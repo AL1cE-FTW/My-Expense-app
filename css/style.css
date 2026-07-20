@@ -1,0 +1,441 @@
+:root {
+  --color-bg: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-text: #2c3e50;
+  --color-text-muted: #7f8c8d;
+  --color-border: #e0e5ea;
+  --color-primary: #3b82f6;
+  --color-primary-dark: #2563eb;
+  --color-income: #10b981;
+  --color-expense: #ef4444;
+  --color-income-bg: #ecfdf5;
+  --color-expense-bg: #fef2f2;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic",
+    "Noto Sans JP", Meiryo, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ヘッダー */
+.app-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 16px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header h1 {
+  font-size: 1.3rem;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.current-month {
+  font-size: 1.1rem;
+  font-weight: 700;
+  min-width: 8.5em;
+  text-align: center;
+}
+
+.nav-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.nav-btn:hover {
+  background: var(--color-bg);
+}
+
+.today-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.today-btn:hover {
+  background: var(--color-bg);
+}
+
+/* レイアウト */
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.card h2 {
+  font-size: 1.05rem;
+  margin-bottom: 14px;
+}
+
+/* サマリーカード */
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.summary-cards .card {
+  text-align: center;
+  padding: 18px 12px;
+}
+
+.card-label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.card-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.income-card .card-value {
+  color: var(--color-income);
+}
+
+.expense-card .card-value {
+  color: var(--color-expense);
+}
+
+.balance-card .card-value.positive {
+  color: var(--color-income);
+}
+
+.balance-card .card-value.negative {
+  color: var(--color-expense);
+}
+
+/* フォーム */
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-group-wide {
+  grid-column: 1 / -1;
+}
+
+.form-group label {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.form-group input,
+.form-group select {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.type-toggle {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.type-option {
+  flex: 1;
+}
+
+.type-option input {
+  display: none;
+}
+
+.type-option span {
+  display: block;
+  text-align: center;
+  padding: 9px 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.type-option input[value="expense"]:checked + span {
+  background: var(--color-expense-bg);
+  color: var(--color-expense);
+  font-weight: 700;
+}
+
+.type-option input[value="income"]:checked + span {
+  background: var(--color-income-bg);
+  color: var(--color-income);
+  font-weight: 700;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--color-primary-dark);
+}
+
+.btn-secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.btn-secondary:hover {
+  background: var(--color-bg);
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+/* カテゴリ別内訳 */
+.category-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.breakdown-row {
+  display: grid;
+  grid-template-columns: 7em 1fr 7em;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.breakdown-bar-track {
+  background: var(--color-bg);
+  border-radius: 6px;
+  height: 14px;
+  overflow: hidden;
+}
+
+.breakdown-bar {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 6px;
+  min-width: 2px;
+}
+
+.breakdown-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 記録一覧 */
+.list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.csv-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.csv-actions label.btn {
+  display: inline-block;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.entry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.entry-table th,
+.entry-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.entry-table td.memo-cell {
+  white-space: normal;
+  min-width: 10em;
+}
+
+.entry-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.amount-col,
+.amount-cell {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-cell.income {
+  color: var(--color-income);
+  font-weight: 700;
+}
+
+.amount-cell.expense {
+  color: var(--color-expense);
+}
+
+.type-badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+}
+
+.type-badge.income {
+  background: var(--color-income-bg);
+  color: var(--color-income);
+}
+
+.type-badge.expense {
+  background: var(--color-expense-bg);
+  color: var(--color-expense);
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.icon-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--color-text);
+}
+
+.icon-btn:hover {
+  background: var(--color-bg);
+}
+
+.icon-btn.delete:hover {
+  background: var(--color-expense-bg);
+  border-color: var(--color-expense);
+  color: var(--color-expense);
+}
+
+.empty-message {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  padding: 10px 0;
+}
+
+/* フッター */
+.app-footer {
+  text-align: center;
+  padding: 20px 16px 32px;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+/* スマホ対応 */
+@media (max-width: 600px) {
+  .summary-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .card-value {
+    font-size: 1.2rem;
+  }
+
+  .breakdown-row {
+    grid-template-columns: 5.5em 1fr 6em;
+  }
+}
