@@ -1,7 +1,7 @@
 # My-Expense-app (家計簿 Web アプリ)
 
-スプレッドシートの代わりに、ブラウザで家計簿を管理できるシンプルな Web アプリです。
-ビルド不要・サーバー不要で、`index.html` を開くだけで動作します。
+スプレッドシートの代わりに、スマホとPCでデータを同期しながら使える家計簿 Web アプリです。
+ビルド不要・フレームワーク不要の Vanilla JS + Firebase (Firestore) 構成です。
 
 ## 機能
 
@@ -10,32 +10,64 @@
 - **月間サマリー** — 収入合計・支出合計・収支を自動集計
 - **カテゴリ別支出グラフ** — 今月の支出をカテゴリ別に棒グラフで表示
 - **編集・削除** — 記録した内容はあとから修正・削除可能
+- **メール/パスワードでログイン** — 同じアカウントでログインすればスマホ・PC間でリアルタイムに同期
 - **CSV エクスポート** — 全記録を CSV でダウンロード(Excel 対応の BOM 付き UTF-8)
 - **CSV インポート** — 既存のスプレッドシートから CSV 経由でデータ移行
 
-## 使い方
+## セットアップ
 
-ローカルで開くだけで使えます:
+このアプリはデータの保存・同期に [Firebase](https://firebase.google.com/) (無料枠) を使います。
+自分専用の Firebase プロジェクトを作成し、設定値をアプリに渡すだけで動きます。
+
+### 1. Firebaseプロジェクトを作成
+
+1. [Firebase コンソール](https://console.firebase.google.com/) にアクセスし、新規プロジェクトを作成
+2. 左メニュー「Authentication」→「Sign-in method」タブ →「メール/パスワード」を有効化
+3. 左メニュー「Firestore Database」→「データベースの作成」→ 本番モードを選択(リージョンは `asia-northeast1` など任意)
+4. Firestore の「ルール」タブを開き、このリポジトリの `firestore.rules` の内容を貼り付けて「公開」
+   - このルールにより、各ユーザーは自分のデータにしかアクセスできません
+5. 左メニュー「プロジェクトの設定」(歯車アイコン) →「全般」→「マイアプリ」→ ウェブアプリを追加 (`</>` アイコン)
+6. 表示された `firebaseConfig` の値をコピー
+
+### 2. 設定ファイルを作成
 
 ```bash
-# そのままブラウザで開く
-open index.html          # macOS
-start index.html         # Windows
+cp js/firebase-config.example.js js/firebase-config.js
+```
 
-# もしくは簡易サーバーで配信
+`js/firebase-config.js` を開き、`YOUR_API_KEY` などのプレースホルダーを手順1でコピーした値に置き換えます。
+
+このファイルは `.gitignore` に含まれているため、そのままでは Git にコミットされません。
+GitHub Pages などで公開する場合は、後述の「公開方法」を参照してください
+(Firebase の Web 設定値は非公開情報ではなく、コミットしても問題ありません)。
+
+### 3. ローカルで起動
+
+ブラウザの ES Modules 制限により、`index.html` を直接ダブルクリックして開く(`file://`)のでは動作しません。
+簡易 HTTP サーバー経由で開いてください。
+
+```bash
 python3 -m http.server 8000
 # → http://localhost:8000 を開く
 ```
 
-GitHub Pages などの静的ホスティングにそのまま配置することもできます。
+初回はログイン画面で「新規登録」タブからメールアドレスとパスワードを登録してください。
 
-## データの保存について
+## スマホと PC でデータを共有する
 
-記録はブラウザの **localStorage** に保存されます。
+同じ Firebase アカウント(同じメールアドレス)でログインすれば、スマホと PC で自動的にデータが同期されます。
+ローカルの `python3 -m http.server` はそのマシン上でしかアクセスできないため、実際にスマホからも使うには、
+以下のいずれかの方法でアプリをインターネット上に公開する必要があります。
 
-- サーバーには一切送信されません
-- 同じブラウザ・同じ端末でのみデータが見えます
-- ブラウザのデータ消去で記録も消えるため、定期的に **CSV エクスポート** でバックアップしてください
+### 公開方法 (GitHub Pages の例)
+
+1. `js/firebase-config.js` を `.gitignore` から外すか、`git add -f js/firebase-config.js` でコミットに含める
+2. このブランチを `main` にマージ (または Pages の対象ブランチに指定)
+3. リポジトリの Settings → Pages → Source で対象ブランチ・ルートディレクトリを選択
+4. 発行された `https://<ユーザー名>.github.io/My-Expense-app/` にスマホ・PC両方からアクセス
+5. Firebase コンソールの「Authentication」→「Settings」→「承認済みドメイン」に、その GitHub Pages のドメインを追加
+
+Netlify や Vercel など、他の静的ホスティングサービスでも同様に公開できます。
 
 ## スプレッドシートからの移行 (CSV インポート)
 
@@ -52,12 +84,20 @@ GitHub Pages などの静的ホスティングにそのまま配置すること�
 - 1行目がヘッダー行の場合は自動的にスキップされます
 - 形式を認識できない行はスキップされ、件数が表示されます
 
+## データの保存について
+
+記録は Firestore に保存され、ブラウザにはオフラインキャッシュ(IndexedDB)が作られます。
+オフラインでも記録の閲覧・追加は可能で、オンラインに戻ると自動的に同期されます。
+
 ## 構成
 
 ```
-index.html      … 画面 (UI)
-css/style.css   … スタイル
-js/app.js       … ロジック (記録の管理・集計・CSV 入出力)
+index.html                       … 画面 (UI)
+css/style.css                    … スタイル
+js/app.js                        … ロジック (認証・Firestore同期・集計・CSV入出力)
+js/firebase-config.example.js    … Firebase設定のテンプレート
+js/firebase-config.js            … 自分のFirebase設定 (.gitignore対象、要作成)
+firestore.rules                  … Firestoreセキュリティルール
 ```
 
 フレームワークやビルドツールは使用していません (Vanilla JS)。

@@ -1,10 +1,17 @@
 "use strict";
 
-// ---------------------------------------------------------------------------
-// 定数・状態
-// ---------------------------------------------------------------------------
+const FIREBASE_SDK_VERSION = "10.14.1";
+const FIREBASE_CDN = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
 
-const STORAGE_KEY = "kakeibo-entries";
+// Firebase SDK は動的 import で読み込む。CDN に到達できない環境
+// (ネットワーク不調・広告ブロッカー等) でもアプリを固まらせず、
+// エラー画面を出せるようにするため。
+let firestoreApi = null;
+let authApi = null;
+
+// ---------------------------------------------------------------------------
+// 定数
+// ---------------------------------------------------------------------------
 
 const CATEGORIES = {
   expense: [
@@ -26,39 +33,36 @@ const CATEGORIES = {
 
 const TYPE_LABELS = { expense: "支出", income: "収入" };
 
+const AUTH_ERROR_MESSAGES = {
+  "auth/email-already-in-use": "このメールアドレスは既に登録されています。",
+  "auth/invalid-email": "メールアドレスの形式が正しくありません。",
+  "auth/weak-password": "パスワードは6文字以上にしてください。",
+  "auth/user-not-found": "メールアドレスまたはパスワードが正しくありません。",
+  "auth/wrong-password": "メールアドレスまたはパスワードが正しくありません。",
+  "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
+  "auth/too-many-requests": "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+  "auth/network-request-failed": "ネットワークエラーが発生しました。接続をご確認ください。",
+};
+
+function authErrorMessage(err) {
+  return AUTH_ERROR_MESSAGES[err.code] || `エラーが発生しました (${err.code || err.message})`;
+}
+
+// ---------------------------------------------------------------------------
+// 状態
+// ---------------------------------------------------------------------------
+
 /** @type {{id: string, date: string, type: "income"|"expense", category: string, amount: number, memo: string}[]} */
-let entries = loadEntries();
+let entries = [];
 
 // 表示中の月 (毎月1日の Date)
 let currentMonth = startOfMonth(new Date());
 
-// ---------------------------------------------------------------------------
-// 永続化
-// ---------------------------------------------------------------------------
-
-function loadEntries() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data)) return [];
-    return data.filter(
-      (e) =>
-        e &&
-        typeof e.id === "string" &&
-        typeof e.date === "string" &&
-        (e.type === "income" || e.type === "expense") &&
-        typeof e.category === "string" &&
-        Number.isFinite(e.amount)
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveEntries() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
+let db = null;
+let auth = null;
+let currentUid = null;
+let unsubscribeEntries = null;
+let authMode = "login";
 
 // ---------------------------------------------------------------------------
 // ユーティリティ
@@ -83,10 +87,6 @@ function toDateInputValue(date) {
   return `${y}-${m}-${d}`;
 }
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
 function entriesForMonth(monthDate) {
   const prefix = `${monthDate.getFullYear()}-${String(
     monthDate.getMonth() + 1
@@ -101,6 +101,23 @@ function entriesForMonth(monthDate) {
 // ---------------------------------------------------------------------------
 
 const el = {
+  loadingScreen: document.getElementById("loading-screen"),
+  setupScreen: document.getElementById("setup-screen"),
+  sdkErrorScreen: document.getElementById("sdk-error-screen"),
+  authScreen: document.getElementById("auth-screen"),
+  appRoot: document.getElementById("app-root"),
+
+  authTabs: document.querySelectorAll(".auth-tab"),
+  authForm: document.getElementById("auth-form"),
+  authEmail: document.getElementById("auth-email"),
+  authPassword: document.getElementById("auth-password"),
+  authError: document.getElementById("auth-error"),
+  authSubmitBtn: document.getElementById("auth-submit-btn"),
+  authForgotBtn: document.getElementById("auth-forgot-btn"),
+
+  userEmail: document.getElementById("user-email"),
+  logoutBtn: document.getElementById("logout-btn"),
+
   currentMonth: document.getElementById("current-month"),
   prevMonth: document.getElementById("prev-month"),
   nextMonth: document.getElementById("next-month"),
@@ -126,6 +143,86 @@ const el = {
 
 function selectedType() {
   return document.querySelector('input[name="entry-type"]:checked').value;
+}
+
+// ---------------------------------------------------------------------------
+// 画面切り替え
+// ---------------------------------------------------------------------------
+
+function showOnly(screen) {
+  el.loadingScreen.classList.toggle("hidden", screen !== "loading");
+  el.setupScreen.classList.toggle("hidden", screen !== "setup");
+  el.sdkErrorScreen.classList.toggle("hidden", screen !== "sdk-error");
+  el.authScreen.classList.toggle("hidden", screen !== "auth");
+  el.appRoot.classList.toggle("hidden", screen !== "app");
+}
+
+function showAuthScreen() {
+  if (unsubscribeEntries) {
+    unsubscribeEntries();
+    unsubscribeEntries = null;
+  }
+  entries = [];
+  currentUid = null;
+  el.authForm.reset();
+  el.authError.classList.add("hidden");
+  showOnly("auth");
+}
+
+function showApp(user) {
+  currentUid = user.uid;
+  el.userEmail.textContent = user.email;
+  showOnly("app");
+  subscribeEntries(user.uid);
+  resetForm();
+}
+
+// ---------------------------------------------------------------------------
+// Firestore 連携
+// ---------------------------------------------------------------------------
+
+function entriesCollection(uid) {
+  return firestoreApi.collection(db, `users/${uid}/entries`);
+}
+
+function subscribeEntries(uid) {
+  if (unsubscribeEntries) unsubscribeEntries();
+  const q = firestoreApi.query(entriesCollection(uid), firestoreApi.orderBy("date", "desc"));
+  unsubscribeEntries = firestoreApi.onSnapshot(
+    q,
+    (snapshot) => {
+      entries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      render();
+    },
+    (error) => {
+      console.error(error);
+      alert("データの取得に失敗しました: " + error.message);
+    }
+  );
+}
+
+async function addEntryToDb(data) {
+  await firestoreApi.addDoc(entriesCollection(currentUid), data);
+}
+
+async function updateEntryInDb(id, data) {
+  await firestoreApi.updateDoc(firestoreApi.doc(db, `users/${currentUid}/entries/${id}`), data);
+}
+
+async function deleteEntryFromDb(id) {
+  await firestoreApi.deleteDoc(firestoreApi.doc(db, `users/${currentUid}/entries/${id}`));
+}
+
+async function importEntriesToDb(items) {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const batch = firestoreApi.writeBatch(db);
+    for (const item of chunk) {
+      batch.set(firestoreApi.doc(entriesCollection(currentUid)), item);
+    }
+    await batch.commit();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,19 +392,22 @@ function startEdit(id) {
   el.form.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function deleteEntry(id) {
+async function deleteEntry(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
   const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
   if (!confirm(`この記録を削除しますか?\n${label}`)) return;
 
-  entries = entries.filter((e) => e.id !== id);
-  saveEntries();
+  try {
+    await deleteEntryFromDb(id);
+  } catch (err) {
+    alert("削除に失敗しました: " + err.message);
+    return;
+  }
   if (el.entryId.value === id) resetForm();
-  render();
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
 
   const amount = Math.floor(Number(el.entryAmount.value));
@@ -325,14 +425,20 @@ function handleSubmit(event) {
   };
 
   const editingId = el.entryId.value;
-  if (editingId) {
-    const index = entries.findIndex((e) => e.id === editingId);
-    if (index !== -1) entries[index] = { id: editingId, ...data };
-  } else {
-    entries.push({ id: generateId(), ...data });
+  el.submitBtn.disabled = true;
+  try {
+    if (editingId) {
+      await updateEntryInDb(editingId, data);
+    } else {
+      await addEntryToDb(data);
+    }
+  } catch (err) {
+    alert("保存に失敗しました: " + err.message);
+    return;
+  } finally {
+    el.submitBtn.disabled = false;
   }
 
-  saveEntries();
   resetForm();
 
   // 追加・更新した記録の月を表示する
@@ -461,7 +567,7 @@ function parseType(value) {
 
 function importCsv(file) {
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     const text = String(reader.result).replace(/^\uFEFF/, "");
     const rows = parseCsv(text).filter(
       (r) => r.length > 1 || (r.length === 1 && r[0].trim() !== "")
@@ -509,7 +615,7 @@ function importCsv(file) {
         continue;
       }
 
-      imported.push({ id: generateId(), date, type, category, amount, memo });
+      imported.push({ date, type, category, amount, memo });
     }
 
     if (imported.length === 0) {
@@ -523,9 +629,12 @@ function importCsv(file) {
     }
     if (!confirm(message)) return;
 
-    entries.push(...imported);
-    saveEntries();
-    render();
+    try {
+      await importEntriesToDb(imported);
+    } catch (err) {
+      alert("インポートに失敗しました: " + err.message);
+      return;
+    }
     alert(`${imported.length}件をインポートしました。`);
   };
   reader.onerror = () => alert("ファイルの読み込みに失敗しました。");
@@ -533,45 +642,140 @@ function importCsv(file) {
 }
 
 // ---------------------------------------------------------------------------
+// 認証
+// ---------------------------------------------------------------------------
+
+function setupAuthForm() {
+  for (const tab of el.authTabs) {
+    tab.addEventListener("click", () => {
+      authMode = tab.dataset.mode;
+      for (const t of el.authTabs) t.classList.toggle("active", t === tab);
+      el.authSubmitBtn.textContent = authMode === "login" ? "ログイン" : "新規登録";
+      el.authError.classList.add("hidden");
+    });
+  }
+
+  el.authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const email = el.authEmail.value.trim();
+    const password = el.authPassword.value;
+    el.authError.classList.add("hidden");
+    el.authSubmitBtn.disabled = true;
+    try {
+      if (authMode === "login") {
+        await authApi.signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await authApi.createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err) {
+      el.authError.textContent = authErrorMessage(err);
+      el.authError.classList.remove("hidden");
+    } finally {
+      el.authSubmitBtn.disabled = false;
+    }
+  });
+
+  el.authForgotBtn.addEventListener("click", async () => {
+    const email = el.authEmail.value.trim();
+    if (!email) {
+      el.authError.textContent = "パスワード再設定にはメールアドレスを入力してください。";
+      el.authError.classList.remove("hidden");
+      return;
+    }
+    try {
+      await authApi.sendPasswordResetEmail(auth, email);
+      alert("パスワード再設定用のメールを送信しました。");
+    } catch (err) {
+      el.authError.textContent = authErrorMessage(err);
+      el.authError.classList.remove("hidden");
+    }
+  });
+
+  el.logoutBtn.addEventListener("click", () => authApi.signOut(auth));
+}
+
+// ---------------------------------------------------------------------------
 // イベント登録・初期化
 // ---------------------------------------------------------------------------
 
-el.prevMonth.addEventListener("click", () => {
-  currentMonth = new Date(
-    currentMonth.getFullYear(),
-    currentMonth.getMonth() - 1,
-    1
-  );
-  render();
-});
+function setupAppEventListeners() {
+  el.prevMonth.addEventListener("click", () => {
+    currentMonth = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth() - 1,
+      1
+    );
+    render();
+  });
 
-el.nextMonth.addEventListener("click", () => {
-  currentMonth = new Date(
-    currentMonth.getFullYear(),
-    currentMonth.getMonth() + 1,
-    1
-  );
-  render();
-});
+  el.nextMonth.addEventListener("click", () => {
+    currentMonth = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth() + 1,
+      1
+    );
+    render();
+  });
 
-el.todayBtn.addEventListener("click", () => {
-  currentMonth = startOfMonth(new Date());
-  render();
-});
+  el.todayBtn.addEventListener("click", () => {
+    currentMonth = startOfMonth(new Date());
+    render();
+  });
 
-for (const radio of document.querySelectorAll('input[name="entry-type"]')) {
-  radio.addEventListener("change", () => renderCategoryOptions(selectedType()));
+  for (const radio of document.querySelectorAll('input[name="entry-type"]')) {
+    radio.addEventListener("change", () => renderCategoryOptions(selectedType()));
+  }
+
+  el.form.addEventListener("submit", handleSubmit);
+  el.cancelEditBtn.addEventListener("click", resetForm);
+  el.exportCsvBtn.addEventListener("click", exportCsv);
+
+  el.importCsvInput.addEventListener("change", () => {
+    const file = el.importCsvInput.files[0];
+    if (file) importCsv(file);
+    el.importCsvInput.value = "";
+  });
 }
 
-el.form.addEventListener("submit", handleSubmit);
-el.cancelEditBtn.addEventListener("click", resetForm);
-el.exportCsvBtn.addEventListener("click", exportCsv);
+async function main() {
+  let appModule, authModule, firestoreModule;
+  try {
+    [appModule, authModule, firestoreModule] = await Promise.all([
+      import(`${FIREBASE_CDN}/firebase-app.js`),
+      import(`${FIREBASE_CDN}/firebase-auth.js`),
+      import(`${FIREBASE_CDN}/firebase-firestore.js`),
+    ]);
+  } catch (err) {
+    console.error("Firebase SDK の読み込みに失敗しました:", err);
+    showOnly("sdk-error");
+    return;
+  }
+  authApi = authModule;
+  firestoreApi = firestoreModule;
 
-el.importCsvInput.addEventListener("change", () => {
-  const file = el.importCsvInput.files[0];
-  if (file) importCsv(file);
-  el.importCsvInput.value = "";
-});
+  let firebaseConfig;
+  try {
+    ({ firebaseConfig } = await import("./firebase-config.js"));
+  } catch {
+    showOnly("setup");
+    return;
+  }
 
-resetForm();
-render();
+  const app = appModule.initializeApp(firebaseConfig);
+  auth = authApi.getAuth(app);
+  db = firestoreApi.initializeFirestore(app, {
+    localCache: firestoreApi.persistentLocalCache({
+      tabManager: firestoreApi.persistentMultipleTabManager(),
+    }),
+  });
+
+  setupAuthForm();
+  setupAppEventListeners();
+
+  authApi.onAuthStateChanged(auth, (user) => {
+    if (user) showApp(user);
+    else showAuthScreen();
+  });
+}
+
+main();

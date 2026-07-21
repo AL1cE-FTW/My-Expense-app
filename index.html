@@ -8,117 +8,181 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header class="app-header">
-    <h1>📒 家計簿</h1>
-    <div class="month-nav">
-      <button id="prev-month" class="nav-btn" aria-label="前の月">◀</button>
-      <span id="current-month" class="current-month"></span>
-      <button id="next-month" class="nav-btn" aria-label="次の月">▶</button>
-      <button id="today-btn" class="today-btn">今月</button>
+  <!-- 読み込み中 -->
+  <div id="loading-screen" class="auth-screen">
+    <div class="auth-card">
+      <p>読み込み中...</p>
     </div>
-  </header>
+  </div>
 
-  <main class="container">
-    <!-- 月間サマリー -->
-    <section class="summary-cards">
-      <div class="card income-card">
-        <div class="card-label">収入</div>
-        <div class="card-value" id="total-income">¥0</div>
-      </div>
-      <div class="card expense-card">
-        <div class="card-label">支出</div>
-        <div class="card-value" id="total-expense">¥0</div>
-      </div>
-      <div class="card balance-card">
-        <div class="card-label">収支</div>
-        <div class="card-value" id="balance">¥0</div>
-      </div>
-    </section>
+  <!-- Firebase SDK 自体の読み込みに失敗した場合 (ネットワーク不調・広告ブロッカーなど) -->
+  <div id="sdk-error-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <h1>📡 読み込みエラー</h1>
+      <p>
+        Firebaseとの通信に失敗しました。インターネット接続をご確認いただくか、
+        広告ブロッカーなどの拡張機能を無効にしたうえで、ページを再読み込みしてください。
+      </p>
+    </div>
+  </div>
 
-    <!-- 入力フォーム -->
-    <section class="card form-card">
-      <h2 id="form-title">記録を追加</h2>
-      <form id="entry-form">
-        <input type="hidden" id="entry-id">
-        <div class="form-row">
-          <div class="form-group">
-            <label for="entry-date">日付</label>
-            <input type="date" id="entry-date" required>
-          </div>
-          <div class="form-group">
-            <label>種別</label>
-            <div class="type-toggle">
-              <label class="type-option">
-                <input type="radio" name="entry-type" value="expense" checked>
-                <span>支出</span>
-              </label>
-              <label class="type-option">
-                <input type="radio" name="entry-type" value="income">
-                <span>収入</span>
-              </label>
+  <!-- 未セットアップ (firebase-config.js が無い場合) -->
+  <div id="setup-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <h1>⚙️ セットアップが必要です</h1>
+      <p>
+        Firebaseの設定ファイルが見つかりません。<br>
+        <code>js/firebase-config.example.js</code> をコピーして
+        <code>js/firebase-config.js</code> を作成し、あなたの Firebase
+        プロジェクトの設定値を入力してください。
+      </p>
+      <p>手順は README.md の「Firebaseのセットアップ」をご覧ください。</p>
+    </div>
+  </div>
+
+  <!-- ログイン / 新規登録 -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <h1>📒 家計簿</h1>
+      <p class="auth-sub">スマホとPCでデータを同期するには、ログインしてください。</p>
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-mode="login">ログイン</button>
+        <button type="button" class="auth-tab" data-mode="signup">新規登録</button>
+      </div>
+      <form id="auth-form">
+        <div class="form-group">
+          <label for="auth-email">メールアドレス</label>
+          <input type="email" id="auth-email" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">パスワード (6文字以上)</label>
+          <input type="password" id="auth-password" required minlength="6" autocomplete="current-password">
+        </div>
+        <p id="auth-error" class="auth-error hidden"></p>
+        <button type="submit" class="btn btn-primary auth-submit" id="auth-submit-btn">ログイン</button>
+        <button type="button" class="auth-forgot" id="auth-forgot-btn">パスワードをお忘れですか?</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- アプリ本体 -->
+  <div id="app-root" class="hidden">
+    <header class="app-header">
+      <h1>📒 家計簿</h1>
+      <div class="month-nav">
+        <button id="prev-month" class="nav-btn" aria-label="前の月">◀</button>
+        <span id="current-month" class="current-month"></span>
+        <button id="next-month" class="nav-btn" aria-label="次の月">▶</button>
+        <button id="today-btn" class="today-btn">今月</button>
+      </div>
+      <div class="user-bar">
+        <span id="user-email" class="user-email"></span>
+        <button id="logout-btn" class="btn btn-secondary btn-small">ログアウト</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- 月間サマリー -->
+      <section class="summary-cards">
+        <div class="card income-card">
+          <div class="card-label">収入</div>
+          <div class="card-value" id="total-income">¥0</div>
+        </div>
+        <div class="card expense-card">
+          <div class="card-label">支出</div>
+          <div class="card-value" id="total-expense">¥0</div>
+        </div>
+        <div class="card balance-card">
+          <div class="card-label">収支</div>
+          <div class="card-value" id="balance">¥0</div>
+        </div>
+      </section>
+
+      <!-- 入力フォーム -->
+      <section class="card form-card">
+        <h2 id="form-title">記録を追加</h2>
+        <form id="entry-form">
+          <input type="hidden" id="entry-id">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="entry-date">日付</label>
+              <input type="date" id="entry-date" required>
+            </div>
+            <div class="form-group">
+              <label>種別</label>
+              <div class="type-toggle">
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="expense" checked>
+                  <span>支出</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="income">
+                  <span>収入</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="entry-category">カテゴリ</label>
+              <select id="entry-category" required></select>
+            </div>
+            <div class="form-group">
+              <label for="entry-amount">金額 (円)</label>
+              <input type="number" id="entry-amount" min="1" step="1" placeholder="1000" required>
+            </div>
+            <div class="form-group form-group-wide">
+              <label for="entry-memo">メモ</label>
+              <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
             </div>
           </div>
-          <div class="form-group">
-            <label for="entry-category">カテゴリ</label>
-            <select id="entry-category" required></select>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="submit-btn">追加</button>
+            <button type="button" class="btn btn-secondary hidden" id="cancel-edit-btn">キャンセル</button>
           </div>
-          <div class="form-group">
-            <label for="entry-amount">金額 (円)</label>
-            <input type="number" id="entry-amount" min="1" step="1" placeholder="1000" required>
-          </div>
-          <div class="form-group form-group-wide">
-            <label for="entry-memo">メモ</label>
-            <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
+        </form>
+      </section>
+
+      <!-- カテゴリ別内訳 -->
+      <section class="card">
+        <h2>カテゴリ別支出</h2>
+        <div id="category-breakdown" class="category-breakdown">
+          <p class="empty-message">今月の支出はまだありません</p>
+        </div>
+      </section>
+
+      <!-- 記録一覧 -->
+      <section class="card">
+        <div class="list-header">
+          <h2>今月の記録</h2>
+          <div class="csv-actions">
+            <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
+            <label class="btn btn-secondary btn-small" for="import-csv-input">CSVインポート</label>
+            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden">
           </div>
         </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="submit-btn">追加</button>
-          <button type="button" class="btn btn-secondary hidden" id="cancel-edit-btn">キャンセル</button>
+        <div class="table-wrapper">
+          <table class="entry-table">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>種別</th>
+                <th>カテゴリ</th>
+                <th class="amount-col">金額</th>
+                <th>メモ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="entry-list"></tbody>
+          </table>
+          <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
         </div>
-      </form>
-    </section>
+      </section>
+    </main>
 
-    <!-- カテゴリ別内訳 -->
-    <section class="card">
-      <h2>カテゴリ別支出</h2>
-      <div id="category-breakdown" class="category-breakdown">
-        <p class="empty-message">今月の支出はまだありません</p>
-      </div>
-    </section>
+    <footer class="app-footer">
+      <p>データは Firebase (Firestore) に保存され、同じアカウントでログインしたスマホ・PC間で同期されます。</p>
+    </footer>
+  </div>
 
-    <!-- 記録一覧 -->
-    <section class="card">
-      <div class="list-header">
-        <h2>今月の記録</h2>
-        <div class="csv-actions">
-          <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
-          <label class="btn btn-secondary btn-small" for="import-csv-input">CSVインポート</label>
-          <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden">
-        </div>
-      </div>
-      <div class="table-wrapper">
-        <table class="entry-table">
-          <thead>
-            <tr>
-              <th>日付</th>
-              <th>種別</th>
-              <th>カテゴリ</th>
-              <th class="amount-col">金額</th>
-              <th>メモ</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="entry-list"></tbody>
-        </table>
-        <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
-      </div>
-    </section>
-  </main>
-
-  <footer class="app-footer">
-    <p>データはこのブラウザ内 (localStorage) に保存されます。バックアップにはCSVエクスポートをご利用ください。</p>
-  </footer>
-
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
