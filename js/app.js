@@ -33,6 +33,11 @@ const CATEGORIES = {
 
 const TYPE_LABELS = { expense: "支出", income: "収入" };
 
+// Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
+const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
+const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
+const NWS_TARGET_RATIO = { need: 0.5, want: 0.3, save: 0.2 };
+
 const AUTH_ERROR_MESSAGES = {
   "auth/email-already-in-use": "このメールアドレスは既に登録されています。",
   "auth/invalid-email": "メールアドレスの形式が正しくありません。",
@@ -150,6 +155,8 @@ const el = {
   submitBtn: document.getElementById("submit-btn"),
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
   categoryBreakdown: document.getElementById("category-breakdown"),
+  nwsChart: document.getElementById("nws-chart"),
+  nwsLegend: document.getElementById("nws-legend"),
   budgetOverall: document.getElementById("budget-overall"),
   budgetBreakdown: document.getElementById("budget-breakdown"),
   editBudgetBtn: document.getElementById("edit-budget-btn"),
@@ -289,6 +296,7 @@ function render() {
   const monthEntries = entriesForMonth(currentMonth);
   renderSummary(monthEntries);
   renderBudget(monthEntries);
+  renderNeedWantSave(monthEntries);
   renderBreakdown(monthEntries);
   renderList(monthEntries);
 }
@@ -414,6 +422,105 @@ function renderBudget(monthEntries) {
 
     row.append(name, track, amountText);
     el.budgetBreakdown.appendChild(row);
+  }
+}
+
+const NWS_SVG_NS = "http://www.w3.org/2000/svg";
+const NWS_RADIUS = 70;
+const NWS_STROKE_WIDTH = 28;
+const NWS_CIRCUMFERENCE = 2 * Math.PI * NWS_RADIUS;
+const NWS_COLORS = { need: "#3b82f6", want: "#f59e0b", save: "#10b981" };
+const NWS_BG_COLORS = { need: "#bfdbfe", want: "#fde68a", save: "#a7f3d0" };
+const NWS_LABELS = { need: "Need", want: "Want", save: "Save" };
+
+function nwsArc(offset, length, color) {
+  const circle = document.createElementNS(NWS_SVG_NS, "circle");
+  circle.setAttribute("cx", "100");
+  circle.setAttribute("cy", "100");
+  circle.setAttribute("r", String(NWS_RADIUS));
+  circle.setAttribute("fill", "none");
+  circle.setAttribute("stroke", color);
+  circle.setAttribute("stroke-width", String(NWS_STROKE_WIDTH));
+  circle.setAttribute(
+    "stroke-dasharray",
+    `${Math.max(length, 0)} ${NWS_CIRCUMFERENCE - Math.max(length, 0)}`
+  );
+  circle.setAttribute("stroke-dashoffset", String(-offset));
+  return circle;
+}
+
+function renderNeedWantSave(monthEntries) {
+  let totalIncome = 0;
+  let needSpent = 0;
+  let wantSpent = 0;
+  for (const e of monthEntries) {
+    if (e.type === "income") {
+      totalIncome += e.amount;
+    } else if (NEED_CATEGORIES.includes(e.category)) {
+      needSpent += e.amount;
+    } else {
+      wantSpent += e.amount;
+    }
+  }
+
+  el.nwsChart.innerHTML = "";
+  el.nwsLegend.innerHTML = "";
+
+  if (totalIncome <= 0) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent = "今月の収入を登録すると表示されます";
+    el.nwsLegend.appendChild(p);
+    return;
+  }
+
+  const saveAmount = totalIncome - needSpent - wantSpent;
+  const buckets = [
+    { key: "need", actual: needSpent, target: totalIncome * NWS_TARGET_RATIO.need },
+    { key: "want", actual: wantSpent, target: totalIncome * NWS_TARGET_RATIO.want },
+    { key: "save", actual: saveAmount, target: totalIncome * NWS_TARGET_RATIO.save },
+  ];
+
+  const group = document.createElementNS(NWS_SVG_NS, "g");
+  group.setAttribute("transform", "rotate(-90 100 100)");
+
+  let offset = 0;
+  for (const bucket of buckets) {
+    const segmentLength = NWS_CIRCUMFERENCE * NWS_TARGET_RATIO[bucket.key];
+    group.appendChild(nwsArc(offset, segmentLength, NWS_BG_COLORS[bucket.key]));
+
+    const ratio = bucket.target > 0 ? bucket.actual / bucket.target : 0;
+    const isOver = bucket.key === "save" ? ratio < 0 : ratio > 1;
+    const fillLength = segmentLength * Math.min(Math.max(ratio, 0), 1);
+    const fillColor = isOver ? "#ef4444" : NWS_COLORS[bucket.key];
+    group.appendChild(nwsArc(offset, fillLength, fillColor));
+
+    bucket.ratio = ratio;
+    bucket.isOver = isOver;
+    offset += segmentLength;
+  }
+  el.nwsChart.appendChild(group);
+
+  for (const bucket of buckets) {
+    const item = document.createElement("div");
+    item.className = "nws-legend-item";
+
+    const swatch = document.createElement("span");
+    swatch.className = "nws-swatch";
+    swatch.style.background = bucket.isOver ? "#ef4444" : NWS_COLORS[bucket.key];
+
+    const label = document.createElement("span");
+    label.className = "nws-legend-label";
+    label.textContent = `${NWS_LABELS[bucket.key]} ${Math.round(NWS_TARGET_RATIO[bucket.key] * 100)}%`;
+
+    const detail = document.createElement("span");
+    detail.className = "nws-legend-detail";
+    detail.classList.toggle("over", bucket.isOver);
+    const percent = Math.round(bucket.ratio * 100);
+    detail.textContent = `${formatYen(Math.round(bucket.actual))} / ${formatYen(Math.round(bucket.target))} (${percent}%)`;
+
+    item.append(swatch, label, detail);
+    el.nwsLegend.appendChild(item);
   }
 }
 
