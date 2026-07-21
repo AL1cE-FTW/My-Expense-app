@@ -126,6 +126,7 @@ const el = {
   prevMonth: document.getElementById("prev-month"),
   nextMonth: document.getElementById("next-month"),
   todayBtn: document.getElementById("today-btn"),
+  cumulativeSavings: document.getElementById("cumulative-savings"),
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
@@ -272,11 +273,23 @@ async function saveBudgetsToDb(newBudgets) {
 function render() {
   el.currentMonth.textContent = formatMonth(currentMonth);
 
+  renderCumulativeSavings();
+
   const monthEntries = entriesForMonth(currentMonth);
   renderSummary(monthEntries);
   renderBudget(monthEntries);
   renderBreakdown(monthEntries);
   renderList(monthEntries);
+}
+
+function renderCumulativeSavings() {
+  let total = 0;
+  for (const e of entries) {
+    total += e.type === "income" ? e.amount : -e.amount;
+  }
+  el.cumulativeSavings.textContent = (total < 0 ? "-" : "") + formatYen(Math.abs(total));
+  el.cumulativeSavings.classList.toggle("positive", total > 0);
+  el.cumulativeSavings.classList.toggle("negative", total < 0);
 }
 
 function renderSummary(monthEntries) {

@@ -115,6 +115,32 @@ body {
   margin-bottom: 14px;
 }
 
+/* 累計貯金額 */
+.cumulative-card {
+  text-align: center;
+  padding: 18px 12px;
+}
+
+.cumulative-label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.cumulative-value {
+  font-size: 1.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cumulative-value.positive {
+  color: var(--color-income);
+}
+
+.cumulative-value.negative {
+  color: var(--color-expense);
+}
+
 /* サマリーカード */
 .summary-cards {
   display: grid;
