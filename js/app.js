@@ -736,14 +736,15 @@ function parseCsv(text) {
 
 /**
  * 日付文字列を YYYY-MM-DD に正規化する。
- * 対応形式: 2026-07-20 / 2026/7/20 / 2026.7.20 / 2026年7月20日
+ * 対応形式: 2026-07-20 / 2026/7/20 / 2026.7.20 / 2026年7月20日 / 26/7/20 (2桁年)
  */
 function normalizeDate(value) {
   const m = String(value)
     .trim()
-    .match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/);
+    .match(/^(\d{2}|\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/);
   if (!m) return null;
-  const [, y, mo, d] = m;
+  let [, y, mo, d] = m;
+  if (y.length === 2) y = "20" + y;
   const date = new Date(Number(y), Number(mo) - 1, Number(d));
   if (
     date.getFullYear() !== Number(y) ||
@@ -762,6 +763,160 @@ function parseType(value) {
   return null;
 }
 
+function parseCsvAmount(value) {
+  return Math.floor(Number(String(value ?? "").replace(/[,¥\s]/g, "")));
+}
+
+// スプレッドシートのカテゴリ名 -> アプリのカテゴリ名。
+// 完全一致しない場合はこの表で読み替え、それでも見つからなければ
+// 「その他支出」「その他収入」に分類する (取り込み自体は諦めない)。
+const CATEGORY_ALIASES = {
+  expense: {
+    "水道光熱費": "水道・光熱",
+    "通信費": "通信",
+    "住居費": "住居",
+    "交通費": "交通",
+    "その他": "その他支出",
+    "医療費": "医療",
+    "教育費": "教育",
+    "学費": "教育",
+    "娯楽費": "趣味・娯楽",
+    "趣味": "趣味・娯楽",
+    "美容費": "衣服・美容",
+    "衣服費": "衣服・美容",
+    "サブスクリプション": "その他支出",
+    "サブスク": "その他支出",
+  },
+  income: {
+    "給料": "給与",
+    "ボーナス": "賞与",
+    "利息": "副収入",
+    "その他": "その他収入",
+    "仕送り": "その他収入",
+    "貯蓄": "その他収入",
+  },
+};
+
+function resolveCategory(rawCategory, type) {
+  const trimmed = String(rawCategory ?? "").trim();
+  if (CATEGORIES[type].includes(trimmed)) return trimmed;
+  const alias = CATEGORY_ALIASES[type][trimmed];
+  if (alias) return alias;
+  return type === "expense" ? "その他支出" : "その他収入";
+}
+
+/**
+ * 「日付,種別,カテゴリ,金額,メモ」の縦持ち形式 (エクスポート形式と同じ) を解析する。
+ */
+function parseSimpleFormat(rows) {
+  let start = 0;
+  if (normalizeDate(rows[0][0]) === null) start = 1; // 先頭行がヘッダーならスキップ
+
+  const imported = [];
+  const errors = [];
+
+  for (let i = start; i < rows.length; i++) {
+    const cols = rows[i];
+    const lineNo = i + 1;
+    const date = normalizeDate(cols[0] ?? "");
+    const type = parseType(cols[1] ?? "");
+    const category = String(cols[2] ?? "").trim();
+    const amount = parseCsvAmount(cols[3]);
+    const memo = String(cols[4] ?? "").trim();
+
+    if (!date) {
+      errors.push(`${lineNo}行目: 日付を認識できません (${cols[0] ?? ""})`);
+      continue;
+    }
+    if (!type) {
+      errors.push(
+        `${lineNo}行目: 種別は「収入」か「支出」で指定してください (${cols[1] ?? ""})`
+      );
+      continue;
+    }
+    if (!category) {
+      errors.push(`${lineNo}行目: カテゴリが空です`);
+      continue;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      errors.push(`${lineNo}行目: 金額を認識できません (${cols[3] ?? ""})`);
+      continue;
+    }
+
+    imported.push({ date, type, category, amount, memo });
+  }
+
+  return { imported, errors };
+}
+
+function isWideFormatHeaderRow(cols) {
+  return (
+    String(cols[1] ?? "").trim() === "日付" &&
+    String(cols[2] ?? "").trim() === "金額" &&
+    String(cols[3] ?? "").trim() === "説明" &&
+    String(cols[4] ?? "").trim() === "カテゴリ"
+  );
+}
+
+/**
+ * 「概要」スプレッドシートの [取引] タブをそのままエクスポートした形式を解析する。
+ * 支出の表 (列1-4: 日付,金額,説明,カテゴリ) と収入の表 (列6-9: 同じ並び) が
+ * 左右に並んでおり、どちらの表にも属さない解説行・空行が混在する。
+ * この形式のヘッダー行が見つからない場合は null を返す。
+ */
+function parseWideFormat(rows) {
+  const headerIndex = rows.findIndex(isWideFormatHeaderRow);
+  if (headerIndex === -1) return null;
+
+  const imported = [];
+  const errors = [];
+
+  for (let i = headerIndex + 1; i < rows.length; i++) {
+    const cols = rows[i];
+    const lineNo = i + 1;
+
+    const expenseDateRaw = String(cols[1] ?? "").trim();
+    if (expenseDateRaw) {
+      const date = normalizeDate(expenseDateRaw);
+      const amount = parseCsvAmount(cols[2]);
+      if (!date) {
+        errors.push(`${lineNo}行目 (支出): 日付を認識できません (${expenseDateRaw})`);
+      } else if (!Number.isFinite(amount) || amount <= 0) {
+        errors.push(`${lineNo}行目 (支出): 金額を認識できません (${cols[2] ?? ""})`);
+      } else {
+        imported.push({
+          date,
+          type: "expense",
+          category: resolveCategory(cols[4], "expense"),
+          amount,
+          memo: String(cols[3] ?? "").trim(),
+        });
+      }
+    }
+
+    const incomeDateRaw = String(cols[6] ?? "").trim();
+    if (incomeDateRaw) {
+      const date = normalizeDate(incomeDateRaw);
+      const amount = parseCsvAmount(cols[7]);
+      if (!date) {
+        errors.push(`${lineNo}行目 (収入): 日付を認識できません (${incomeDateRaw})`);
+      } else if (!Number.isFinite(amount) || amount <= 0) {
+        errors.push(`${lineNo}行目 (収入): 金額を認識できません (${cols[7] ?? ""})`);
+      } else {
+        imported.push({
+          date,
+          type: "income",
+          category: resolveCategory(cols[9], "income"),
+          amount,
+          memo: String(cols[8] ?? "").trim(),
+        });
+      }
+    }
+  }
+
+  return { imported, errors };
+}
+
 function importCsv(file) {
   const reader = new FileReader();
   reader.onload = async () => {
@@ -775,45 +930,7 @@ function importCsv(file) {
       return;
     }
 
-    // 先頭行がヘッダーならスキップ
-    let start = 0;
-    if (normalizeDate(rows[0][0]) === null) start = 1;
-
-    const imported = [];
-    const errors = [];
-
-    for (let i = start; i < rows.length; i++) {
-      const cols = rows[i];
-      const lineNo = i + 1;
-      const date = normalizeDate(cols[0] ?? "");
-      const type = parseType(cols[1] ?? "");
-      const category = String(cols[2] ?? "").trim();
-      const amount = Math.floor(
-        Number(String(cols[3] ?? "").replace(/[,¥\s]/g, ""))
-      );
-      const memo = String(cols[4] ?? "").trim();
-
-      if (!date) {
-        errors.push(`${lineNo}行目: 日付を認識できません (${cols[0] ?? ""})`);
-        continue;
-      }
-      if (!type) {
-        errors.push(
-          `${lineNo}行目: 種別は「収入」か「支出」で指定してください (${cols[1] ?? ""})`
-        );
-        continue;
-      }
-      if (!category) {
-        errors.push(`${lineNo}行目: カテゴリが空です`);
-        continue;
-      }
-      if (!Number.isFinite(amount) || amount <= 0) {
-        errors.push(`${lineNo}行目: 金額を認識できません (${cols[3] ?? ""})`);
-        continue;
-      }
-
-      imported.push({ date, type, category, amount, memo });
-    }
+    const { imported, errors } = parseWideFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
       alert("インポートできる行がありませんでした。\n\n" + errors.slice(0, 10).join("\n"));
