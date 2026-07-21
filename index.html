@@ -141,6 +141,28 @@
         </form>
       </section>
 
+      <!-- 予算 -->
+      <section class="card">
+        <div class="list-header">
+          <h2>今月の予算</h2>
+          <button type="button" class="btn btn-secondary btn-small" id="edit-budget-btn">予算を編集</button>
+        </div>
+
+        <div id="budget-overall" class="budget-overall"></div>
+
+        <div id="budget-breakdown" class="category-breakdown">
+          <p class="empty-message">予算が設定されていません</p>
+        </div>
+
+        <form id="budget-form" class="budget-form hidden">
+          <div id="budget-inputs" class="budget-inputs"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn btn-secondary" id="cancel-budget-btn">キャンセル</button>
+          </div>
+        </form>
+      </section>
+
       <!-- カテゴリ別内訳 -->
       <section class="card">
         <h2>カテゴリ別支出</h2>

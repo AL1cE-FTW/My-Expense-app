@@ -2,13 +2,22 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.email == "al1cealwayswithu@gmail.com";
+    }
+
     // 許可されたメールアドレスの本人のみ、自分の記録 (users/{uid}/entries/*) に
     // アクセスできる。他の人がアカウントを作成しても、このメールアドレスと
     // 一致しない限り一切の読み書きができない。
     match /users/{userId}/entries/{entryId} {
-      allow read, write: if request.auth != null
-        && request.auth.uid == userId
-        && request.auth.token.email == "al1cealwayswithu@gmail.com";
+      allow read, write: if isOwner(userId);
+    }
+
+    // 予算などの設定 (users/{uid}/settings/*) も同様に本人のみアクセス可能
+    match /users/{userId}/settings/{docId} {
+      allow read, write: if isOwner(userId);
     }
 
     // それ以外はすべて拒否
