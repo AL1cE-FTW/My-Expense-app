@@ -15,6 +15,7 @@
 - **メール/パスワードでログイン** — 同じアカウントでログインすればスマホ・PC間でリアルタイムに同期
 - **CSV エクスポート** — 全記録を CSV でダウンロード(Excel 対応の BOM 付き UTF-8)
 - **CSV インポート** — 既存のスプレッドシートから CSV 経由でデータ移行
+- **メールからの読み込み** — Vpass (三井住友カード) の利用通知メールをGmailから検索し、利用明細を記録として取り込み
 
 ## セットアップ
 
@@ -94,6 +95,36 @@ Netlify や Vercel など、他の静的ホスティングサービスでも同�
 カテゴリ名がアプリのカテゴリと完全一致しない場合(例: 「交通費」→「交通」、「水道光熱費」→「水道・光熱」)
 は自動的に読み替え、対応表にないカテゴリは「その他支出」「その他収入」として取り込まれます。
 
+## メールからの読み込み機能のセットアップ
+
+「メールから読み込み」ボタンは、Gmail内の Vpass (三井住友カード) の「ご利用のお知らせ」メールを検索し、
+利用明細を自動で記録として取り込みます。お店の名前から Suica/PASMO 等の交通系は「交通」、
+コンビニ・飲食店は「食費」など、よくあるパターンをある程度自動でカテゴリ分けしますが、
+判定できないものは「その他支出」になるため、あとで見直してください。一度取り込んだメールは記録され、
+重複して取り込まれることはありません。
+
+使うには、Google Cloud 側でOAuth認証の設定が別途必要です(Firebaseと同じGoogle Cloudプロジェクトを流用できます)。
+
+1. [Google Cloud Console](https://console.cloud.google.com/) で、Firebaseプロジェクトと同じプロジェクトを選択
+2. 「APIとサービス」→「ライブラリ」で **Gmail API** を検索して有効化
+3. 「APIとサービス」→「OAuth同意画面」を設定
+   - User Type は「External」を選択
+   - スコープに `https://www.googleapis.com/auth/gmail.readonly` を追加
+   - 「テストユーザー」に自分のGmailアドレスを追加(この状態なら審査不要ですぐ使えます)
+4. 「認証情報」→「認証情報を作成」→「OAuthクライアントID」
+   - アプリケーションの種類: 「ウェブアプリケーション」
+   - 「承認済みのJavaScript生成元」に、公開先のURL (`https://<ユーザー名>.github.io` など) と、
+     ローカルで試す場合は `http://localhost:8000` を追加
+5. 作成されたクライアントIDをコピー
+
+```bash
+cp js/google-config.example.js js/google-config.js
+```
+
+`js/google-config.js` を開き、`YOUR_CLIENT_ID...` の部分をコピーしたクライアントIDに置き換えます。
+このファイルも `.gitignore` 対象です。GitHub Pagesなどで公開する場合は `firebase-config.js` と同様、
+`git add -f js/google-config.js` でコミットに含めてください(OAuthクライアントIDも非公開情報ではありません)。
+
 ## データの保存について
 
 記録は Firestore に保存され、ブラウザにはオフラインキャッシュ(IndexedDB)が作られます。
@@ -107,6 +138,8 @@ css/style.css                    … スタイル
 js/app.js                        … ロジック (認証・Firestore同期・集計・CSV入出力)
 js/firebase-config.example.js    … Firebase設定のテンプレート
 js/firebase-config.js            … 自分のFirebase設定 (.gitignore対象、要作成)
+js/google-config.example.js      … Google OAuth設定のテンプレート (メール読み込み用)
+js/google-config.js              … 自分のGoogle OAuth設定 (.gitignore対象、任意)
 firestore.rules                  … Firestoreセキュリティルール
 ```
 

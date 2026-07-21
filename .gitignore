@@ -1,2 +1,5 @@
 # あなた自身の Firebase プロジェクト設定 (js/firebase-config.example.js をコピーして作成)
 js/firebase-config.js
+
+# あなた自身の Google OAuth クライアントID (js/google-config.example.js をコピーして作成)
+js/google-config.js

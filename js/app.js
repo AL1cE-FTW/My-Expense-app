@@ -68,6 +68,11 @@ let unsubscribeEntries = null;
 let unsubscribeBudget = null;
 let authMode = "login";
 
+// Gmail 連携 (メールからの読み込み)
+let googleClientId = null;
+let googleTokenClient = null;
+let gmailAccessToken = null;
+
 // ---------------------------------------------------------------------------
 // ユーティリティ
 // ---------------------------------------------------------------------------
@@ -150,6 +155,7 @@ const el = {
   listEmptyMessage: document.getElementById("list-empty-message"),
   exportCsvBtn: document.getElementById("export-csv-btn"),
   importCsvInput: document.getElementById("import-csv-input"),
+  gmailImportBtn: document.getElementById("gmail-import-btn"),
 };
 
 function selectedType() {
@@ -969,6 +975,221 @@ function importCsv(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Gmail 連携 (メールからの読み込み)
+// ---------------------------------------------------------------------------
+
+const GMAIL_QUERY = 'from:statement@vpass.ne.jp subject:"ご利用のお知らせ" newer_than:60d';
+
+// お店の名前からカテゴリを推測する。Suica/PASMO等の交通系は確実、それ以外は
+// よくある業態のキーワードで大まかに振り分け、当てはまらなければ「その他支出」。
+const MERCHANT_CATEGORY_RULES = [
+  {
+    category: "交通",
+    pattern: /Ｓｕｉｃａ|Suica|ＰＡＳＭＯ|PASMO|ＪＲ|(?:^|[^A-Za-z])JR(?:[^A-Za-z]|$)|地下鉄|バス|タクシー|ＥＴＣ|ICOCA|みどりの窓口|東京メトロ|モノレール/i,
+  },
+  {
+    category: "食費",
+    pattern: /ファミリーマート|セブン|ローソン|ミニストップ|デイリーヤマザキ|コンビニ|スーパー|イオン|やまか|西友|マルエツ|ライフ|カフェ|スターバックス|ドトール|マクドナルド|吉野家|すき家|松屋|ラーメン|食堂|レストラン|居酒屋|もんじゃ|大戸屋|ピザ|寿司/i,
+  },
+  {
+    category: "日用品",
+    pattern: /マツモトキヨシ|ドラッグ|ダイソー|セリア|無印良品|ニトリ|ホームセンター|ロフト|東急ハンズ/i,
+  },
+  {
+    category: "趣味・娯楽",
+    pattern: /KODANSHA|SHUEISHA|集英社|講談社|GOOGLE|AMAZON|Steam|Netflix|Spotify|BOOTH|PICCOMA|ピッコマ|映画|カラオケ/i,
+  },
+  {
+    category: "衣服・美容",
+    pattern: /ユニクロ|UNIQLO|ＧＵ|美容室|ヘアサロン|理容/i,
+  },
+];
+
+function guessCategoryFromMerchant(merchant) {
+  for (const rule of MERCHANT_CATEGORY_RULES) {
+    if (rule.pattern.test(merchant)) return rule.category;
+  }
+  return "その他支出";
+}
+
+function decodeBase64Url(data) {
+  const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function findPlainTextPart(payload) {
+  if (!payload) return null;
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    return decodeBase64Url(payload.body.data);
+  }
+  for (const part of payload.parts || []) {
+    const found = findPlainTextPart(part);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Vpass「ご利用のお知らせ」メールの本文から利用明細を1件抽出する。
+ * 解析できなければ null を返す。
+ */
+function parseVpassEmail(text) {
+  const dateMatch = text.match(/◇利用日[:：]\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  const merchantMatch = text.match(/◇利用先[:：]\s*(.+)/);
+  const amountMatch = text.match(/◇利用金額[:：]\s*([\d,]+)円/);
+  if (!dateMatch || !merchantMatch || !amountMatch) return null;
+
+  const [, y, mo, d] = dateMatch;
+  const amount = Number(amountMatch[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const merchant = merchantMatch[1].trim();
+  if (!merchant) return null;
+
+  return {
+    date: `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
+    type: "expense",
+    category: guessCategoryFromMerchant(merchant),
+    amount,
+    memo: merchant,
+  };
+}
+
+async function gmailApiFetch(path, params) {
+  const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`);
+  for (const [key, value] of Object.entries(params || {})) {
+    url.searchParams.set(key, value);
+  }
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${gmailAccessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Gmail APIエラー (${res.status})`);
+  }
+  return res.json();
+}
+
+function gmailImportDocRef() {
+  return firestoreApi.doc(db, `users/${currentUid}/settings/gmailImport`);
+}
+
+async function getImportedGmailIds() {
+  const snap = await firestoreApi.getDoc(gmailImportDocRef());
+  return snap.exists() ? snap.data().importedIds || [] : [];
+}
+
+async function markGmailIdsImported(ids) {
+  if (ids.length === 0) return;
+  try {
+    await firestoreApi.updateDoc(gmailImportDocRef(), {
+      importedIds: firestoreApi.arrayUnion(...ids),
+    });
+  } catch {
+    // 初回はドキュメントがまだ存在しない
+    await firestoreApi.setDoc(gmailImportDocRef(), { importedIds: ids });
+  }
+}
+
+function requestGmailAccessToken() {
+  return new Promise((resolve, reject) => {
+    if (!window.google?.accounts?.oauth2) {
+      reject(new Error("Googleの認証ライブラリを読み込めませんでした。"));
+      return;
+    }
+    if (!googleTokenClient) {
+      googleTokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: googleClientId,
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        callback: (response) => {
+          if (response.error) {
+            reject(new Error(response.error));
+            return;
+          }
+          gmailAccessToken = response.access_token;
+          resolve(gmailAccessToken);
+        },
+        error_callback: (err) => reject(new Error(err.type || "認証に失敗しました")),
+      });
+    }
+    googleTokenClient.requestAccessToken({ prompt: gmailAccessToken ? "" : "consent" });
+  });
+}
+
+async function importFromGmail() {
+  if (!googleClientId) {
+    alert(
+      "メールからの読み込み機能を使うには設定が必要です。\n\n" +
+        "js/google-config.example.js をコピーして js/google-config.js を作成し、" +
+        "README.md の「メールからの読み込み機能のセットアップ」の手順に沿って設定してください。"
+    );
+    return;
+  }
+
+  el.gmailImportBtn.disabled = true;
+  el.gmailImportBtn.textContent = "接続中...";
+  try {
+    if (!gmailAccessToken) {
+      await requestGmailAccessToken();
+    }
+
+    el.gmailImportBtn.textContent = "検索中...";
+    const importedIds = new Set(await getImportedGmailIds());
+
+    const listResult = await gmailApiFetch("messages", { q: GMAIL_QUERY, maxResults: "50" });
+    const messages = listResult.messages || [];
+    const newMessages = messages.filter((m) => !importedIds.has(m.id));
+
+    if (newMessages.length === 0) {
+      alert("新しい利用通知メールは見つかりませんでした。");
+      return;
+    }
+
+    el.gmailImportBtn.textContent = "解析中...";
+    const imported = [];
+    const newIds = [];
+    for (const m of newMessages) {
+      const full = await gmailApiFetch(`messages/${m.id}`, { format: "full" });
+      const text = findPlainTextPart(full.payload);
+      newIds.push(m.id); // 解析できなくても既読扱いにし、毎回取得し直さないようにする
+      if (!text) continue;
+      const entry = parseVpassEmail(text);
+      if (entry) imported.push(entry);
+    }
+
+    if (imported.length === 0) {
+      await markGmailIdsImported(newIds);
+      alert("新しい利用通知メールは見つかりましたが、内容を解析できませんでした。");
+      return;
+    }
+
+    const total = imported.reduce((sum, e) => sum + e.amount, 0);
+    const preview = imported
+      .slice(0, 5)
+      .map((e) => `${e.date} ${e.memo} ${formatYen(e.amount)} (${e.category})`)
+      .join("\n");
+    const message =
+      `${imported.length}件の利用明細が見つかりました (合計 ${formatYen(total)})。取り込みますか?\n\n` +
+      preview +
+      (imported.length > 5 ? `\n...ほか${imported.length - 5}件` : "") +
+      "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。";
+    if (!confirm(message)) return;
+
+    await importEntriesToDb(imported);
+    await markGmailIdsImported(newIds);
+
+    alert(`${imported.length}件をインポートしました。`);
+  } catch (err) {
+    console.error(err);
+    alert("メールの読み込みに失敗しました: " + err.message);
+  } finally {
+    el.gmailImportBtn.disabled = false;
+    el.gmailImportBtn.textContent = "メールから読み込み";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 認証
 // ---------------------------------------------------------------------------
 
@@ -1069,6 +1290,8 @@ function setupAppEventListeners() {
     if (file) importCsv(file);
     el.importCsvInput.value = "";
   });
+
+  el.gmailImportBtn.addEventListener("click", importFromGmail);
 }
 
 async function main() {
@@ -1093,6 +1316,13 @@ async function main() {
   } catch {
     showOnly("setup");
     return;
+  }
+
+  try {
+    ({ googleClientId } = await import("./google-config.js"));
+  } catch {
+    // 未設定でもアプリ自体は使える (「メールから読み込み」ボタンのみ案内を表示)
+    googleClientId = null;
   }
 
   const app = appModule.initializeApp(firebaseConfig);
