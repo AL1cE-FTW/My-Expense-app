@@ -68,6 +68,11 @@ let unsubscribeEntries = null;
 let unsubscribeBudget = null;
 let authMode = "login";
 
+// 記録一覧の並び替え
+let sortColumn = "date";
+let sortDirection = "desc";
+const SORT_DEFAULT_DIRECTION = { date: "desc", type: "asc", category: "asc", amount: "desc" };
+
 // Gmail 連携 (メールからの読み込み)
 let googleClientId = null;
 let googleTokenClient = null;
@@ -455,11 +460,55 @@ function renderBreakdown(monthEntries) {
   }
 }
 
+function sortEntries(list) {
+  const sorted = [...list];
+  sorted.sort((a, b) => {
+    let cmp;
+    switch (sortColumn) {
+      case "type":
+        cmp = TYPE_LABELS[a.type].localeCompare(TYPE_LABELS[b.type], "ja");
+        break;
+      case "category":
+        cmp = a.category.localeCompare(b.category, "ja");
+        break;
+      case "amount":
+        cmp = a.amount - b.amount;
+        break;
+      case "date":
+      default:
+        cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+        break;
+    }
+    return sortDirection === "asc" ? cmp : -cmp;
+  });
+  return sorted;
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.sort === sortColumn) {
+      th.classList.add(sortDirection === "asc" ? "sort-asc" : "sort-desc");
+    }
+  });
+}
+
+function handleSortClick(column) {
+  if (sortColumn === column) {
+    sortDirection = sortDirection === "asc" ? "desc" : "asc";
+  } else {
+    sortColumn = column;
+    sortDirection = SORT_DEFAULT_DIRECTION[column] || "asc";
+  }
+  render();
+}
+
 function renderList(monthEntries) {
   el.entryList.innerHTML = "";
   el.listEmptyMessage.classList.toggle("hidden", monthEntries.length > 0);
+  updateSortIndicators();
 
-  for (const entry of monthEntries) {
+  for (const entry of sortEntries(monthEntries)) {
     const tr = document.createElement("tr");
 
     const dateTd = document.createElement("td");
@@ -1292,6 +1341,10 @@ function setupAppEventListeners() {
   });
 
   el.gmailImportBtn.addEventListener("click", importFromGmail);
+
+  document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
+    th.addEventListener("click", () => handleSortClick(th.dataset.sort));
+  });
 }
 
 async function main() {
