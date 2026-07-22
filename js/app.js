@@ -71,6 +71,9 @@ let budgets = {};
 // 表示中の月 (毎月1日の Date)
 let currentMonth = startOfMonth(new Date());
 
+// 表示モード: "month" (月別) または "year" (年間)
+let viewMode = "month";
+
 let db = null;
 let auth = null;
 let currentUid = null;
@@ -120,6 +123,17 @@ function entriesForMonth(monthDate) {
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+function entriesForYear(monthDate) {
+  const prefix = String(monthDate.getFullYear());
+  return entries
+    .filter((e) => e.date.startsWith(prefix))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function periodEntries() {
+  return viewMode === "year" ? entriesForYear(currentMonth) : entriesForMonth(currentMonth);
+}
+
 // ---------------------------------------------------------------------------
 // DOM 参照
 // ---------------------------------------------------------------------------
@@ -142,10 +156,13 @@ const el = {
   userEmail: document.getElementById("user-email"),
   logoutBtn: document.getElementById("logout-btn"),
 
+  viewTabs: document.querySelectorAll(".view-tab"),
   currentMonth: document.getElementById("current-month"),
   prevMonth: document.getElementById("prev-month"),
   nextMonth: document.getElementById("next-month"),
   todayBtn: document.getElementById("today-btn"),
+  budgetSectionTitle: document.getElementById("budget-section-title"),
+  listSectionTitle: document.getElementById("list-section-title"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
@@ -294,16 +311,22 @@ async function saveBudgetsToDb(newBudgets) {
 // ---------------------------------------------------------------------------
 
 function render() {
-  el.currentMonth.textContent = formatMonth(currentMonth);
+  el.currentMonth.textContent =
+    viewMode === "year" ? `${currentMonth.getFullYear()}年` : formatMonth(currentMonth);
+
+  const periodLabel = viewMode === "year" ? "今年" : "今月";
+  el.budgetSectionTitle.textContent = `${periodLabel}の予算`;
+  el.listSectionTitle.textContent = `${periodLabel}の記録`;
 
   renderCumulativeSavings();
 
-  const monthEntries = entriesForMonth(currentMonth);
-  renderSummary(monthEntries);
-  renderBudget(monthEntries);
-  renderNeedWantSave(monthEntries);
-  renderBreakdown(monthEntries);
-  renderList(monthEntries);
+  const targetMultiplier = viewMode === "year" ? 12 : 1;
+  const entriesInPeriod = periodEntries();
+  renderSummary(entriesInPeriod);
+  renderBudget(entriesInPeriod, targetMultiplier);
+  renderNeedWantSave(entriesInPeriod);
+  renderBreakdown(entriesInPeriod);
+  renderList(entriesInPeriod);
 }
 
 function renderCumulativeSavings() {
@@ -338,7 +361,7 @@ function budgetBarClass(ratio) {
   return "budget-bar";
 }
 
-function renderBudget(monthEntries) {
+function renderBudget(monthEntries, targetMultiplier = 1) {
   const actuals = new Map();
   for (const e of monthEntries) {
     if (e.type !== "expense") continue;
@@ -346,7 +369,7 @@ function renderBudget(monthEntries) {
   }
 
   const budgetedCategories = Object.keys(budgets).filter((c) => budgets[c] > 0);
-  const totalBudget = budgetedCategories.reduce((sum, c) => sum + budgets[c], 0);
+  const totalBudget = budgetedCategories.reduce((sum, c) => sum + budgets[c], 0) * targetMultiplier;
   const totalActual = [...actuals.values()].reduce((sum, v) => sum + v, 0);
 
   el.budgetOverall.innerHTML = "";
@@ -379,7 +402,7 @@ function renderBudget(monthEntries) {
     ...budgetedCategories
       .map((category) => ({
         category,
-        budget: budgets[category],
+        budget: budgets[category] * targetMultiplier,
         actual: actuals.get(category) || 0,
       }))
       .sort((a, b) => b.actual / b.budget - a.actual / a.budget),
@@ -478,7 +501,7 @@ function renderNeedWantSave(monthEntries) {
   if (totalIncome <= 0) {
     const p = document.createElement("p");
     p.className = "empty-message";
-    p.textContent = "今月の収入を登録すると表示されます";
+    p.textContent = `${viewMode === "year" ? "今年" : "今月"}の収入を登録すると表示されます`;
     el.nwsLegend.appendChild(p);
     return;
   }
@@ -570,7 +593,7 @@ function renderBreakdown(monthEntries) {
   if (totals.size === 0) {
     const p = document.createElement("p");
     p.className = "empty-message";
-    p.textContent = "今月の支出はまだありません";
+    p.textContent = `${viewMode === "year" ? "今年" : "今月"}の支出はまだありません`;
     el.categoryBreakdown.appendChild(p);
     return;
   }
@@ -646,6 +669,10 @@ function handleSortClick(column) {
 function renderList(monthEntries) {
   el.entryList.innerHTML = "";
   el.listEmptyMessage.classList.toggle("hidden", monthEntries.length > 0);
+  el.listEmptyMessage.textContent =
+    viewMode === "year"
+      ? "今年の記録はまだありません。上のフォームから追加してください。"
+      : "今月の記録はまだありません。上のフォームから追加してください。";
   updateSortIndicators();
 
   for (const entry of sortEntries(monthEntries)) {
@@ -1440,20 +1467,18 @@ function setupAuthForm() {
 
 function setupAppEventListeners() {
   el.prevMonth.addEventListener("click", () => {
-    currentMonth = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth() - 1,
-      1
-    );
+    currentMonth =
+      viewMode === "year"
+        ? new Date(currentMonth.getFullYear() - 1, currentMonth.getMonth(), 1)
+        : new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
     render();
   });
 
   el.nextMonth.addEventListener("click", () => {
-    currentMonth = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth() + 1,
-      1
-    );
+    currentMonth =
+      viewMode === "year"
+        ? new Date(currentMonth.getFullYear() + 1, currentMonth.getMonth(), 1)
+        : new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
     render();
   });
 
@@ -1461,6 +1486,15 @@ function setupAppEventListeners() {
     currentMonth = startOfMonth(new Date());
     render();
   });
+
+  for (const tab of el.viewTabs) {
+    tab.addEventListener("click", () => {
+      viewMode = tab.dataset.view;
+      for (const t of el.viewTabs) t.classList.toggle("active", t === tab);
+      el.todayBtn.textContent = viewMode === "year" ? "今年" : "今月";
+      render();
+    });
+  }
 
   for (const radio of document.querySelectorAll('input[name="entry-type"]')) {
     radio.addEventListener("change", () => renderCategoryOptions(selectedType()));

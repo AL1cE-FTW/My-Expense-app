@@ -69,10 +69,14 @@
   <div id="app-root" class="hidden">
     <header class="app-header">
       <h1>📒 家計簿</h1>
+      <div class="view-toggle">
+        <button type="button" class="view-tab active" data-view="month">月別</button>
+        <button type="button" class="view-tab" data-view="year">年間</button>
+      </div>
       <div class="month-nav">
-        <button id="prev-month" class="nav-btn" aria-label="前の月">◀</button>
+        <button id="prev-month" class="nav-btn" aria-label="前へ">◀</button>
         <span id="current-month" class="current-month"></span>
-        <button id="next-month" class="nav-btn" aria-label="次の月">▶</button>
+        <button id="next-month" class="nav-btn" aria-label="次へ">▶</button>
         <button id="today-btn" class="today-btn">今月</button>
       </div>
       <div class="user-bar">
@@ -150,7 +154,7 @@
       <!-- 予算 -->
       <section class="card">
         <div class="list-header">
-          <h2>今月の予算</h2>
+          <h2 id="budget-section-title">今月の予算</h2>
           <button type="button" class="btn btn-secondary btn-small" id="edit-budget-btn">予算を編集</button>
         </div>
 
@@ -191,7 +195,7 @@
       <!-- 記録一覧 -->
       <section class="card">
         <div class="list-header">
-          <h2>今月の記録</h2>
+          <h2 id="list-section-title">今月の記録</h2>
           <div class="csv-actions">
             <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
             <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
