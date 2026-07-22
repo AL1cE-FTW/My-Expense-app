@@ -211,6 +211,17 @@
             <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden">
           </div>
         </div>
+        <div class="list-filters">
+          <select id="filter-type" class="filter-select">
+            <option value="all">すべての種別</option>
+            <option value="expense">支出</option>
+            <option value="income">収入</option>
+            <option value="save">貯蓄</option>
+          </select>
+          <select id="filter-category" class="filter-select">
+            <option value="all">すべてのカテゴリ</option>
+          </select>
+        </div>
         <div class="table-wrapper">
           <table class="entry-table">
             <thead>

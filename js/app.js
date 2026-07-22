@@ -87,6 +87,10 @@ let sortColumn = "date";
 let sortDirection = "desc";
 const SORT_DEFAULT_DIRECTION = { date: "desc", type: "asc", category: "asc", amount: "desc" };
 
+// 記録一覧の絞り込み
+let filterType = "all";
+let filterCategory = "all";
+
 // Gmail 連携 (メールからの読み込み)
 let googleClientId = null;
 let googleTokenClient = null;
@@ -188,6 +192,8 @@ const el = {
   budgetInputs: document.getElementById("budget-inputs"),
   cancelBudgetBtn: document.getElementById("cancel-budget-btn"),
   entryList: document.getElementById("entry-list"),
+  filterType: document.getElementById("filter-type"),
+  filterCategory: document.getElementById("filter-category"),
   listEmptyMessage: document.getElementById("list-empty-message"),
   exportCsvBtn: document.getElementById("export-csv-btn"),
   importCsvInput: document.getElementById("import-csv-input"),
@@ -676,16 +682,54 @@ function handleSortClick(column) {
   render();
 }
 
+function applyFilters(list) {
+  return list.filter((e) => {
+    if (filterType !== "all" && e.type !== filterType) return false;
+    if (filterCategory !== "all" && e.category !== filterCategory) return false;
+    return true;
+  });
+}
+
+function renderFilterCategoryOptions() {
+  const categoryLists =
+    filterType === "all"
+      ? [...CATEGORIES.expense, ...CATEGORIES.income, ...CATEGORIES.save]
+      : CATEGORIES[filterType];
+  const uniqueCategories = [...new Set(categoryLists)];
+
+  const previousValue = filterCategory;
+  el.filterCategory.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "すべてのカテゴリ";
+  el.filterCategory.appendChild(allOption);
+  for (const category of uniqueCategories) {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    el.filterCategory.appendChild(option);
+  }
+
+  // 以前選んでいたカテゴリが引き続き選択肢にあれば維持する
+  filterCategory = uniqueCategories.includes(previousValue) ? previousValue : "all";
+  el.filterCategory.value = filterCategory;
+}
+
 function renderList(monthEntries) {
+  const filtered = applyFilters(monthEntries);
+  const isFiltered = filterType !== "all" || filterCategory !== "all";
+
   el.entryList.innerHTML = "";
-  el.listEmptyMessage.classList.toggle("hidden", monthEntries.length > 0);
+  el.listEmptyMessage.classList.toggle("hidden", filtered.length > 0);
+
+  const periodLabel = viewMode === "year" ? "今年" : "今月";
   el.listEmptyMessage.textContent =
-    viewMode === "year"
-      ? "今年の記録はまだありません。上のフォームから追加してください。"
-      : "今月の記録はまだありません。上のフォームから追加してください。";
+    monthEntries.length === 0 && !isFiltered
+      ? `${periodLabel}の記録はまだありません。上のフォームから追加してください。`
+      : "条件に一致する記録がありません。";
   updateSortIndicators();
 
-  for (const entry of sortEntries(monthEntries)) {
+  for (const entry of sortEntries(filtered)) {
     const tr = document.createElement("tr");
 
     const dateTd = document.createElement("td");
@@ -1533,6 +1577,19 @@ function setupAppEventListeners() {
   document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
     th.addEventListener("click", () => handleSortClick(th.dataset.sort));
   });
+
+  el.filterType.addEventListener("change", () => {
+    filterType = el.filterType.value;
+    renderFilterCategoryOptions();
+    render();
+  });
+
+  el.filterCategory.addEventListener("change", () => {
+    filterCategory = el.filterCategory.value;
+    render();
+  });
+
+  renderFilterCategoryOptions();
 }
 
 async function main() {
