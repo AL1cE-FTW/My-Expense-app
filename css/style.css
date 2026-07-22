@@ -167,7 +167,7 @@ body {
 /* サマリーカード */
 .summary-cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 14px;
 }
 
@@ -202,6 +202,10 @@ body {
 
 .balance-card .card-value.negative {
   color: var(--color-expense);
+}
+
+.save-card .card-value {
+  color: #2f7dea;
 }
 
 /* フォーム */
@@ -278,6 +282,12 @@ body {
 .type-option input[value="income"]:checked + span {
   background: var(--color-income-bg);
   color: var(--color-income);
+  font-weight: 700;
+}
+
+.type-option input[value="save"]:checked + span {
+  background: #e7f0fd;
+  color: #2f7dea;
   font-weight: 700;
 }
 
@@ -601,6 +611,10 @@ body {
   color: var(--color-expense);
 }
 
+.amount-cell.save {
+  color: #2f7dea;
+}
+
 .type-badge {
   display: inline-block;
   border-radius: 6px;
@@ -616,6 +630,11 @@ body {
 .type-badge.expense {
   background: var(--color-expense-bg);
   color: var(--color-expense);
+}
+
+.type-badge.save {
+  background: #e7f0fd;
+  color: #2f7dea;
 }
 
 .row-actions {

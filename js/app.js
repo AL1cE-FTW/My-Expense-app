@@ -29,9 +29,10 @@ const CATEGORIES = {
     "その他支出",
   ],
   income: ["給与", "賞与", "副収入", "その他収入"],
+  save: ["株式", "投資信託", "定期預金", "その他貯蓄"],
 };
 
-const TYPE_LABELS = { expense: "支出", income: "収入" };
+const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
 
 // Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
@@ -167,6 +168,7 @@ const el = {
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
+  totalSave: document.getElementById("total-save"),
   form: document.getElementById("entry-form"),
   formTitle: document.getElementById("form-title"),
   entryId: document.getElementById("entry-id"),
@@ -332,7 +334,9 @@ function render() {
 function renderCumulativeSavings() {
   let total = 0;
   for (const e of entries) {
-    total += e.type === "income" ? e.amount : -e.amount;
+    if (e.type === "income") total += e.amount;
+    else if (e.type === "expense") total -= e.amount;
+    // "save" (貯蓄・投資) は現金が資産に形を変えただけなので加減算しない
   }
   el.cumulativeSavings.textContent = (total < 0 ? "-" : "") + formatYen(Math.abs(total));
   el.cumulativeSavings.classList.toggle("positive", total > 0);
@@ -342,8 +346,10 @@ function renderCumulativeSavings() {
 function renderSummary(monthEntries) {
   let income = 0;
   let expense = 0;
+  let saved = 0;
   for (const e of monthEntries) {
     if (e.type === "income") income += e.amount;
+    else if (e.type === "save") saved += e.amount;
     else expense += e.amount;
   }
   const balance = income - expense;
@@ -353,6 +359,7 @@ function renderSummary(monthEntries) {
   el.balance.textContent = (balance < 0 ? "-" : "") + formatYen(Math.abs(balance));
   el.balance.classList.toggle("positive", balance > 0);
   el.balance.classList.toggle("negative", balance < 0);
+  el.totalSave.textContent = formatYen(saved);
 }
 
 function budgetBarClass(ratio) {
@@ -488,6 +495,9 @@ function renderNeedWantSave(monthEntries) {
   for (const e of monthEntries) {
     if (e.type === "income") {
       totalIncome += e.amount;
+    } else if (e.type === "save") {
+      // 貯蓄・投資は使ったお金ではないので Need/Want に数えない。
+      // Save実績 (income - need - want) には自然に残る形で反映される。
     } else if (NEED_CATEGORIES.includes(e.category)) {
       needSpent += e.amount;
     } else {
@@ -998,6 +1008,7 @@ function parseType(value) {
   const s = String(value).trim().toLowerCase();
   if (s === "収入" || s === "income") return "income";
   if (s === "支出" || s === "expense") return "expense";
+  if (s === "貯蓄" || s === "save" || s === "投資" || s === "invest") return "save";
   return null;
 }
 
