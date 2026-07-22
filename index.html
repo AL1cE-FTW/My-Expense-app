@@ -152,6 +152,41 @@
               <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
             </div>
           </div>
+
+          <div class="payslip-section hidden" id="payslip-section">
+            <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">
+              給与明細の内訳を入力する(総支給額・税金・交通費など)
+            </button>
+            <div class="payslip-breakdown hidden" id="payslip-breakdown">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="payslip-gross">総支給額</label>
+                  <input type="number" id="payslip-gross" min="0" step="1" placeholder="300000">
+                </div>
+                <div class="form-group">
+                  <label for="payslip-commute">交通費(内訳・非課税分)</label>
+                  <input type="number" id="payslip-commute" min="0" step="1" placeholder="10000">
+                </div>
+                <div class="form-group">
+                  <label for="payslip-income-tax">所得税</label>
+                  <input type="number" id="payslip-income-tax" min="0" step="1" placeholder="8000">
+                </div>
+                <div class="form-group">
+                  <label for="payslip-resident-tax">住民税</label>
+                  <input type="number" id="payslip-resident-tax" min="0" step="1" placeholder="15000">
+                </div>
+                <div class="form-group">
+                  <label for="payslip-social-insurance">社会保険料</label>
+                  <input type="number" id="payslip-social-insurance" min="0" step="1" placeholder="45000">
+                </div>
+              </div>
+              <p class="payslip-net-preview">
+                差引支給額(手取り・上の「金額」に自動反映): <strong id="payslip-net-value">¥0</strong>
+              </p>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-clear-btn">内訳をクリアする</button>
+            </div>
+          </div>
+
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" id="submit-btn">追加</button>
             <button type="button" class="btn btn-secondary hidden" id="cancel-edit-btn">キャンセル</button>

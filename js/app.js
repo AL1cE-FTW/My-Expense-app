@@ -34,6 +34,10 @@ const CATEGORIES = {
 
 const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
 
+// 給与明細の内訳入力を出すカテゴリ
+const PAYSLIP_CATEGORY = "給与";
+const PAYSLIP_FIELDS = ["gross", "commute", "incomeTax", "residentTax", "socialInsurance"];
+
 // Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
 const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
@@ -180,6 +184,16 @@ const el = {
   entryCategory: document.getElementById("entry-category"),
   entryAmount: document.getElementById("entry-amount"),
   entryMemo: document.getElementById("entry-memo"),
+  payslipSection: document.getElementById("payslip-section"),
+  payslipToggleBtn: document.getElementById("payslip-toggle-btn"),
+  payslipBreakdown: document.getElementById("payslip-breakdown"),
+  payslipGross: document.getElementById("payslip-gross"),
+  payslipCommute: document.getElementById("payslip-commute"),
+  payslipIncomeTax: document.getElementById("payslip-income-tax"),
+  payslipResidentTax: document.getElementById("payslip-resident-tax"),
+  payslipSocialInsurance: document.getElementById("payslip-social-insurance"),
+  payslipNetValue: document.getElementById("payslip-net-value"),
+  payslipClearBtn: document.getElementById("payslip-clear-btn"),
   submitBtn: document.getElementById("submit-btn"),
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
   categoryBreakdown: document.getElementById("category-breakdown"),
@@ -758,6 +772,16 @@ function renderList(monthEntries) {
     const actions = document.createElement("div");
     actions.className = "row-actions";
 
+    let detailRow = null;
+    if (entry.payslip) {
+      detailRow = buildPayslipDetailRow(entry);
+      const detailBtn = document.createElement("button");
+      detailBtn.className = "icon-btn";
+      detailBtn.textContent = "内訳";
+      detailBtn.addEventListener("click", () => detailRow.classList.toggle("hidden"));
+      actions.appendChild(detailBtn);
+    }
+
     const editBtn = document.createElement("button");
     editBtn.className = "icon-btn";
     editBtn.textContent = "編集";
@@ -773,7 +797,28 @@ function renderList(monthEntries) {
 
     tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, actionsTd);
     el.entryList.appendChild(tr);
+    if (detailRow) el.entryList.appendChild(detailRow);
   }
+}
+
+// 給与明細の内訳を表示する行 (「内訳」ボタンで開閉)
+function buildPayslipDetailRow(entry) {
+  const p = entry.payslip;
+  const row = document.createElement("tr");
+  row.className = "payslip-detail-row hidden";
+
+  const td = document.createElement("td");
+  td.colSpan = 6;
+  const parts = [`総支給額 ${formatYen(p.gross)}`];
+  if (p.commute) parts.push(`うち交通費 ${formatYen(p.commute)}`);
+  parts.push(`所得税 ${formatYen(p.incomeTax || 0)}`);
+  parts.push(`住民税 ${formatYen(p.residentTax || 0)}`);
+  parts.push(`社会保険料 ${formatYen(p.socialInsurance || 0)}`);
+  parts.push(`手取り ${formatYen(entry.amount)}`);
+  td.textContent = parts.join(" / ");
+
+  row.appendChild(td);
+  return row;
 }
 
 function renderCategoryOptions(type, selected) {
@@ -785,6 +830,68 @@ function renderCategoryOptions(type, selected) {
     if (category === selected) option.selected = true;
     el.entryCategory.appendChild(option);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 給与明細の内訳 (総支給額・税金・社会保険料・交通費 -> 手取りを自動計算)
+// ---------------------------------------------------------------------------
+
+function payslipInputEl(field) {
+  return {
+    gross: el.payslipGross,
+    commute: el.payslipCommute,
+    incomeTax: el.payslipIncomeTax,
+    residentTax: el.payslipResidentTax,
+    socialInsurance: el.payslipSocialInsurance,
+  }[field];
+}
+
+function computePayslipNet() {
+  const gross = Math.floor(Number(el.payslipGross.value)) || 0;
+  const incomeTax = Math.floor(Number(el.payslipIncomeTax.value)) || 0;
+  const residentTax = Math.floor(Number(el.payslipResidentTax.value)) || 0;
+  const socialInsurance = Math.floor(Number(el.payslipSocialInsurance.value)) || 0;
+  return Math.max(0, gross - incomeTax - residentTax - socialInsurance);
+}
+
+function updatePayslipPreview() {
+  const net = computePayslipNet();
+  el.payslipNetValue.textContent = formatYen(net);
+  el.entryAmount.value = net;
+}
+
+function openPayslipBreakdown() {
+  el.payslipBreakdown.classList.remove("hidden");
+  el.payslipToggleBtn.classList.add("hidden");
+  el.entryAmount.readOnly = true;
+  updatePayslipPreview();
+}
+
+function closePayslipBreakdown({ clearValues = true } = {}) {
+  el.payslipBreakdown.classList.add("hidden");
+  el.payslipToggleBtn.classList.remove("hidden");
+  el.entryAmount.readOnly = false;
+  if (clearValues) {
+    for (const field of PAYSLIP_FIELDS) payslipInputEl(field).value = "";
+  }
+}
+
+// 種別が「収入」・カテゴリが「給与」のときだけ内訳入力欄を出す
+function updatePayslipVisibility() {
+  const isSalary = selectedType() === "income" && el.entryCategory.value === PAYSLIP_CATEGORY;
+  el.payslipSection.classList.toggle("hidden", !isSalary);
+  if (!isSalary) closePayslipBreakdown();
+}
+
+// 内訳が入力されていれば {gross, commute, incomeTax, residentTax, socialInsurance} を、
+// 入力されていなければ null を返す
+function buildPayslipData() {
+  if (el.payslipBreakdown.classList.contains("hidden")) return null;
+  const payslip = {};
+  for (const field of PAYSLIP_FIELDS) {
+    payslip[field] = Math.floor(Number(payslipInputEl(field).value)) || 0;
+  }
+  return payslip.gross > 0 ? payslip : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -857,6 +964,7 @@ function resetForm() {
   el.form.reset();
   el.entryDate.value = toDateInputValue(new Date());
   renderCategoryOptions("expense");
+  updatePayslipVisibility();
   el.formTitle.textContent = "記録を追加";
   el.submitBtn.textContent = "追加";
   el.cancelEditBtn.classList.add("hidden");
@@ -874,6 +982,15 @@ function startEdit(id) {
   renderCategoryOptions(entry.type, entry.category);
   el.entryAmount.value = entry.amount;
   el.entryMemo.value = entry.memo || "";
+
+  updatePayslipVisibility();
+  if (entry.payslip) {
+    for (const field of PAYSLIP_FIELDS) {
+      payslipInputEl(field).value = entry.payslip[field] || "";
+    }
+    openPayslipBreakdown();
+    el.entryAmount.value = entry.amount;
+  }
 
   el.formTitle.textContent = "記録を編集";
   el.submitBtn.textContent = "更新";
@@ -911,6 +1028,7 @@ async function handleSubmit(event) {
     category: el.entryCategory.value,
     amount,
     memo: el.entryMemo.value.trim(),
+    payslip: buildPayslipData(),
   };
 
   const editingId = el.entryId.value;
@@ -1552,7 +1670,17 @@ function setupAppEventListeners() {
   }
 
   for (const radio of document.querySelectorAll('input[name="entry-type"]')) {
-    radio.addEventListener("change", () => renderCategoryOptions(selectedType()));
+    radio.addEventListener("change", () => {
+      renderCategoryOptions(selectedType());
+      updatePayslipVisibility();
+    });
+  }
+
+  el.entryCategory.addEventListener("change", updatePayslipVisibility);
+  el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
+  el.payslipClearBtn.addEventListener("click", () => closePayslipBreakdown());
+  for (const field of PAYSLIP_FIELDS) {
+    payslipInputEl(field).addEventListener("input", updatePayslipPreview);
   }
 
   el.form.addEventListener("submit", handleSubmit);
