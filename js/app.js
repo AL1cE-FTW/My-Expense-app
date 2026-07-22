@@ -37,6 +37,11 @@ const TYPE_LABELS = { expense: "支出", income: "収入" };
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
 const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
 const NWS_TARGET_RATIO = { need: 0.5, want: 0.3, save: 0.2 };
+const NWS_BUCKET_COLORS = { need: "#2f7dea", want: "#f5c518" };
+
+function categoryBucket(category) {
+  return NEED_CATEGORIES.includes(category) ? "need" : "want";
+}
 
 const AUTH_ERROR_MESSAGES = {
   "auth/email-already-in-use": "このメールアドレスは既に登録されています。",
@@ -398,8 +403,7 @@ function renderBudget(monthEntries) {
     const row = document.createElement("div");
     row.className = "budget-row";
 
-    const name = document.createElement("span");
-    name.textContent = category;
+    const name = createCategoryLabel(category);
 
     const track = document.createElement("div");
     track.className = "budget-bar-track";
@@ -429,9 +433,14 @@ const NWS_SVG_NS = "http://www.w3.org/2000/svg";
 const NWS_RADIUS = 50;
 const NWS_STROKE_WIDTH = 90;
 const NWS_CIRCUMFERENCE = 2 * Math.PI * NWS_RADIUS;
-const NWS_COLORS = { need: "#2f7dea", want: "#f5c518", save: "#4caf50" };
+const NWS_COLORS = { ...NWS_BUCKET_COLORS, save: "#4caf50" };
 const NWS_BG_COLORS = { need: "#bcd7fa", want: "#faedb0", save: "#c3e6c4" };
 const NWS_LABELS = { need: "🏠 Need", want: "🛍️ Want", save: "🐷 Save" };
+const NWS_CATEGORY_DESCRIPTIONS = {
+  need: NEED_CATEGORIES.join("・"),
+  want: WANT_CATEGORIES.join("・") + " など",
+  save: "収入 − Need − Want (実際に残った金額)",
+};
 
 function nwsArc(offset, length, color) {
   const circle = document.createElementNS(NWS_SVG_NS, "circle");
@@ -505,6 +514,9 @@ function renderNeedWantSave(monthEntries) {
     const item = document.createElement("div");
     item.className = "nws-legend-item";
 
+    const main = document.createElement("div");
+    main.className = "nws-legend-main";
+
     const swatch = document.createElement("span");
     swatch.className = "nws-swatch";
     swatch.style.background = bucket.isOver ? "#ef4444" : NWS_COLORS[bucket.key];
@@ -519,9 +531,31 @@ function renderNeedWantSave(monthEntries) {
     const percent = Math.round(bucket.ratio * 100);
     detail.textContent = `${formatYen(Math.round(bucket.actual))} / ${formatYen(Math.round(bucket.target))} (${percent}%)`;
 
-    item.append(swatch, label, detail);
+    main.append(swatch, label, detail);
+
+    const categories = document.createElement("div");
+    categories.className = "nws-legend-categories";
+    categories.textContent = NWS_CATEGORY_DESCRIPTIONS[bucket.key];
+
+    item.append(main, categories);
     el.nwsLegend.appendChild(item);
   }
+}
+
+function createCategoryLabel(category) {
+  const wrap = document.createElement("span");
+  wrap.className = "category-label";
+
+  const dot = document.createElement("span");
+  dot.className = "category-dot";
+  dot.style.background = NWS_BUCKET_COLORS[categoryBucket(category)];
+  dot.title = categoryBucket(category) === "need" ? "Need" : "Want";
+
+  const text = document.createElement("span");
+  text.textContent = category;
+
+  wrap.append(dot, text);
+  return wrap;
 }
 
 function renderBreakdown(monthEntries) {
@@ -548,8 +582,7 @@ function renderBreakdown(monthEntries) {
     const row = document.createElement("div");
     row.className = "breakdown-row";
 
-    const name = document.createElement("span");
-    name.textContent = category;
+    const name = createCategoryLabel(category);
 
     const track = document.createElement("div");
     track.className = "breakdown-bar-track";
@@ -684,8 +717,11 @@ function renderBudgetInputs() {
     group.className = "form-group";
 
     const label = document.createElement("label");
-    label.textContent = category;
     label.htmlFor = `budget-input-${category}`;
+    const dot = document.createElement("span");
+    dot.className = "category-dot";
+    dot.style.background = NWS_BUCKET_COLORS[categoryBucket(category)];
+    label.append(dot, document.createTextNode(category));
 
     const input = document.createElement("input");
     input.type = "number";

@@ -432,6 +432,12 @@ body {
 
 .nws-legend-item {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nws-legend-main {
+  display: flex;
   align-items: baseline;
   gap: 8px;
   font-size: 0.88rem;
@@ -457,6 +463,26 @@ body {
 .nws-legend-detail.over {
   color: var(--color-expense);
   font-weight: 700;
+}
+
+.nws-legend-categories {
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+  padding-left: 18px;
+}
+
+/* カテゴリ名の色ドット (Need/Want) */
+.category-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.category-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 /* 記録一覧 */
