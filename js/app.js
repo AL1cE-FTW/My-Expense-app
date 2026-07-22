@@ -198,6 +198,7 @@ const el = {
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
   categoryBreakdown: document.getElementById("category-breakdown"),
   yearlyChartSection: document.getElementById("yearly-chart-section"),
+  monthlyBarYaxis: document.getElementById("monthly-bar-yaxis"),
   monthlyBarChart: document.getElementById("monthly-bar-chart"),
   nwsChart: document.getElementById("nws-chart"),
   nwsLegend: document.getElementById("nws-legend"),
@@ -354,6 +355,22 @@ function render() {
   renderList(entriesInPeriod);
 }
 
+// 縦軸の目盛り幅をキリの良い数値 (1, 2, 5 × 10^n) から選ぶ
+const CHART_STEP_CANDIDATES = [
+  1000, 2000, 5000,
+  10000, 20000, 50000,
+  100000, 200000, 500000,
+  1000000, 2000000, 5000000,
+];
+
+function chartStepFor(max) {
+  const minStep = max / 6;
+  return (
+    CHART_STEP_CANDIDATES.find((step) => step >= minStep) ||
+    CHART_STEP_CANDIDATES[CHART_STEP_CANDIDATES.length - 1]
+  );
+}
+
 // 年間表示のときだけ、月ごとの収入・支出を棒グラフで表示する
 function renderMonthlyBarChart() {
   el.yearlyChartSection.classList.toggle("hidden", viewMode !== "year");
@@ -367,9 +384,20 @@ function renderMonthlyBarChart() {
     monthlyTotals[month][e.type] += e.amount;
   }
 
-  const max = Math.max(1, ...monthlyTotals.flatMap((m) => [m.income, m.expense]));
+  const dataMax = Math.max(0, ...monthlyTotals.flatMap((m) => [m.income, m.expense]));
+  const step = chartStepFor(dataMax > 0 ? dataMax : 1);
+  const chartMax = dataMax > 0 ? Math.ceil(dataMax / step) * step : step;
   const currentRealMonth =
     year === new Date().getFullYear() ? new Date().getMonth() : -1;
+
+  el.monthlyBarYaxis.innerHTML = "";
+  for (let value = chartMax; value >= 0; value -= step) {
+    const label = document.createElement("span");
+    label.className = "monthly-bar-yaxis-label";
+    label.style.top = `${100 - (value / chartMax) * 100}%`;
+    label.textContent = formatYen(value);
+    el.monthlyBarYaxis.appendChild(label);
+  }
 
   el.monthlyBarChart.innerHTML = "";
   monthlyTotals.forEach((totals, index) => {
@@ -381,12 +409,12 @@ function renderMonthlyBarChart() {
 
     const incomeBar = document.createElement("div");
     incomeBar.className = "month-bar income";
-    incomeBar.style.height = `${(totals.income / max) * 100}%`;
+    incomeBar.style.height = `${(totals.income / chartMax) * 100}%`;
     incomeBar.title = `${index + 1}月 収入 ${formatYen(totals.income)}`;
 
     const expenseBar = document.createElement("div");
     expenseBar.className = "month-bar expense";
-    expenseBar.style.height = `${(totals.expense / max) * 100}%`;
+    expenseBar.style.height = `${(totals.expense / chartMax) * 100}%`;
     expenseBar.title = `${index + 1}月 支出 ${formatYen(totals.expense)}`;
 
     bars.append(incomeBar, expenseBar);

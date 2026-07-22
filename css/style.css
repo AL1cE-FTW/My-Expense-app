@@ -359,12 +359,35 @@ body {
 }
 
 /* 月別の収支推移 (年間表示) */
+.monthly-chart-row {
+  display: flex;
+  gap: 4px;
+}
+
+.monthly-bar-yaxis {
+  position: relative;
+  width: 60px;
+  flex-shrink: 0;
+  height: 180px;
+  margin-top: 20px;
+}
+
+.monthly-bar-yaxis-label {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 .monthly-bar-chart {
+  flex: 1;
   display: flex;
   align-items: flex-end;
   gap: 6px;
   height: 180px;
-  padding-top: 20px;
+  margin-top: 20px;
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
 }
