@@ -358,6 +358,86 @@ body {
   font-size: 0.82rem;
 }
 
+/* 月別の収支推移 (年間表示) */
+.monthly-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 180px;
+  padding-top: 20px;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.month-bar-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 30px;
+  height: 100%;
+}
+
+.month-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+}
+
+.month-bar {
+  width: 9px;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+}
+
+.month-bar.income {
+  background: var(--color-income);
+}
+
+.month-bar.expense {
+  background: var(--color-expense);
+}
+
+.month-bar-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+.month-bar-label.current {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.monthly-bar-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.legend-dot.income {
+  background: var(--color-income);
+}
+
+.legend-dot.expense {
+  background: var(--color-expense);
+}
+
 /* カテゴリ別内訳 */
 .category-breakdown {
   display: flex;

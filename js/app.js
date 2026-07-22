@@ -197,6 +197,8 @@ const el = {
   submitBtn: document.getElementById("submit-btn"),
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
   categoryBreakdown: document.getElementById("category-breakdown"),
+  yearlyChartSection: document.getElementById("yearly-chart-section"),
+  monthlyBarChart: document.getElementById("monthly-bar-chart"),
   nwsChart: document.getElementById("nws-chart"),
   nwsLegend: document.getElementById("nws-legend"),
   budgetOverall: document.getElementById("budget-overall"),
@@ -345,10 +347,57 @@ function render() {
   const targetMultiplier = viewMode === "year" ? 12 : 1;
   const entriesInPeriod = periodEntries();
   renderSummary(entriesInPeriod);
+  renderMonthlyBarChart();
   renderBudget(entriesInPeriod, targetMultiplier);
   renderNeedWantSave(entriesInPeriod);
   renderBreakdown(entriesInPeriod);
   renderList(entriesInPeriod);
+}
+
+// 年間表示のときだけ、月ごとの収入・支出を棒グラフで表示する
+function renderMonthlyBarChart() {
+  el.yearlyChartSection.classList.toggle("hidden", viewMode !== "year");
+  if (viewMode !== "year") return;
+
+  const year = currentMonth.getFullYear();
+  const monthlyTotals = Array.from({ length: 12 }, () => ({ income: 0, expense: 0 }));
+  for (const e of entriesForYear(currentMonth)) {
+    if (e.type !== "income" && e.type !== "expense") continue;
+    const month = Number(e.date.slice(5, 7)) - 1;
+    monthlyTotals[month][e.type] += e.amount;
+  }
+
+  const max = Math.max(1, ...monthlyTotals.flatMap((m) => [m.income, m.expense]));
+  const currentRealMonth =
+    year === new Date().getFullYear() ? new Date().getMonth() : -1;
+
+  el.monthlyBarChart.innerHTML = "";
+  monthlyTotals.forEach((totals, index) => {
+    const group = document.createElement("div");
+    group.className = "month-bar-group";
+
+    const bars = document.createElement("div");
+    bars.className = "month-bars";
+
+    const incomeBar = document.createElement("div");
+    incomeBar.className = "month-bar income";
+    incomeBar.style.height = `${(totals.income / max) * 100}%`;
+    incomeBar.title = `${index + 1}月 収入 ${formatYen(totals.income)}`;
+
+    const expenseBar = document.createElement("div");
+    expenseBar.className = "month-bar expense";
+    expenseBar.style.height = `${(totals.expense / max) * 100}%`;
+    expenseBar.title = `${index + 1}月 支出 ${formatYen(totals.expense)}`;
+
+    bars.append(incomeBar, expenseBar);
+
+    const label = document.createElement("div");
+    label.className = "month-bar-label" + (index === currentRealMonth ? " current" : "");
+    label.textContent = `${index + 1}月`;
+
+    group.append(bars, label);
+    el.monthlyBarChart.appendChild(group);
+  });
 }
 
 function renderCumulativeSavings() {
