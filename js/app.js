@@ -426,12 +426,12 @@ function renderBudget(monthEntries) {
 }
 
 const NWS_SVG_NS = "http://www.w3.org/2000/svg";
-const NWS_RADIUS = 70;
-const NWS_STROKE_WIDTH = 28;
+const NWS_RADIUS = 50;
+const NWS_STROKE_WIDTH = 90;
 const NWS_CIRCUMFERENCE = 2 * Math.PI * NWS_RADIUS;
-const NWS_COLORS = { need: "#3b82f6", want: "#f59e0b", save: "#10b981" };
-const NWS_BG_COLORS = { need: "#bfdbfe", want: "#fde68a", save: "#a7f3d0" };
-const NWS_LABELS = { need: "Need", want: "Want", save: "Save" };
+const NWS_COLORS = { need: "#2f7dea", want: "#f5c518", save: "#4caf50" };
+const NWS_BG_COLORS = { need: "#bcd7fa", want: "#faedb0", save: "#c3e6c4" };
+const NWS_LABELS = { need: "🏠 Need", want: "🛍️ Want", save: "🐷 Save" };
 
 function nwsArc(offset, length, color) {
   const circle = document.createElementNS(NWS_SVG_NS, "circle");
