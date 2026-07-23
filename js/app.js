@@ -1795,6 +1795,52 @@ function setupAppEventListeners() {
   });
 
   renderFilterCategoryOptions();
+  setupSidebarScrollSpy();
+}
+
+// サイドバーのリンクを、現在スクロールして表示中のセクションに応じてハイライトする
+// (ヘッダー直下のライン(referenceY)を最後に通過したセクションをアクティブにする。
+//  最後のセクションはページ末尾でスクロールが頭打ちになり画面中央まで届かない
+//  ことがあるため、IntersectionObserverの領域判定ではなく通過判定を使う)
+let sidebarScrollSpyBound = false;
+
+function setupSidebarScrollSpy() {
+  if (sidebarScrollSpyBound) return;
+  sidebarScrollSpyBound = true;
+
+  const links = [...document.querySelectorAll(".sidebar-link")];
+  if (links.length === 0) return;
+  const sections = links
+    .map((link) => document.getElementById(link.getAttribute("href").slice(1)))
+    .filter(Boolean);
+  if (sections.length === 0) return;
+
+  const REFERENCE_Y = 140;
+
+  function updateActiveSidebarLink() {
+    // ページ最下部までスクロールすると、最後のセクションがページの高さ不足で
+    // REFERENCE_Y まで届かないことがあるため、末尾到達時は最後のリンクを優先する
+    const atBottom =
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+
+    let current = sections[0];
+    if (atBottom) {
+      current = sections[sections.length - 1];
+    } else {
+      for (const section of sections) {
+        if (section.getBoundingClientRect().top <= REFERENCE_Y) current = section;
+      }
+    }
+
+    for (const link of links) {
+      link.classList.toggle("active", link.getAttribute("href") === `#${current.id}`);
+    }
+  }
+
+  // 初期状態 (ログイン前で #app-root がまだ非表示のときは getBoundingClientRect が
+  // 全て0になってしまうため、レイアウト計算に頼らず先頭リンクを既定でアクティブにする)
+  links[0].classList.add("active");
+  window.addEventListener("scroll", updateActiveSidebarLink, { passive: true });
 }
 
 async function main() {

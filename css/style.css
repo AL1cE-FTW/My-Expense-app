@@ -46,8 +46,8 @@ html {
 .app-sidebar {
   width: 220px;
   flex-shrink: 0;
-  background: #1b2436;
-  color: #b6bfd1;
+  background: #171c29;
+  color: #9aa4ba;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -63,7 +63,7 @@ html {
 
 .sidebar-nav-label {
   font-size: 0.7rem;
-  color: #7c869c;
+  color: #6b7690;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 8px 10px 4px;
@@ -73,14 +73,21 @@ html {
   display: block;
   padding: 9px 10px;
   border-radius: 8px;
-  color: #b6bfd1;
+  color: #9aa4ba;
   text-decoration: none;
   font-size: 0.88rem;
+  font-weight: 500;
 }
 
 .sidebar-link:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   color: #fff;
+}
+
+.sidebar-link.active {
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 700;
 }
 
 .app-content {
