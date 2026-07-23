@@ -98,7 +98,6 @@ html {
 #summary-section,
 #budget-section,
 #nws-section,
-#breakdown-section,
 #list-section {
   scroll-margin-top: 84px;
 }
@@ -538,38 +537,11 @@ html {
   background: var(--color-expense);
 }
 
-/* カテゴリ別内訳 */
+/* カテゴリ別内訳 (予算セクションの内訳表示で使用) */
 .category-breakdown {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.breakdown-row {
-  display: grid;
-  grid-template-columns: 7em 1fr 7em;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.9rem;
-}
-
-.breakdown-bar-track {
-  background: var(--color-bg);
-  border-radius: 6px;
-  height: 14px;
-  overflow: hidden;
-}
-
-.breakdown-bar {
-  height: 100%;
-  background: var(--color-primary);
-  border-radius: 6px;
-  min-width: 2px;
-}
-
-.breakdown-amount {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 /* 予算 */
@@ -1036,10 +1008,6 @@ html {
 
   .card-value {
     font-size: 1.2rem;
-  }
-
-  .breakdown-row {
-    grid-template-columns: 5.5em 1fr 6em;
   }
 
   .budget-row {

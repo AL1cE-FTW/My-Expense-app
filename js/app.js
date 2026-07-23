@@ -196,7 +196,6 @@ const el = {
   payslipClearBtn: document.getElementById("payslip-clear-btn"),
   submitBtn: document.getElementById("submit-btn"),
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
-  categoryBreakdown: document.getElementById("category-breakdown"),
   yearlyChartSection: document.getElementById("yearly-chart-section"),
   monthlyBarYaxis: document.getElementById("monthly-bar-yaxis"),
   monthlyBarChart: document.getElementById("monthly-bar-chart"),
@@ -351,7 +350,6 @@ function render() {
   renderMonthlyBarChart();
   renderBudget(entriesInPeriod, targetMultiplier);
   renderNeedWantSave(entriesInPeriod);
-  renderBreakdown(entriesInPeriod);
   renderList(entriesInPeriod);
 }
 
@@ -687,48 +685,6 @@ function createCategoryLabel(category) {
 
   wrap.append(dot, text);
   return wrap;
-}
-
-function renderBreakdown(monthEntries) {
-  const totals = new Map();
-  for (const e of monthEntries) {
-    if (e.type !== "expense") continue;
-    totals.set(e.category, (totals.get(e.category) || 0) + e.amount);
-  }
-
-  el.categoryBreakdown.innerHTML = "";
-
-  if (totals.size === 0) {
-    const p = document.createElement("p");
-    p.className = "empty-message";
-    p.textContent = `${viewMode === "year" ? "今年" : "今月"}の支出はまだありません`;
-    el.categoryBreakdown.appendChild(p);
-    return;
-  }
-
-  const sorted = [...totals.entries()].sort((a, b) => b[1] - a[1]);
-  const max = sorted[0][1];
-
-  for (const [category, amount] of sorted) {
-    const row = document.createElement("div");
-    row.className = "breakdown-row";
-
-    const name = createCategoryLabel(category);
-
-    const track = document.createElement("div");
-    track.className = "breakdown-bar-track";
-    const bar = document.createElement("div");
-    bar.className = "breakdown-bar";
-    bar.style.width = `${(amount / max) * 100}%`;
-    track.appendChild(bar);
-
-    const value = document.createElement("span");
-    value.className = "breakdown-amount";
-    value.textContent = formatYen(amount);
-
-    row.append(name, track, value);
-    el.categoryBreakdown.appendChild(row);
-  }
 }
 
 function sortEntries(list) {
