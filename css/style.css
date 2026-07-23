@@ -32,6 +32,76 @@ body {
   display: none !important;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+/* アプリ全体のレイアウト (デスクトップ: サイドバー / スマホ: 上部ヘッダーのみ) */
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1b2436;
+  color: #b6bfd1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 20px 14px;
+}
+
+.sidebar-brand {
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 6px 10px 22px;
+}
+
+.sidebar-nav-label {
+  font-size: 0.7rem;
+  color: #7c869c;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px 4px;
+}
+
+.sidebar-link {
+  display: block;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #b6bfd1;
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+
+.sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+}
+
+#summary-section,
+#budget-section,
+#nws-section,
+#breakdown-section,
+#list-section {
+  scroll-margin-top: 84px;
+}
+
+@media (max-width: 768px) {
+  .app-sidebar {
+    display: none;
+  }
+}
+
 /* ヘッダー */
 .app-header {
   background: var(--color-surface);

@@ -67,6 +67,17 @@
 
   <!-- アプリ本体 -->
   <div id="app-root" class="hidden">
+   <div class="app-shell">
+    <nav class="app-sidebar">
+      <div class="sidebar-brand">📒 家計簿</div>
+      <div class="sidebar-nav-label">セクション</div>
+      <a class="sidebar-link" href="#summary-section">概要</a>
+      <a class="sidebar-link" href="#budget-section">予算</a>
+      <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
+      <a class="sidebar-link" href="#breakdown-section">カテゴリ別支出</a>
+      <a class="sidebar-link" href="#list-section">記録一覧</a>
+    </nav>
+    <div class="app-content">
     <header class="app-header">
       <h1>📒 家計簿</h1>
       <div class="view-toggle">
@@ -93,7 +104,7 @@
       </section>
 
       <!-- 月間サマリー -->
-      <section class="summary-cards">
+      <section class="summary-cards" id="summary-section">
         <div class="card income-card">
           <div class="card-label">収入</div>
           <div class="card-value" id="total-income">¥0</div>
@@ -208,7 +219,7 @@
       </section>
 
       <!-- 予算 -->
-      <section class="card">
+      <section class="card" id="budget-section">
         <div class="list-header">
           <h2 id="budget-section-title">今月の予算</h2>
           <button type="button" class="btn btn-secondary btn-small" id="edit-budget-btn">予算を編集</button>
@@ -230,7 +241,7 @@
       </section>
 
       <!-- Need / Want / Save -->
-      <section class="card">
+      <section class="card" id="nws-section">
         <h2>Need / Want / Save (50:30:20)</h2>
         <div id="nws-content">
           <div class="nws-wrapper">
@@ -241,7 +252,7 @@
       </section>
 
       <!-- カテゴリ別内訳 -->
-      <section class="card">
+      <section class="card" id="breakdown-section">
         <h2>カテゴリ別支出</h2>
         <div id="category-breakdown" class="category-breakdown">
           <p class="empty-message">今月の支出はまだありません</p>
@@ -249,7 +260,7 @@
       </section>
 
       <!-- 記録一覧 -->
-      <section class="card">
+      <section class="card" id="list-section">
         <div class="list-header">
           <h2 id="list-section-title">今月の記録</h2>
           <div class="csv-actions">
@@ -292,6 +303,8 @@
     <footer class="app-footer">
       <p>データは Firebase (Firestore) に保存され、同じアカウントでログインしたスマホ・PC間で同期されます。</p>
     </footer>
+    </div>
+   </div>
   </div>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
