@@ -97,6 +97,7 @@ html {
 
 #summary-section,
 #budget-section,
+#plan-actual-section,
 #nws-section,
 #list-section {
   scroll-margin-top: 84px;
@@ -237,6 +238,21 @@ html {
 }
 
 .cumulative-value.negative {
+  color: var(--color-expense);
+}
+
+.cumulative-change {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cumulative-change.positive {
+  color: var(--color-income);
+}
+
+.cumulative-change.negative {
   color: var(--color-expense);
 }
 
@@ -615,6 +631,56 @@ html {
 .budget-amount-text.over {
   color: var(--color-expense);
   font-weight: 700;
+}
+
+/* 予定と実績 */
+.plan-actual-group {
+  margin-bottom: 20px;
+}
+
+.plan-actual-group:last-child {
+  margin-bottom: 0;
+}
+
+.plan-actual-heading {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+.plan-actual-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-actual-row {
+  display: grid;
+  grid-template-columns: 3.2em 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.plan-actual-label {
+  color: var(--color-text-muted);
+}
+
+.plan-actual-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-bar.plan {
+  background: #94a3b8;
+}
+
+.budget-bar.actual-income {
+  background: var(--color-income);
+}
+
+.budget-bar.actual-expense {
+  background: var(--color-expense);
 }
 
 .budget-form {

@@ -73,6 +73,7 @@
       <div class="sidebar-nav-label">セクション</div>
       <a class="sidebar-link" href="#summary-section">概要</a>
       <a class="sidebar-link" href="#budget-section">予算</a>
+      <a class="sidebar-link" href="#plan-actual-section">予定と実績</a>
       <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
       <a class="sidebar-link" href="#list-section">記録一覧</a>
     </nav>
@@ -100,6 +101,7 @@
       <section class="card cumulative-card">
         <div class="cumulative-label">累計貯金額 (全期間の収支合計)</div>
         <div class="cumulative-value" id="cumulative-savings">¥0</div>
+        <div class="cumulative-change" id="cumulative-change"></div>
       </section>
 
       <!-- 月間サマリー -->
@@ -237,6 +239,32 @@
             <button type="button" class="btn btn-secondary" id="cancel-budget-btn">キャンセル</button>
           </div>
         </form>
+      </section>
+
+      <!-- 予定と実績 -->
+      <section class="card" id="plan-actual-section">
+        <h2 id="plan-actual-section-title">今月の予定と実績</h2>
+
+        <div class="plan-actual-group">
+          <h3 class="plan-actual-heading">支出</h3>
+          <div id="expense-plan-actual" class="plan-actual-chart"></div>
+        </div>
+
+        <div class="plan-actual-group">
+          <div class="list-header">
+            <h3 class="plan-actual-heading">収入</h3>
+            <button type="button" class="btn btn-secondary btn-small" id="edit-income-budget-btn">収入目標を編集</button>
+          </div>
+          <div id="income-plan-actual" class="plan-actual-chart"></div>
+
+          <form id="income-budget-form" class="budget-form hidden">
+            <div id="income-budget-inputs" class="budget-inputs"></div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">保存</button>
+              <button type="button" class="btn btn-secondary" id="cancel-income-budget-btn">キャンセル</button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <!-- Need / Want / Save -->

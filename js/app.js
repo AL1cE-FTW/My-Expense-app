@@ -73,6 +73,9 @@ let entries = [];
 // カテゴリ名 -> 月間予算額 (支出カテゴリのみ)
 let budgets = {};
 
+// カテゴリ名 -> 月間収入目標額 (収入カテゴリのみ)
+let incomeBudgets = {};
+
 // 表示中の月 (毎月1日の Date)
 let currentMonth = startOfMonth(new Date());
 
@@ -84,6 +87,7 @@ let auth = null;
 let currentUid = null;
 let unsubscribeEntries = null;
 let unsubscribeBudget = null;
+let unsubscribeIncomeBudget = null;
 let authMode = "login";
 
 // 記録一覧の並び替え
@@ -173,6 +177,7 @@ const el = {
   budgetSectionTitle: document.getElementById("budget-section-title"),
   listSectionTitle: document.getElementById("list-section-title"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
+  cumulativeChange: document.getElementById("cumulative-change"),
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
@@ -207,6 +212,13 @@ const el = {
   budgetForm: document.getElementById("budget-form"),
   budgetInputs: document.getElementById("budget-inputs"),
   cancelBudgetBtn: document.getElementById("cancel-budget-btn"),
+  planActualSectionTitle: document.getElementById("plan-actual-section-title"),
+  expensePlanActual: document.getElementById("expense-plan-actual"),
+  incomePlanActual: document.getElementById("income-plan-actual"),
+  editIncomeBudgetBtn: document.getElementById("edit-income-budget-btn"),
+  incomeBudgetForm: document.getElementById("income-budget-form"),
+  incomeBudgetInputs: document.getElementById("income-budget-inputs"),
+  cancelIncomeBudgetBtn: document.getElementById("cancel-income-budget-btn"),
   entryList: document.getElementById("entry-list"),
   filterType: document.getElementById("filter-type"),
   filterCategory: document.getElementById("filter-category"),
@@ -241,8 +253,13 @@ function showAuthScreen() {
     unsubscribeBudget();
     unsubscribeBudget = null;
   }
+  if (unsubscribeIncomeBudget) {
+    unsubscribeIncomeBudget();
+    unsubscribeIncomeBudget = null;
+  }
   entries = [];
   budgets = {};
+  incomeBudgets = {};
   currentUid = null;
   el.authForm.reset();
   el.authError.classList.add("hidden");
@@ -255,8 +272,10 @@ function showApp(user) {
   showOnly("app");
   subscribeEntries(user.uid);
   subscribeBudget(user.uid);
+  subscribeIncomeBudget(user.uid);
   resetForm();
   closeBudgetForm();
+  closeIncomeBudgetForm();
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +349,29 @@ async function saveBudgetsToDb(newBudgets) {
   await firestoreApi.setDoc(budgetDocRef(currentUid), newBudgets);
 }
 
+function incomeBudgetDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/incomeBudget`);
+}
+
+function subscribeIncomeBudget(uid) {
+  if (unsubscribeIncomeBudget) unsubscribeIncomeBudget();
+  unsubscribeIncomeBudget = firestoreApi.onSnapshot(
+    incomeBudgetDocRef(uid),
+    (snap) => {
+      incomeBudgets = snap.exists() ? snap.data() : {};
+      render();
+    },
+    (error) => {
+      console.error(error);
+      alert("収入目標の取得に失敗しました: " + error.message);
+    }
+  );
+}
+
+async function saveIncomeBudgetsToDb(newBudgets) {
+  await firestoreApi.setDoc(incomeBudgetDocRef(currentUid), newBudgets);
+}
+
 // ---------------------------------------------------------------------------
 // 描画
 // ---------------------------------------------------------------------------
@@ -340,6 +382,7 @@ function render() {
 
   const periodLabel = viewMode === "year" ? "今年" : "今月";
   el.budgetSectionTitle.textContent = `${periodLabel}の予算`;
+  el.planActualSectionTitle.textContent = `${periodLabel}の予定と実績`;
   el.listSectionTitle.textContent = `${periodLabel}の記録`;
 
   renderCumulativeSavings();
@@ -348,7 +391,8 @@ function render() {
   const entriesInPeriod = periodEntries();
   renderSummary(entriesInPeriod);
   renderMonthlyBarChart();
-  renderBudget(entriesInPeriod, targetMultiplier);
+  const budgetTotals = renderBudget(entriesInPeriod, targetMultiplier);
+  renderPlanActual(entriesInPeriod, targetMultiplier, budgetTotals);
   renderNeedWantSave(entriesInPeriod);
   renderList(entriesInPeriod);
 }
@@ -436,6 +480,24 @@ function renderCumulativeSavings() {
   el.cumulativeSavings.textContent = (total < 0 ? "-" : "") + formatYen(Math.abs(total));
   el.cumulativeSavings.classList.toggle("positive", total > 0);
   el.cumulativeSavings.classList.toggle("negative", total < 0);
+
+  // 今月(実際のカレンダー上の今月)の貯蓄額と、累計貯金額に対する増減率
+  let thisMonthNet = 0;
+  for (const e of entriesForMonth(startOfMonth(new Date()))) {
+    if (e.type === "income") thisMonthNet += e.amount;
+    else if (e.type === "expense") thisMonthNet -= e.amount;
+  }
+  const previousTotal = total - thisMonthNet;
+
+  const sign = thisMonthNet > 0 ? "+" : thisMonthNet < 0 ? "-" : "";
+  let changeText = `今月の貯蓄額: ${sign}${formatYen(Math.abs(thisMonthNet))}`;
+  if (previousTotal !== 0) {
+    const rate = (thisMonthNet / Math.abs(previousTotal)) * 100;
+    changeText += ` (${rate > 0 ? "+" : ""}${rate.toFixed(1)}%)`;
+  }
+  el.cumulativeChange.textContent = changeText;
+  el.cumulativeChange.classList.toggle("positive", thisMonthNet > 0);
+  el.cumulativeChange.classList.toggle("negative", thisMonthNet < 0);
 }
 
 function renderSummary(monthEntries) {
@@ -521,7 +583,7 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     p.className = "empty-message";
     p.textContent = "予算が設定されていません";
     el.budgetBreakdown.appendChild(p);
-    return;
+    return { totalActual, totalBudget };
   }
 
   for (const { category, budget, actual } of rows) {
@@ -553,6 +615,83 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     row.append(name, percentText, amountText);
     el.budgetBreakdown.appendChild(row);
   }
+
+  return { totalActual, totalBudget };
+}
+
+// ---------------------------------------------------------------------------
+// 予定と実績 (支出は予算、収入は収入目標との比較)
+// ---------------------------------------------------------------------------
+
+function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
+  renderPlanActualChart(
+    el.expensePlanActual,
+    budgetTotals.totalBudget,
+    budgetTotals.totalActual,
+    "支出の予定が設定されていません(上の「予算を編集」から設定できます)",
+    "expense"
+  );
+
+  const incomeBudgetedCategories = Object.keys(incomeBudgets).filter((c) => incomeBudgets[c] > 0);
+  const totalIncomeBudget =
+    incomeBudgetedCategories.reduce((sum, c) => sum + incomeBudgets[c], 0) * targetMultiplier;
+  let totalIncomeActual = 0;
+  for (const e of monthEntries) {
+    if (e.type === "income") totalIncomeActual += e.amount;
+  }
+
+  renderPlanActualChart(
+    el.incomePlanActual,
+    totalIncomeBudget,
+    totalIncomeActual,
+    "収入の目標が設定されていません(「収入目標を編集」から設定できます)",
+    "income"
+  );
+}
+
+function renderPlanActualChart(container, planned, actual, emptyMessage, kind) {
+  container.innerHTML = "";
+
+  if (planned <= 0) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent = emptyMessage;
+    container.appendChild(p);
+    return;
+  }
+
+  const max = Math.max(planned, actual, 1);
+  const planRow = buildPlanActualRow("予定", planned, max, "plan");
+  const actualRow = buildPlanActualRow(
+    "実績",
+    actual,
+    max,
+    kind === "income" ? "actual-income" : "actual-expense"
+  );
+  container.append(planRow, actualRow);
+}
+
+function buildPlanActualRow(label, amount, max, barClass) {
+  const row = document.createElement("div");
+  row.className = "plan-actual-row";
+
+  const labelEl = document.createElement("span");
+  labelEl.className = "plan-actual-label";
+  labelEl.textContent = label;
+
+  const track = document.createElement("div");
+  track.className = "budget-bar-track";
+  const bar = document.createElement("div");
+  bar.className = `budget-bar ${barClass}`;
+  bar.style.width = `${Math.min(amount / max, 1) * 100}%`;
+  track.appendChild(bar);
+
+  const valueEl = document.createElement("span");
+  valueEl.className = "plan-actual-value";
+  valueEl.textContent = formatYen(amount);
+
+  row.append(labelEl, track, valueEl);
+  return row;
 }
 
 const NWS_SVG_NS = "http://www.w3.org/2000/svg";
@@ -987,6 +1126,60 @@ async function handleBudgetSubmit(event) {
     return;
   }
   closeBudgetForm();
+}
+
+function renderIncomeBudgetInputs() {
+  el.incomeBudgetInputs.innerHTML = "";
+  for (const category of CATEGORIES.income) {
+    const group = document.createElement("div");
+    group.className = "form-group";
+
+    const label = document.createElement("label");
+    label.htmlFor = `income-budget-input-${category}`;
+    label.textContent = category;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.id = `income-budget-input-${category}`;
+    input.dataset.category = category;
+    input.min = "0";
+    input.step = "1";
+    input.placeholder = "0";
+    if (incomeBudgets[category] > 0) input.value = incomeBudgets[category];
+
+    group.append(label, input);
+    el.incomeBudgetInputs.appendChild(group);
+  }
+}
+
+function openIncomeBudgetForm() {
+  renderIncomeBudgetInputs();
+  el.incomeBudgetForm.classList.remove("hidden");
+  el.incomeBudgetForm.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function closeIncomeBudgetForm() {
+  el.incomeBudgetForm.classList.add("hidden");
+}
+
+async function handleIncomeBudgetSubmit(event) {
+  event.preventDefault();
+
+  const newIncomeBudgets = {};
+  for (const input of el.incomeBudgetInputs.querySelectorAll("input[data-category]")) {
+    const amount = Math.floor(Number(input.value));
+    if (Number.isFinite(amount) && amount > 0) {
+      newIncomeBudgets[input.dataset.category] = amount;
+    }
+  }
+
+  try {
+    await saveIncomeBudgetsToDb(newIncomeBudgets);
+  } catch (err) {
+    alert("収入目標の保存に失敗しました: " + err.message);
+    return;
+  }
+  closeIncomeBudgetForm();
 }
 
 // ---------------------------------------------------------------------------
@@ -1727,6 +1920,13 @@ function setupAppEventListeners() {
   });
   el.cancelBudgetBtn.addEventListener("click", closeBudgetForm);
   el.budgetForm.addEventListener("submit", handleBudgetSubmit);
+
+  el.editIncomeBudgetBtn.addEventListener("click", () => {
+    if (el.incomeBudgetForm.classList.contains("hidden")) openIncomeBudgetForm();
+    else closeIncomeBudgetForm();
+  });
+  el.cancelIncomeBudgetBtn.addEventListener("click", closeIncomeBudgetForm);
+  el.incomeBudgetForm.addEventListener("submit", handleIncomeBudgetSubmit);
 
   el.importCsvInput.addEventListener("change", () => {
     const file = el.importCsvInput.files[0];
