@@ -627,7 +627,6 @@ html {
 .budget-amount-text {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .budget-amount-text.over {
