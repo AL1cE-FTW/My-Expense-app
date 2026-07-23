@@ -532,14 +532,15 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
 
     const name = createCategoryLabel(category);
 
-    const track = document.createElement("div");
-    track.className = "budget-bar-track";
+    const percentText = document.createElement("span");
+    percentText.className = "budget-percent-text";
     if (budget > 0) {
       const ratio = actual / budget;
-      const bar = document.createElement("div");
-      bar.className = budgetBarClass(ratio);
-      bar.style.width = `${Math.min(ratio, 1) * 100}%`;
-      track.appendChild(bar);
+      percentText.textContent = `${Math.round(ratio * 100)}%`;
+      percentText.classList.toggle("over", ratio >= 1);
+      percentText.classList.toggle("warning", ratio >= 0.8 && ratio < 1);
+    } else {
+      percentText.textContent = "―";
     }
 
     const amountText = document.createElement("span");
@@ -551,7 +552,7 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
       amountText.textContent = `${formatYen(actual)} (予算未設定)`;
     }
 
-    row.append(name, track, amountText);
+    row.append(name, percentText, amountText);
     el.budgetBreakdown.appendChild(row);
   }
 }
