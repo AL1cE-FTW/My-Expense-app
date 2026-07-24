@@ -34,6 +34,9 @@ const CATEGORIES = {
 
 const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
 
+// 収入目標の「賞与」は月額ではなく、ボーナス月・給与の何か月分かで計算する
+const BONUS_CATEGORY = "賞与";
+
 // 給与明細の内訳入力を出すカテゴリ
 const PAYSLIP_CATEGORY = "給与";
 const PAYSLIP_FIELDS = ["gross", "commute", "incomeTax", "residentTax", "socialInsurance"];
@@ -218,6 +221,8 @@ const el = {
   editIncomeBudgetBtn: document.getElementById("edit-income-budget-btn"),
   incomeBudgetForm: document.getElementById("income-budget-form"),
   incomeBudgetInputs: document.getElementById("income-budget-inputs"),
+  bonusMonthGrid: document.getElementById("bonus-month-grid"),
+  bonusMultiplierInput: document.getElementById("bonus-multiplier-input"),
   cancelIncomeBudgetBtn: document.getElementById("cancel-income-budget-btn"),
   entryList: document.getElementById("entry-list"),
   filterType: document.getElementById("filter-type"),
@@ -632,9 +637,7 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
     "expense"
   );
 
-  const incomeBudgetedCategories = Object.keys(incomeBudgets).filter((c) => incomeBudgets[c] > 0);
-  const totalIncomeBudget =
-    incomeBudgetedCategories.reduce((sum, c) => sum + incomeBudgets[c], 0) * targetMultiplier;
+  const totalIncomeBudget = computeIncomeBudgetTotal(targetMultiplier);
   let totalIncomeActual = 0;
   for (const e of monthEntries) {
     if (e.type === "income") totalIncomeActual += e.amount;
@@ -647,6 +650,42 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
     "収入の目標が設定されていません(「収入目標を編集」から設定できます)",
     "income"
   );
+
+  renderBonusNote();
+}
+
+// 収入目標の合計を計算する。「賞与」は月額ではなく、ボーナス月に
+// 給与の指定した月数分を上乗せする形で計算する
+function computeIncomeBudgetTotal(targetMultiplier) {
+  const baseCategories = CATEGORIES.income.filter((c) => c !== BONUS_CATEGORY);
+  const baseMonthly = baseCategories.reduce((sum, c) => sum + (incomeBudgets[c] || 0), 0);
+
+  const bonusMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
+  const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
+  const bonusPerOccurrence = (incomeBudgets["給与"] || 0) * bonusMultiplier;
+
+  if (targetMultiplier === 12) {
+    // 年間表示: 月額×12 + ボーナス月数分のボーナス
+    return baseMonthly * 12 + bonusPerOccurrence * bonusMonths.length;
+  }
+  // 月別表示: 月額 + (表示中の月がボーナス月ならその分を上乗せ)
+  const isBonusMonth = bonusMonths.includes(currentMonth.getMonth() + 1);
+  return baseMonthly + (isBonusMonth ? bonusPerOccurrence : 0);
+}
+
+function renderBonusNote() {
+  const existing = el.incomePlanActual.parentElement.querySelector(".plan-actual-note");
+  if (existing) existing.remove();
+
+  const bonusMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
+  const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
+  if (bonusMonths.length === 0 || bonusMultiplier <= 0) return;
+
+  const note = document.createElement("p");
+  note.className = "plan-actual-note";
+  const monthsLabel = [...bonusMonths].sort((a, b) => a - b).map((m) => `${m}月`).join("・");
+  note.textContent = `賞与: ${monthsLabel}に給与${bonusMultiplier}か月分を計上`;
+  el.incomePlanActual.insertAdjacentElement("afterend", note);
 }
 
 function renderPlanActualChart(container, planned, actual, emptyMessage, kind) {
@@ -1130,7 +1169,8 @@ async function handleBudgetSubmit(event) {
 
 function renderIncomeBudgetInputs() {
   el.incomeBudgetInputs.innerHTML = "";
-  for (const category of CATEGORIES.income) {
+  // 賞与は月額ではなく、下のボーナス設定 (月・給与の何か月分か) で計算するため除外
+  for (const category of CATEGORIES.income.filter((c) => c !== BONUS_CATEGORY)) {
     const group = document.createElement("div");
     group.className = "form-group";
 
@@ -1152,8 +1192,29 @@ function renderIncomeBudgetInputs() {
   }
 }
 
+function renderBonusSettingsInputs() {
+  const savedMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
+
+  el.bonusMonthGrid.innerHTML = "";
+  for (let month = 1; month <= 12; month++) {
+    const label = document.createElement("label");
+    label.className = "bonus-month-checkbox";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.month = month;
+    checkbox.checked = savedMonths.includes(month);
+
+    label.append(checkbox, document.createTextNode(`${month}月`));
+    el.bonusMonthGrid.appendChild(label);
+  }
+
+  el.bonusMultiplierInput.value = incomeBudgets.bonusMultiplier > 0 ? incomeBudgets.bonusMultiplier : "";
+}
+
 function openIncomeBudgetForm() {
   renderIncomeBudgetInputs();
+  renderBonusSettingsInputs();
   el.incomeBudgetForm.classList.remove("hidden");
   el.incomeBudgetForm.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1171,6 +1232,15 @@ async function handleIncomeBudgetSubmit(event) {
     if (Number.isFinite(amount) && amount > 0) {
       newIncomeBudgets[input.dataset.category] = amount;
     }
+  }
+
+  const bonusMonths = [...el.bonusMonthGrid.querySelectorAll("input[type=checkbox]:checked")].map(
+    (cb) => Number(cb.dataset.month)
+  );
+  if (bonusMonths.length > 0) newIncomeBudgets.bonusMonths = bonusMonths;
+  const bonusMultiplier = Number(el.bonusMultiplierInput.value);
+  if (Number.isFinite(bonusMultiplier) && bonusMultiplier > 0) {
+    newIncomeBudgets.bonusMultiplier = bonusMultiplier;
   }
 
   try {

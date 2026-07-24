@@ -259,6 +259,16 @@
 
           <form id="income-budget-form" class="budget-form hidden">
             <div id="income-budget-inputs" class="budget-inputs"></div>
+
+            <div class="bonus-settings">
+              <p class="bonus-settings-label">賞与(ボーナス)の設定</p>
+              <div id="bonus-month-grid" class="bonus-month-grid"></div>
+              <div class="form-group bonus-multiplier-group">
+                <label for="bonus-multiplier-input">給与の何か月分か</label>
+                <input type="number" id="bonus-multiplier-input" min="0" step="0.5" placeholder="2">
+              </div>
+            </div>
+
             <div class="form-actions">
               <button type="submit" class="btn btn-primary">保存</button>
               <button type="button" class="btn btn-secondary" id="cancel-income-budget-btn">キャンセル</button>
