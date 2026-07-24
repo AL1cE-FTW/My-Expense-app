@@ -52,6 +52,11 @@ html {
   flex-direction: column;
   gap: 2px;
   padding: 20px 14px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  align-self: flex-start;
+  overflow-y: auto;
 }
 
 .sidebar-brand {
