@@ -37,10 +37,10 @@ const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
 // 収入目標の「賞与」は月額ではなく、ボーナス月・給与の何か月分かで計算する
 const BONUS_CATEGORY = "賞与";
 
-// 給与明細の内訳入力を出すカテゴリ
+// 給与明細の内訳入力を出すカテゴリ (給与=通常の給与明細、賞与=賞与明細で項目が異なる)
 const PAYSLIP_CATEGORY = "給与";
-const PAYSLIP_EARNING_FIELDS = ["baseSalary", "commute", "overtimePay"];
-const PAYSLIP_DEDUCTION_FIELDS = [
+const PAYSLIP_SALARY_EARNING_FIELDS = ["baseSalary", "commute", "overtimePay"];
+const PAYSLIP_SALARY_DEDUCTION_FIELDS = [
   "healthInsurance",
   "nursingInsurance",
   "pensionInsurance",
@@ -49,7 +49,15 @@ const PAYSLIP_DEDUCTION_FIELDS = [
   "residentTax",
   "otherDeductions",
 ];
-const PAYSLIP_FIELDS = [...PAYSLIP_EARNING_FIELDS, ...PAYSLIP_DEDUCTION_FIELDS];
+const PAYSLIP_BONUS_EARNING_FIELDS = ["bonusAmount"];
+const PAYSLIP_BONUS_DEDUCTION_FIELDS = [
+  "healthInsurance",
+  "nursingInsurance",
+  "childSupportLevy",
+  "pensionInsurance",
+  "employmentInsurance",
+  "incomeTax",
+];
 
 // Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
@@ -205,6 +213,7 @@ const el = {
   payslipSection: document.getElementById("payslip-section"),
   payslipToggleBtn: document.getElementById("payslip-toggle-btn"),
   payslipBreakdown: document.getElementById("payslip-breakdown"),
+  payslipSalaryFields: document.getElementById("payslip-salary-fields"),
   payslipBaseSalary: document.getElementById("payslip-base-salary"),
   payslipCommute: document.getElementById("payslip-commute"),
   payslipOvertimePay: document.getElementById("payslip-overtime-pay"),
@@ -215,6 +224,14 @@ const el = {
   payslipIncomeTax: document.getElementById("payslip-income-tax"),
   payslipResidentTax: document.getElementById("payslip-resident-tax"),
   payslipOtherDeductions: document.getElementById("payslip-other-deductions"),
+  payslipBonusFields: document.getElementById("payslip-bonus-fields"),
+  payslipBonusAmount: document.getElementById("payslip-bonus-amount"),
+  payslipBonusHealthInsurance: document.getElementById("payslip-bonus-health-insurance"),
+  payslipBonusNursingInsurance: document.getElementById("payslip-bonus-nursing-insurance"),
+  payslipBonusChildSupport: document.getElementById("payslip-bonus-child-support"),
+  payslipBonusPensionInsurance: document.getElementById("payslip-bonus-pension-insurance"),
+  payslipBonusEmploymentInsurance: document.getElementById("payslip-bonus-employment-insurance"),
+  payslipBonusIncomeTax: document.getElementById("payslip-bonus-income-tax"),
   payslipGrossValue: document.getElementById("payslip-gross-value"),
   payslipDeductionValue: document.getElementById("payslip-deduction-value"),
   payslipNetValue: document.getElementById("payslip-net-value"),
@@ -1057,9 +1074,27 @@ function showPayslipDetailModal(entry) {
   const p = entry.payslip;
   el.payslipDetailContent.innerHTML = "";
 
-  if (p.baseSalary !== undefined) {
-    const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
-    const deductions = PAYSLIP_DEDUCTION_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+  if (p.kind === "bonus") {
+    const gross = PAYSLIP_BONUS_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+    const deductions = PAYSLIP_BONUS_DEDUCTION_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+
+    el.payslipDetailContent.append(
+      payslipModalGroupLabel("支給"),
+      payslipModalRow("賞与額", p.bonusAmount || 0),
+      payslipModalRow("支給合計", gross, { total: true }),
+      payslipModalGroupLabel("控除"),
+      payslipModalRow("健康保険", p.healthInsurance || 0),
+      payslipModalRow("介護保険", p.nursingInsurance || 0),
+      payslipModalRow("子ども支援金", p.childSupportLevy || 0),
+      payslipModalRow("厚生年金", p.pensionInsurance || 0),
+      payslipModalRow("雇用保険料", p.employmentInsurance || 0),
+      payslipModalRow("所得税", p.incomeTax || 0),
+      payslipModalRow("控除合計", deductions, { total: true }),
+      payslipModalRow("差引支給額(手取り)", entry.amount, { total: true })
+    );
+  } else if (p.baseSalary !== undefined) {
+    const gross = PAYSLIP_SALARY_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+    const deductions = PAYSLIP_SALARY_DEDUCTION_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
 
     el.payslipDetailContent.append(
       payslipModalGroupLabel("支給"),
@@ -1112,29 +1147,58 @@ function renderCategoryOptions(type, selected) {
 // 給与明細の内訳 (支給の内訳・控除の内訳 -> 手取りを自動計算)
 // ---------------------------------------------------------------------------
 
-function payslipInputEl(field) {
-  return {
-    baseSalary: el.payslipBaseSalary,
-    commute: el.payslipCommute,
-    overtimePay: el.payslipOvertimePay,
-    healthInsurance: el.payslipHealthInsurance,
-    nursingInsurance: el.payslipNursingInsurance,
-    pensionInsurance: el.payslipPensionInsurance,
-    employmentInsurance: el.payslipEmploymentInsurance,
-    incomeTax: el.payslipIncomeTax,
-    residentTax: el.payslipResidentTax,
-    otherDeductions: el.payslipOtherDeductions,
-  }[field];
+const PAYSLIP_SALARY_INPUT_MAP = {
+  baseSalary: () => el.payslipBaseSalary,
+  commute: () => el.payslipCommute,
+  overtimePay: () => el.payslipOvertimePay,
+  healthInsurance: () => el.payslipHealthInsurance,
+  nursingInsurance: () => el.payslipNursingInsurance,
+  pensionInsurance: () => el.payslipPensionInsurance,
+  employmentInsurance: () => el.payslipEmploymentInsurance,
+  incomeTax: () => el.payslipIncomeTax,
+  residentTax: () => el.payslipResidentTax,
+  otherDeductions: () => el.payslipOtherDeductions,
+};
+
+const PAYSLIP_BONUS_INPUT_MAP = {
+  bonusAmount: () => el.payslipBonusAmount,
+  healthInsurance: () => el.payslipBonusHealthInsurance,
+  nursingInsurance: () => el.payslipBonusNursingInsurance,
+  childSupportLevy: () => el.payslipBonusChildSupport,
+  pensionInsurance: () => el.payslipBonusPensionInsurance,
+  employmentInsurance: () => el.payslipBonusEmploymentInsurance,
+  incomeTax: () => el.payslipBonusIncomeTax,
+};
+
+// 種別が「収入」・カテゴリが「賞与」のときは賞与明細用の内訳、それ以外(給与)は通常の給与明細用の内訳
+function payslipMode() {
+  return el.entryCategory.value === BONUS_CATEGORY ? "bonus" : "salary";
 }
 
-function payslipFieldValue(field) {
-  return Math.floor(Number(payslipInputEl(field).value)) || 0;
+function payslipEarningFields(mode) {
+  return mode === "bonus" ? PAYSLIP_BONUS_EARNING_FIELDS : PAYSLIP_SALARY_EARNING_FIELDS;
+}
+
+function payslipDeductionFields(mode) {
+  return mode === "bonus" ? PAYSLIP_BONUS_DEDUCTION_FIELDS : PAYSLIP_SALARY_DEDUCTION_FIELDS;
+}
+
+function payslipInputEl(field, mode) {
+  return (mode === "bonus" ? PAYSLIP_BONUS_INPUT_MAP : PAYSLIP_SALARY_INPUT_MAP)[field]();
+}
+
+function payslipFieldValue(field, mode) {
+  return Math.floor(Number(payslipInputEl(field, mode).value)) || 0;
 }
 
 function computePayslipTotals() {
-  const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + payslipFieldValue(field), 0);
-  const deductions = PAYSLIP_DEDUCTION_FIELDS.reduce(
-    (sum, field) => sum + payslipFieldValue(field),
+  const mode = payslipMode();
+  const gross = payslipEarningFields(mode).reduce(
+    (sum, field) => sum + payslipFieldValue(field, mode),
+    0
+  );
+  const deductions = payslipDeductionFields(mode).reduce(
+    (sum, field) => sum + payslipFieldValue(field, mode),
     0
   );
   return { gross, deductions, net: Math.max(0, gross - deductions) };
@@ -1155,31 +1219,49 @@ function openPayslipBreakdown() {
   updatePayslipPreview();
 }
 
+function allPayslipInputEls() {
+  return [
+    ...Object.values(PAYSLIP_SALARY_INPUT_MAP).map((getEl) => getEl()),
+    ...Object.values(PAYSLIP_BONUS_INPUT_MAP).map((getEl) => getEl()),
+  ];
+}
+
 function closePayslipBreakdown({ clearValues = true } = {}) {
   el.payslipBreakdown.classList.add("hidden");
   el.payslipToggleBtn.classList.remove("hidden");
   el.entryAmount.readOnly = false;
   if (clearValues) {
-    for (const field of PAYSLIP_FIELDS) payslipInputEl(field).value = "";
+    for (const input of allPayslipInputEls()) input.value = "";
   }
 }
 
-// 種別が「収入」・カテゴリが「給与」のときだけ内訳入力欄を出す
+// 種別が「収入」・カテゴリが「給与」または「賞与」のときだけ内訳入力欄を出す
 function updatePayslipVisibility() {
-  const isSalary = selectedType() === "income" && el.entryCategory.value === PAYSLIP_CATEGORY;
-  el.payslipSection.classList.toggle("hidden", !isSalary);
-  if (!isSalary) closePayslipBreakdown();
+  const isPayslipCategory =
+    selectedType() === "income" &&
+    (el.entryCategory.value === PAYSLIP_CATEGORY || el.entryCategory.value === BONUS_CATEGORY);
+  el.payslipSection.classList.toggle("hidden", !isPayslipCategory);
+  closePayslipBreakdown();
+  if (!isPayslipCategory) return;
+
+  const mode = payslipMode();
+  el.payslipSalaryFields.classList.toggle("hidden", mode !== "salary");
+  el.payslipBonusFields.classList.toggle("hidden", mode !== "bonus");
+  el.payslipToggleBtn.textContent =
+    mode === "bonus"
+      ? "賞与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)"
+      : "給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)";
 }
 
-// 内訳が入力されていれば {gross, commute, incomeTax, residentTax, socialInsurance} を、
-// 入力されていなければ null を返す
+// 内訳が入力されていれば payslip オブジェクトを、入力されていなければ null を返す
 function buildPayslipData() {
   if (el.payslipBreakdown.classList.contains("hidden")) return null;
-  const payslip = {};
-  for (const field of PAYSLIP_FIELDS) {
-    payslip[field] = payslipFieldValue(field);
+  const mode = payslipMode();
+  const payslip = { kind: mode };
+  for (const field of [...payslipEarningFields(mode), ...payslipDeductionFields(mode)]) {
+    payslip[field] = payslipFieldValue(field, mode);
   }
-  const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + payslip[field], 0);
+  const gross = payslipEarningFields(mode).reduce((sum, field) => sum + payslip[field], 0);
   return gross > 0 ? payslip : null;
 }
 
@@ -1359,8 +1441,10 @@ function startEdit(id) {
 
   updatePayslipVisibility();
   if (entry.payslip) {
-    for (const field of PAYSLIP_FIELDS) {
-      payslipInputEl(field).value = entry.payslip[field] || "";
+    // 旧形式(kindなし)は給与用の内訳として復元する
+    const mode = entry.payslip.kind === "bonus" ? "bonus" : "salary";
+    for (const field of [...payslipEarningFields(mode), ...payslipDeductionFields(mode)]) {
+      payslipInputEl(field, mode).value = entry.payslip[field] || "";
     }
     openPayslipBreakdown();
     el.entryAmount.value = entry.amount;
@@ -2189,8 +2273,8 @@ function setupAppEventListeners() {
   el.entryCategory.addEventListener("change", updatePayslipVisibility);
   el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
   el.payslipClearBtn.addEventListener("click", () => closePayslipBreakdown());
-  for (const field of PAYSLIP_FIELDS) {
-    payslipInputEl(field).addEventListener("input", updatePayslipPreview);
+  for (const input of allPayslipInputEls()) {
+    input.addEventListener("input", updatePayslipPreview);
   }
 
   el.form.addEventListener("submit", handleSubmit);
