@@ -1692,14 +1692,14 @@ function parseCardUsageFormat(rows) {
 function dedupeAgainstExisting(imported) {
   const existingCounts = new Map();
   for (const e of entries) {
-    const key = [e.date, e.type, e.category, e.amount, e.memo || ""].join(" ");
+    const key = [e.date, e.type, e.category, e.amount, e.memo || ""].join(" ");
     existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
   }
 
   const deduped = [];
   let skippedCount = 0;
   for (const item of imported) {
-    const key = [item.date, item.type, item.category, item.amount, item.memo || ""].join(" ");
+    const key = [item.date, item.type, item.category, item.amount, item.memo || ""].join(" ");
     const remaining = existingCounts.get(key) || 0;
     if (remaining > 0) {
       existingCounts.set(key, remaining - 1);
