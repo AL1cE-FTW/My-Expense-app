@@ -400,6 +400,13 @@ html {
   background: var(--color-bg);
 }
 
+.payslip-group-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
 .payslip-net-preview {
   font-size: 0.85rem;
   color: var(--color-text-muted);

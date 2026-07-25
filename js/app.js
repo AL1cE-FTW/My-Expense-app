@@ -39,7 +39,17 @@ const BONUS_CATEGORY = "賞与";
 
 // 給与明細の内訳入力を出すカテゴリ
 const PAYSLIP_CATEGORY = "給与";
-const PAYSLIP_FIELDS = ["gross", "commute", "incomeTax", "residentTax", "socialInsurance"];
+const PAYSLIP_EARNING_FIELDS = ["baseSalary", "commute", "overtimePay"];
+const PAYSLIP_DEDUCTION_FIELDS = [
+  "healthInsurance",
+  "nursingInsurance",
+  "pensionInsurance",
+  "employmentInsurance",
+  "incomeTax",
+  "residentTax",
+  "otherDeductions",
+];
+const PAYSLIP_FIELDS = [...PAYSLIP_EARNING_FIELDS, ...PAYSLIP_DEDUCTION_FIELDS];
 
 // Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
@@ -195,11 +205,18 @@ const el = {
   payslipSection: document.getElementById("payslip-section"),
   payslipToggleBtn: document.getElementById("payslip-toggle-btn"),
   payslipBreakdown: document.getElementById("payslip-breakdown"),
-  payslipGross: document.getElementById("payslip-gross"),
+  payslipBaseSalary: document.getElementById("payslip-base-salary"),
   payslipCommute: document.getElementById("payslip-commute"),
+  payslipOvertimePay: document.getElementById("payslip-overtime-pay"),
+  payslipHealthInsurance: document.getElementById("payslip-health-insurance"),
+  payslipNursingInsurance: document.getElementById("payslip-nursing-insurance"),
+  payslipPensionInsurance: document.getElementById("payslip-pension-insurance"),
+  payslipEmploymentInsurance: document.getElementById("payslip-employment-insurance"),
   payslipIncomeTax: document.getElementById("payslip-income-tax"),
   payslipResidentTax: document.getElementById("payslip-resident-tax"),
-  payslipSocialInsurance: document.getElementById("payslip-social-insurance"),
+  payslipOtherDeductions: document.getElementById("payslip-other-deductions"),
+  payslipGrossValue: document.getElementById("payslip-gross-value"),
+  payslipDeductionValue: document.getElementById("payslip-deduction-value"),
   payslipNetValue: document.getElementById("payslip-net-value"),
   payslipClearBtn: document.getElementById("payslip-clear-btn"),
   submitBtn: document.getElementById("submit-btn"),
@@ -1021,12 +1038,35 @@ function buildPayslipDetailRow(entry) {
 
   const td = document.createElement("td");
   td.colSpan = 6;
-  const parts = [`総支給額 ${formatYen(p.gross)}`];
-  if (p.commute) parts.push(`うち交通費 ${formatYen(p.commute)}`);
-  parts.push(`所得税 ${formatYen(p.incomeTax || 0)}`);
-  parts.push(`住民税 ${formatYen(p.residentTax || 0)}`);
-  parts.push(`社会保険料 ${formatYen(p.socialInsurance || 0)}`);
-  parts.push(`手取り ${formatYen(entry.amount)}`);
+
+  let parts;
+  if (p.baseSalary !== undefined) {
+    const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+    const deductions = PAYSLIP_DEDUCTION_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
+    parts = [
+      `本給 ${formatYen(p.baseSalary || 0)}`,
+      `通勤手当 ${formatYen(p.commute || 0)}`,
+      `時間外勤務手当 ${formatYen(p.overtimePay || 0)}`,
+      `支給合計 ${formatYen(gross)}`,
+      `健康保険 ${formatYen(p.healthInsurance || 0)}`,
+      `介護保険 ${formatYen(p.nursingInsurance || 0)}`,
+      `厚生年金 ${formatYen(p.pensionInsurance || 0)}`,
+      `雇用保険料 ${formatYen(p.employmentInsurance || 0)}`,
+      `所得税 ${formatYen(p.incomeTax || 0)}`,
+      `住民税 ${formatYen(p.residentTax || 0)}`,
+      `その他控除 ${formatYen(p.otherDeductions || 0)}`,
+      `控除合計 ${formatYen(deductions)}`,
+      `手取り ${formatYen(entry.amount)}`,
+    ];
+  } else {
+    // 旧形式(総支給額・社会保険料まとめ)で保存された記録との互換表示
+    parts = [`総支給額 ${formatYen(p.gross || 0)}`];
+    if (p.commute) parts.push(`うち交通費 ${formatYen(p.commute)}`);
+    parts.push(`所得税 ${formatYen(p.incomeTax || 0)}`);
+    parts.push(`住民税 ${formatYen(p.residentTax || 0)}`);
+    parts.push(`社会保険料 ${formatYen(p.socialInsurance || 0)}`);
+    parts.push(`手取り ${formatYen(entry.amount)}`);
+  }
   td.textContent = parts.join(" / ");
 
   row.appendChild(td);
@@ -1045,29 +1085,41 @@ function renderCategoryOptions(type, selected) {
 }
 
 // ---------------------------------------------------------------------------
-// 給与明細の内訳 (総支給額・税金・社会保険料・交通費 -> 手取りを自動計算)
+// 給与明細の内訳 (支給の内訳・控除の内訳 -> 手取りを自動計算)
 // ---------------------------------------------------------------------------
 
 function payslipInputEl(field) {
   return {
-    gross: el.payslipGross,
+    baseSalary: el.payslipBaseSalary,
     commute: el.payslipCommute,
+    overtimePay: el.payslipOvertimePay,
+    healthInsurance: el.payslipHealthInsurance,
+    nursingInsurance: el.payslipNursingInsurance,
+    pensionInsurance: el.payslipPensionInsurance,
+    employmentInsurance: el.payslipEmploymentInsurance,
     incomeTax: el.payslipIncomeTax,
     residentTax: el.payslipResidentTax,
-    socialInsurance: el.payslipSocialInsurance,
+    otherDeductions: el.payslipOtherDeductions,
   }[field];
 }
 
-function computePayslipNet() {
-  const gross = Math.floor(Number(el.payslipGross.value)) || 0;
-  const incomeTax = Math.floor(Number(el.payslipIncomeTax.value)) || 0;
-  const residentTax = Math.floor(Number(el.payslipResidentTax.value)) || 0;
-  const socialInsurance = Math.floor(Number(el.payslipSocialInsurance.value)) || 0;
-  return Math.max(0, gross - incomeTax - residentTax - socialInsurance);
+function payslipFieldValue(field) {
+  return Math.floor(Number(payslipInputEl(field).value)) || 0;
+}
+
+function computePayslipTotals() {
+  const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + payslipFieldValue(field), 0);
+  const deductions = PAYSLIP_DEDUCTION_FIELDS.reduce(
+    (sum, field) => sum + payslipFieldValue(field),
+    0
+  );
+  return { gross, deductions, net: Math.max(0, gross - deductions) };
 }
 
 function updatePayslipPreview() {
-  const net = computePayslipNet();
+  const { gross, deductions, net } = computePayslipTotals();
+  el.payslipGrossValue.textContent = formatYen(gross);
+  el.payslipDeductionValue.textContent = formatYen(deductions);
   el.payslipNetValue.textContent = formatYen(net);
   el.entryAmount.value = net;
 }
@@ -1101,9 +1153,10 @@ function buildPayslipData() {
   if (el.payslipBreakdown.classList.contains("hidden")) return null;
   const payslip = {};
   for (const field of PAYSLIP_FIELDS) {
-    payslip[field] = Math.floor(Number(payslipInputEl(field).value)) || 0;
+    payslip[field] = payslipFieldValue(field);
   }
-  return payslip.gross > 0 ? payslip : null;
+  const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + payslip[field], 0);
+  return gross > 0 ? payslip : null;
 }
 
 // ---------------------------------------------------------------------------
