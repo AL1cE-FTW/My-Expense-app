@@ -1625,10 +1625,73 @@ function parseWideFormat(rows) {
   return { imported, errors };
 }
 
+// 先頭行が「氏名,マスクされたカード番号,カードブランド」の形式かどうかで、
+// カード会社サイト (Vpassなど) からダウンロードした利用履歴CSVを判定する。
+// 例: 山田　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット
+function isCardUsageHeaderRow(cols) {
+  return /^\d{4}-\d{2}\*+-\*+-\*+$/.test(String(cols[1] ?? "").trim());
+}
+
+/**
+ * クレジットカードサイトからダウンロードした利用履歴CSVを解析する。
+ * 各行は「利用日,利用先,利用金額,支払回数,今回回数,今回支払金額,備考」の形式。
+ * 日付が空の行 (末尾の合計行など) はスキップする。全件「支出」として取り込み、
+ * カテゴリは利用先の店名から推測する (メールからの読み込みと同じロジック)。
+ */
+function parseCardUsageFormat(rows) {
+  if (!isCardUsageHeaderRow(rows[0])) return null;
+
+  const imported = [];
+  const errors = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const cols = rows[i];
+    const lineNo = i + 1;
+    const dateRaw = String(cols[0] ?? "").trim();
+    if (!dateRaw) continue; // 合計行など、日付のない行はスキップ
+
+    const date = normalizeDate(dateRaw);
+    const merchant = String(cols[1] ?? "").trim();
+    const amount = parseCsvAmount(cols[2]);
+
+    if (!date) {
+      errors.push(`${lineNo}行目: 日付を認識できません (${dateRaw})`);
+      continue;
+    }
+    if (!merchant) {
+      errors.push(`${lineNo}行目: 利用先が空です`);
+      continue;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      errors.push(`${lineNo}行目: 金額を認識できません (${cols[2] ?? ""})`);
+      continue;
+    }
+
+    imported.push({
+      date,
+      type: "expense",
+      category: guessCategoryFromMerchant(merchant),
+      amount,
+      memo: merchant,
+    });
+  }
+
+  return { imported, errors };
+}
+
+// UTF-8として不正な文字が含まれる場合は Shift_JIS (カード利用履歴CSVでよく使われる)
+// として読み直す。BOM付きUTF-8やUTF-8のみのCSV(自分でエクスポートしたものなど)は
+// そのまま使われる。
+function decodeCsvBuffer(buffer) {
+  const utf8Text = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+  if (!utf8Text.includes("�")) return utf8Text.replace(/^﻿/, "");
+  return new TextDecoder("shift_jis").decode(buffer);
+}
+
 function importCsv(file) {
   const reader = new FileReader();
   reader.onload = async () => {
-    const text = String(reader.result).replace(/^\uFEFF/, "");
+    const text = decodeCsvBuffer(reader.result);
     const rows = parseCsv(text).filter(
       (r) => r.length > 1 || (r.length === 1 && r[0].trim() !== "")
     );
@@ -1638,7 +1701,8 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors } = parseWideFormat(rows) || parseSimpleFormat(rows);
+    const { imported, errors } =
+      parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
       alert("インポートできる行がありませんでした。\n\n" + errors.slice(0, 10).join("\n"));
@@ -1660,7 +1724,7 @@ function importCsv(file) {
     alert(`${imported.length}件をインポートしました。`);
   };
   reader.onerror = () => alert("ファイルの読み込みに失敗しました。");
-  reader.readAsText(file, "UTF-8");
+  reader.readAsArrayBuffer(file);
 }
 
 // ---------------------------------------------------------------------------
@@ -1678,7 +1742,10 @@ const MERCHANT_CATEGORY_RULES = [
   },
   {
     category: "食費",
-    pattern: /ファミリーマート|セブン|ローソン|ミニストップ|デイリーヤマザキ|コンビニ|スーパー|イオン|やまか|西友|マルエツ|ライフ|カフェ|スターバックス|ドトール|マクドナルド|吉野家|すき家|松屋|ラーメン|食堂|レストラン|居酒屋|もんじゃ|大戸屋|ピザ|寿司/i,
+    // 「フアミリ―マ―ト」のようにカード会社のCSVでは小さい「ァ」や長音記号「ー」が
+    // 通常サイズの文字やダッシュに置き換わっていることがあるため、それも拾えるように
+    // 「フアミリ」で判定する
+    pattern: /ファミリーマート|フアミリ|セブン|ローソン|ミニストップ|デイリーヤマザキ|ニューデイズ|キオスク|コンビニ|スーパー|イオン|やまか|西友|マルエツ|東急ストア|ライフ|カフェ|スターバックス|ドトール|ベックス|コージーコーナー|カルディ|珈琲|マクドナルド|吉野家|すき家|松屋|ラーメン|餃子|食堂|レストラン|居酒屋|もんじゃ|大戸屋|ピザ|寿司/i,
   },
   {
     category: "日用品",
@@ -1686,7 +1753,7 @@ const MERCHANT_CATEGORY_RULES = [
   },
   {
     category: "趣味・娯楽",
-    pattern: /KODANSHA|SHUEISHA|集英社|講談社|GOOGLE|AMAZON|Steam|Netflix|Spotify|BOOTH|PICCOMA|ピッコマ|映画|カラオケ/i,
+    pattern: /KODANSHA|SHUEISHA|集英社|講談社|GOOGLE|AMAZON|APPLE|Steam|Netflix|Spotify|BOOTH|PICCOMA|ピッコマ|映画|カラオケ/i,
   },
   {
     category: "衣服・美容",
@@ -1694,9 +1761,19 @@ const MERCHANT_CATEGORY_RULES = [
   },
 ];
 
+// 全角英数字・全角スペースを半角に変換する。カード利用履歴CSVでは
+// 「ＢＯＯＴＨ」「ＧＯＯＧＬＥ　ＰＬＡＹ　ＪＡＰＡＮ」のように国内加盟店名が
+// 全角化されていることが多く、半角前提のカテゴリ判定パターンに掛からないため。
+function toHalfWidthAscii(text) {
+  return text
+    .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/　/g, " ");
+}
+
 function guessCategoryFromMerchant(merchant) {
+  const normalized = toHalfWidthAscii(merchant);
   for (const rule of MERCHANT_CATEGORY_RULES) {
-    if (rule.pattern.test(merchant)) return rule.category;
+    if (rule.pattern.test(normalized)) return rule.category;
   }
   return "その他支出";
 }
