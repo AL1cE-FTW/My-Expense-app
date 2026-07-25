@@ -1635,20 +1635,26 @@ function isCardUsageHeaderRow(cols) {
 /**
  * クレジットカードサイトからダウンロードした利用履歴CSVを解析する。
  * 各行は「利用日,利用先,利用金額,支払回数,今回回数,今回支払金額,備考」の形式。
- * 日付が空の行 (末尾の合計行など) はスキップする。全件「支出」として取り込み、
- * カテゴリは利用先の店名から推測する (メールからの読み込みと同じロジック)。
+ * 日付が空の行は、末尾の合計行(例: ,,,,,131507,)であることが多いため、
+ * そこに記載された合計金額を expectedTotal として取り出し、取り込んだ金額の
+ * 合計と突き合わせて正しく読み取れたかを確認できるようにする。
  */
 function parseCardUsageFormat(rows) {
   if (!isCardUsageHeaderRow(rows[0])) return null;
 
   const imported = [];
   const errors = [];
+  let expectedTotal = null;
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
     const lineNo = i + 1;
     const dateRaw = String(cols[0] ?? "").trim();
-    if (!dateRaw) continue; // 合計行など、日付のない行はスキップ
+    if (!dateRaw) {
+      const totalCandidate = parseCsvAmount(cols[5]);
+      if (Number.isFinite(totalCandidate) && totalCandidate > 0) expectedTotal = totalCandidate;
+      continue;
+    }
 
     const date = normalizeDate(dateRaw);
     const merchant = String(cols[1] ?? "").trim();
@@ -1676,7 +1682,33 @@ function parseCardUsageFormat(rows) {
     });
   }
 
-  return { imported, errors };
+  return { imported, errors, expectedTotal };
+}
+
+// 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・メモ) が
+// 完全一致するものを重複とみなしてスキップする。同じCSVを誤って2回読み込んだ
+// 場合などに二重登録されるのを防ぐ。件数ベースで比較するため、同じ内容の取引が
+// 本当に複数回あった場合(同日同額の別々の買い物など)は正しく残す。
+function dedupeAgainstExisting(imported) {
+  const existingCounts = new Map();
+  for (const e of entries) {
+    const key = [e.date, e.type, e.category, e.amount, e.memo || ""].join(" ");
+    existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
+  }
+
+  const deduped = [];
+  let skippedCount = 0;
+  for (const item of imported) {
+    const key = [item.date, item.type, item.category, item.amount, item.memo || ""].join(" ");
+    const remaining = existingCounts.get(key) || 0;
+    if (remaining > 0) {
+      existingCounts.set(key, remaining - 1);
+      skippedCount++;
+    } else {
+      deduped.push(item);
+    }
+  }
+  return { deduped, skippedCount };
 }
 
 // UTF-8として不正な文字が含まれる場合は Shift_JIS (カード利用履歴CSVでよく使われる)
@@ -1701,7 +1733,7 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors } =
+    const { imported, errors, expectedTotal } =
       parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
@@ -1709,19 +1741,46 @@ function importCsv(file) {
       return;
     }
 
-    let message = `${imported.length}件の記録をインポートします。よろしいですか?`;
+    // CSVに記載された合計金額(カード利用履歴CSVの末尾行など)と、実際に読み取れた
+    // 金額の合計を突き合わせ、正しく取り込めているかを確認する
+    let verificationNote = "";
+    if (expectedTotal != null) {
+      const parsedTotal = imported.reduce((sum, e) => sum + e.amount, 0);
+      verificationNote =
+        parsedTotal === expectedTotal
+          ? `\n\n✓ CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
+          : `\n\n⚠️ CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
+              parsedTotal
+            )})が一致しません。一部の行が正しく取り込めていない可能性があります。`;
+    }
+
+    const { deduped, skippedCount } = dedupeAgainstExisting(imported);
+
+    if (deduped.length === 0) {
+      alert(
+        `すべて(${skippedCount}件)既に登録済みのため、新しく追加する記録はありませんでした。` +
+          verificationNote
+      );
+      return;
+    }
+
+    let message = `${deduped.length}件の記録をインポートします。よろしいですか?`;
+    if (skippedCount > 0) {
+      message += `\n\n(${skippedCount}件は既に登録済みのためスキップされます)`;
+    }
     if (errors.length > 0) {
       message += `\n\n(${errors.length}件の行はスキップされます)\n` + errors.slice(0, 5).join("\n");
     }
+    message += verificationNote;
     if (!confirm(message)) return;
 
     try {
-      await importEntriesToDb(imported);
+      await importEntriesToDb(deduped);
     } catch (err) {
       alert("インポートに失敗しました: " + err.message);
       return;
     }
-    alert(`${imported.length}件をインポートしました。`);
+    alert(`${deduped.length}件をインポートしました。`);
   };
   reader.onerror = () => alert("ファイルの読み込みに失敗しました。");
   reader.readAsArrayBuffer(file);
