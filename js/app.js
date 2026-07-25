@@ -245,6 +245,9 @@ const el = {
   filterType: document.getElementById("filter-type"),
   filterCategory: document.getElementById("filter-category"),
   listEmptyMessage: document.getElementById("list-empty-message"),
+  payslipDetailModal: document.getElementById("payslip-detail-modal"),
+  payslipDetailContent: document.getElementById("payslip-detail-content"),
+  payslipDetailClose: document.getElementById("payslip-detail-close"),
   exportCsvBtn: document.getElementById("export-csv-btn"),
   importCsvInput: document.getElementById("import-csv-input"),
   gmailImportBtn: document.getElementById("gmail-import-btn"),
@@ -1001,13 +1004,11 @@ function renderList(monthEntries) {
     const actions = document.createElement("div");
     actions.className = "row-actions";
 
-    let detailRow = null;
     if (entry.payslip) {
-      detailRow = buildPayslipDetailRow(entry);
       const detailBtn = document.createElement("button");
       detailBtn.className = "icon-btn";
       detailBtn.textContent = "内訳";
-      detailBtn.addEventListener("click", () => detailRow.classList.toggle("hidden"));
+      detailBtn.addEventListener("click", () => showPayslipDetailModal(entry));
       actions.appendChild(detailBtn);
     }
 
@@ -1026,51 +1027,74 @@ function renderList(monthEntries) {
 
     tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, actionsTd);
     el.entryList.appendChild(tr);
-    if (detailRow) el.entryList.appendChild(detailRow);
   }
 }
 
-// 給与明細の内訳を表示する行 (「内訳」ボタンで開閉)
-function buildPayslipDetailRow(entry) {
+function payslipModalRow(label, amount, { total = false } = {}) {
+  const row = document.createElement("div");
+  row.className = total ? "payslip-modal-row total" : "payslip-modal-row";
+
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+
+  const valueEl = document.createElement("span");
+  valueEl.className = "payslip-modal-value";
+  valueEl.textContent = formatYen(amount);
+
+  row.append(labelEl, valueEl);
+  return row;
+}
+
+function payslipModalGroupLabel(text) {
+  const label = document.createElement("p");
+  label.className = "payslip-modal-group-label";
+  label.textContent = text;
+  return label;
+}
+
+// 給与明細の内訳をポップアップで表示する
+function showPayslipDetailModal(entry) {
   const p = entry.payslip;
-  const row = document.createElement("tr");
-  row.className = "payslip-detail-row hidden";
+  el.payslipDetailContent.innerHTML = "";
 
-  const td = document.createElement("td");
-  td.colSpan = 6;
-
-  let parts;
   if (p.baseSalary !== undefined) {
     const gross = PAYSLIP_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
     const deductions = PAYSLIP_DEDUCTION_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
-    parts = [
-      `本給 ${formatYen(p.baseSalary || 0)}`,
-      `通勤手当 ${formatYen(p.commute || 0)}`,
-      `時間外勤務手当 ${formatYen(p.overtimePay || 0)}`,
-      `支給合計 ${formatYen(gross)}`,
-      `健康保険 ${formatYen(p.healthInsurance || 0)}`,
-      `介護保険 ${formatYen(p.nursingInsurance || 0)}`,
-      `厚生年金 ${formatYen(p.pensionInsurance || 0)}`,
-      `雇用保険料 ${formatYen(p.employmentInsurance || 0)}`,
-      `所得税 ${formatYen(p.incomeTax || 0)}`,
-      `住民税 ${formatYen(p.residentTax || 0)}`,
-      `その他控除 ${formatYen(p.otherDeductions || 0)}`,
-      `控除合計 ${formatYen(deductions)}`,
-      `手取り ${formatYen(entry.amount)}`,
-    ];
+
+    el.payslipDetailContent.append(
+      payslipModalGroupLabel("支給"),
+      payslipModalRow("本給", p.baseSalary || 0),
+      payslipModalRow("通勤手当", p.commute || 0),
+      payslipModalRow("時間外勤務手当", p.overtimePay || 0),
+      payslipModalRow("支給合計", gross, { total: true }),
+      payslipModalGroupLabel("控除"),
+      payslipModalRow("健康保険", p.healthInsurance || 0),
+      payslipModalRow("介護保険", p.nursingInsurance || 0),
+      payslipModalRow("厚生年金", p.pensionInsurance || 0),
+      payslipModalRow("雇用保険料", p.employmentInsurance || 0),
+      payslipModalRow("所得税", p.incomeTax || 0),
+      payslipModalRow("住民税", p.residentTax || 0),
+      payslipModalRow("その他控除", p.otherDeductions || 0),
+      payslipModalRow("控除合計", deductions, { total: true }),
+      payslipModalRow("差引支給額(手取り)", entry.amount, { total: true })
+    );
   } else {
     // 旧形式(総支給額・社会保険料まとめ)で保存された記録との互換表示
-    parts = [`総支給額 ${formatYen(p.gross || 0)}`];
-    if (p.commute) parts.push(`うち交通費 ${formatYen(p.commute)}`);
-    parts.push(`所得税 ${formatYen(p.incomeTax || 0)}`);
-    parts.push(`住民税 ${formatYen(p.residentTax || 0)}`);
-    parts.push(`社会保険料 ${formatYen(p.socialInsurance || 0)}`);
-    parts.push(`手取り ${formatYen(entry.amount)}`);
+    el.payslipDetailContent.append(
+      payslipModalRow("総支給額", p.gross || 0),
+      ...(p.commute ? [payslipModalRow("うち交通費", p.commute)] : []),
+      payslipModalRow("所得税", p.incomeTax || 0),
+      payslipModalRow("住民税", p.residentTax || 0),
+      payslipModalRow("社会保険料", p.socialInsurance || 0),
+      payslipModalRow("手取り", entry.amount, { total: true })
+    );
   }
-  td.textContent = parts.join(" / ");
 
-  row.appendChild(td);
-  return row;
+  el.payslipDetailModal.classList.remove("hidden");
+}
+
+function hidePayslipDetailModal() {
+  el.payslipDetailModal.classList.add("hidden");
 }
 
 function renderCategoryOptions(type, selected) {
@@ -2208,6 +2232,16 @@ function setupAppEventListeners() {
   el.filterCategory.addEventListener("change", () => {
     filterCategory = el.filterCategory.value;
     render();
+  });
+
+  el.payslipDetailClose.addEventListener("click", hidePayslipDetailModal);
+  el.payslipDetailModal.addEventListener("click", (event) => {
+    if (event.target === el.payslipDetailModal) hidePayslipDetailModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !el.payslipDetailModal.classList.contains("hidden")) {
+      hidePayslipDetailModal();
+    }
   });
 
   renderFilterCategoryOptions();

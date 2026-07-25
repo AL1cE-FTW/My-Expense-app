@@ -417,11 +417,85 @@ html {
   color: var(--color-text);
 }
 
-.payslip-detail-row td {
-  background: var(--color-bg);
+/* モーダル (給与明細の内訳ポップアップ) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+}
+
+.modal-box {
+  position: relative;
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 440px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  margin-bottom: 14px;
+  padding-right: 24px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  font-size: 1.4rem;
+  line-height: 1;
   color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.payslip-modal-group-label {
   font-size: 0.82rem;
-  padding: 8px 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 14px 0 6px;
+}
+
+.payslip-modal-group-label:first-child {
+  margin-top: 0;
+}
+
+.payslip-modal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  padding: 5px 0;
+}
+
+.payslip-modal-row.total {
+  font-weight: 700;
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.payslip-modal-row .payslip-modal-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .form-actions {
