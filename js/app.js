@@ -153,8 +153,10 @@ function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+// マイナスは「¥-96,000」ではなく「-¥96,000」にする (アプリ内の他の表示と揃える)
 function formatYen(amount) {
-  return "¥" + amount.toLocaleString("ja-JP");
+  const sign = amount < 0 ? "-" : "";
+  return sign + "¥" + Math.abs(amount).toLocaleString("ja-JP");
 }
 
 function formatMonth(date) {
@@ -486,7 +488,7 @@ function render() {
 
   renderCumulativeSavings();
 
-  const targetMultiplier = viewMode === "year" ? 12 : 1;
+  const targetMultiplier = viewMode === "year" ? elapsedMonthsInYear() : 1;
   const entriesInPeriod = periodEntries();
   renderSummary(entriesInPeriod);
   renderMonthlyBarChart();
@@ -707,7 +709,7 @@ function renderCumulativeSavings() {
     else if (e.type === "expense") total -= e.amount;
     // "save" (貯蓄・投資) は現金が資産に形を変えただけなので加減算しない
   }
-  el.cumulativeSavings.textContent = (total < 0 ? "-" : "") + formatYen(Math.abs(total));
+  el.cumulativeSavings.textContent = formatYen(total);
   el.cumulativeSavings.classList.toggle("positive", total > 0);
   el.cumulativeSavings.classList.toggle("negative", total < 0);
 
@@ -743,10 +745,23 @@ function renderSummary(monthEntries) {
 
   el.totalIncome.textContent = formatYen(income);
   el.totalExpense.textContent = formatYen(expense);
-  el.balance.textContent = (balance < 0 ? "-" : "") + formatYen(Math.abs(balance));
+  el.balance.textContent = formatYen(balance);
   el.balance.classList.toggle("positive", balance > 0);
   el.balance.classList.toggle("negative", balance < 0);
   el.totalSave.textContent = formatYen(saved);
+}
+
+/**
+ * 年間表示の目標を何か月分にするか。
+ * 当年は3月に「3か月分の実績 vs 12か月分の目標」を比べても意味がないため、
+ * 経過した月数(表示中の月を含む)で按分する。過去の年は12か月分のまま。
+ */
+function elapsedMonthsInYear() {
+  const now = new Date();
+  const shownYear = currentMonth.getFullYear();
+  if (shownYear < now.getFullYear()) return 12;
+  if (shownYear > now.getFullYear()) return 0;
+  return now.getMonth() + 1;
 }
 
 function budgetBarClass(ratio) {
@@ -764,7 +779,16 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
 
   const budgetedCategories = Object.keys(budgets).filter((c) => budgets[c] > 0);
   const totalBudget = budgetedCategories.reduce((sum, c) => sum + budgets[c], 0) * targetMultiplier;
-  const totalActual = [...actuals.values()].reduce((sum, v) => sum + v, 0);
+
+  // 分子も予算を設定したカテゴリだけにする。分母が「予算のあるカテゴリ」なのに
+  // 分子が全支出だと、食費だけ3万の予算で交際費に5万使うと「233%」と真っ赤に
+  // なるのに、予算を設定したカテゴリは全て予算内、という噛み合わない表示になる。
+  let totalActual = 0;
+  let unbudgetedActual = 0;
+  for (const [category, amount] of actuals) {
+    if (budgets[category] > 0) totalActual += amount;
+    else unbudgetedActual += amount;
+  }
 
   el.budgetOverall.innerHTML = "";
   if (totalBudget > 0) {
@@ -788,6 +812,14 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     track.appendChild(bar);
 
     el.budgetOverall.append(text, track);
+
+    // 予算を設定していないカテゴリの支出は、上のバーに含まれず見えなくなるため別行で出す
+    if (unbudgetedActual > 0) {
+      const extra = document.createElement("div");
+      extra.className = "budget-unbudgeted";
+      extra.textContent = `予算外: ${formatYen(unbudgetedActual)}`;
+      el.budgetOverall.appendChild(extra);
+    }
   }
 
   // 予算が設定されているカテゴリを使用率の高い順に、
@@ -813,7 +845,7 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     p.className = "empty-message";
     p.textContent = "予算が設定されていません";
     el.budgetBreakdown.appendChild(p);
-    return { totalActual, totalBudget };
+    return { totalActual, totalBudget, unbudgetedActual };
   }
 
   for (const { category, budget, actual } of rows) {
@@ -846,7 +878,7 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     el.budgetBreakdown.appendChild(row);
   }
 
-  return { totalActual, totalBudget };
+  return { totalActual, totalBudget, unbudgetedActual };
 }
 
 // ---------------------------------------------------------------------------
@@ -896,9 +928,12 @@ function computeIncomeBudgetTotal(targetMultiplier) {
   const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
   const bonusPerOccurrence = (incomeBudgets["給与"] || 0) * bonusMultiplier;
 
-  if (targetMultiplier === 12) {
-    // 年間表示: 月額×12 + ボーナス月数分のボーナス
-    return baseMonthly * 12 + bonusPerOccurrence * bonusMonths.length;
+  if (viewMode === "year") {
+    // 年間表示: 月額×経過月数 + 到来済みのボーナス月の分だけ上乗せする。
+    // (未到来のボーナスまで目標に足すと、達成率が実態より低く見える)
+    const elapsed = targetMultiplier;
+    const arrivedBonusCount = bonusMonths.filter((m) => m <= elapsed).length;
+    return baseMonthly * elapsed + bonusPerOccurrence * arrivedBonusCount;
   }
   // 月別表示: 月額 + (表示中の月がボーナス月ならその分を上乗せ)
   const isBonusMonth = bonusMonths.includes(currentMonth.getMonth() + 1);
@@ -912,11 +947,16 @@ function renderBonusNote() {
   const bonusMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
   const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
   if (bonusMonths.length === 0 || bonusMultiplier <= 0) return;
+  // 給与の目標が未設定だと実額0なので、目標に何も足されていない。
+  // それでも「◯月に給与◯か月分を計上」と出ると計上済みに見えてしまう。
+  const bonusPerOccurrence = (incomeBudgets["給与"] || 0) * bonusMultiplier;
+  if (bonusPerOccurrence <= 0) return;
 
   const note = document.createElement("p");
   note.className = "plan-actual-note";
   const monthsLabel = [...bonusMonths].sort((a, b) => a - b).map((m) => `${m}月`).join("・");
-  note.textContent = `賞与: ${monthsLabel}に給与${bonusMultiplier}か月分を計上`;
+  note.textContent =
+    `賞与: ${monthsLabel}に給与${bonusMultiplier}か月分 (${formatYen(bonusPerOccurrence)}) を計上`;
   el.incomePlanActual.insertAdjacentElement("afterend", note);
 }
 
@@ -1039,7 +1079,10 @@ function renderNeedWantSave(monthEntries) {
 
     const ratio = bucket.target > 0 ? bucket.actual / bucket.target : 0;
     const isOver = bucket.key === "save" ? ratio < 0 : ratio > 1;
-    const fillLength = segmentLength * Math.min(Math.max(ratio, 0), 1);
+    // 収入以上に使った月は Save がマイナスになる。0で塗ると弧が空になり
+    // 「ちょうど0円貯金」と見分けがつかないので、警告として赤で埋める。
+    const fillRatio = isOver && bucket.key === "save" ? 1 : Math.min(Math.max(ratio, 0), 1);
+    const fillLength = segmentLength * fillRatio;
     const fillColor = isOver ? "#ef4444" : NWS_COLORS[bucket.key];
     group.appendChild(nwsArc(offset, fillLength, fillColor));
 
