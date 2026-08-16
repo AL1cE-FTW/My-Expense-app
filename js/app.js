@@ -1100,6 +1100,14 @@ function createCategoryLabel(category) {
 function sortEntries(list) {
   const sorted = [...list];
   sorted.sort((a, b) => {
+    // 登録日が未設定の古い記録は、昇順・降順どちらでも末尾に寄せる。
+    // 下の符号反転より前に決めないと、反転に巻き込まれて先頭に来てしまう。
+    if (sortColumn === "createdAt") {
+      const missingA = !a.createdAt;
+      const missingB = !b.createdAt;
+      if (missingA !== missingB) return missingA ? 1 : -1;
+    }
+
     let cmp;
     switch (sortColumn) {
       case "type":
@@ -1112,13 +1120,10 @@ function sortEntries(list) {
         cmp = a.amount - b.amount;
         break;
       case "createdAt": {
-        // 登録日が未設定の古い記録は常に末尾に寄せる
+        // 未設定どうし、または両方設定済みのケースだけがここに来る
         const av = a.createdAt || "";
         const bv = b.createdAt || "";
-        if (!av && !bv) cmp = 0;
-        else if (!av) cmp = 1;
-        else if (!bv) cmp = -1;
-        else cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        cmp = av < bv ? -1 : av > bv ? 1 : 0;
         break;
       }
       case "date":
@@ -2619,7 +2624,17 @@ function setupAuthForm() {
 // ---------------------------------------------------------------------------
 
 function setupAppEventListeners() {
+  // 日付での絞り込みは特定の1日を見るためのものなので、表示する期間を動かしたら解除する。
+  // 残したままだと「2026年7月」の見出しに「2026年8月5日の記録・0件」が出て、
+  // 理由の分からない行き止まりになる。
+  const clearDateFilter = () => {
+    if (!filterDate) return;
+    filterDate = "";
+    el.filterDate.value = "";
+  };
+
   el.prevMonth.addEventListener("click", () => {
+    clearDateFilter();
     currentMonth =
       viewMode === "year"
         ? new Date(currentMonth.getFullYear() - 1, currentMonth.getMonth(), 1)
@@ -2628,6 +2643,7 @@ function setupAppEventListeners() {
   });
 
   el.nextMonth.addEventListener("click", () => {
+    clearDateFilter();
     currentMonth =
       viewMode === "year"
         ? new Date(currentMonth.getFullYear() + 1, currentMonth.getMonth(), 1)
@@ -2636,12 +2652,14 @@ function setupAppEventListeners() {
   });
 
   el.todayBtn.addEventListener("click", () => {
+    clearDateFilter();
     currentMonth = startOfMonth(new Date());
     render();
   });
 
   for (const tab of el.viewTabs) {
     tab.addEventListener("click", () => {
+      clearDateFilter();
       viewMode = tab.dataset.view;
       for (const t of el.viewTabs) t.classList.toggle("active", t === tab);
       el.todayBtn.textContent = viewMode === "year" ? "今年" : "今月";
