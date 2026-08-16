@@ -379,8 +379,10 @@
           <div class="csv-actions">
             <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
             <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
-            <label class="btn btn-secondary btn-small" for="import-csv-input">CSVインポート</label>
-            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden">
+            <!-- ファイル入力自体は display:none でフォーカスできないため、
+                 ボタンから開く (label だけだとキーボードで到達できない) -->
+            <button class="btn btn-secondary btn-small" id="import-csv-btn">CSVインポート</button>
+            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden" tabindex="-1" aria-hidden="true">
           </div>
         </div>
         <div class="list-filters">
@@ -402,12 +404,12 @@
           <table class="entry-table">
             <thead>
               <tr>
-                <th class="sortable" data-sort="date">日付</th>
-                <th class="sortable" data-sort="type">種別</th>
-                <th class="sortable" data-sort="category">カテゴリ</th>
-                <th class="sortable amount-col" data-sort="amount">金額</th>
+                <th class="sortable" data-sort="date" tabindex="0" role="columnheader" aria-sort="none">日付</th>
+                <th class="sortable" data-sort="type" tabindex="0" role="columnheader" aria-sort="none">種別</th>
+                <th class="sortable" data-sort="category" tabindex="0" role="columnheader" aria-sort="none">カテゴリ</th>
+                <th class="sortable amount-col" data-sort="amount" tabindex="0" role="columnheader" aria-sort="none">金額</th>
                 <th>メモ</th>
-                <th class="sortable" data-sort="createdAt">登録日</th>
+                <th class="sortable" data-sort="createdAt" tabindex="0" role="columnheader" aria-sort="none">登録日</th>
                 <th></th>
               </tr>
             </thead>
@@ -427,18 +429,18 @@
 
   <!-- 給与明細の内訳ポップアップ -->
   <div class="modal-overlay hidden" id="payslip-detail-modal">
-    <div class="modal-box">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="payslip-detail-title">
       <button type="button" class="modal-close" id="payslip-detail-close" aria-label="閉じる">×</button>
-      <h3 class="modal-title">給与明細の内訳</h3>
+      <h3 class="modal-title" id="payslip-detail-title">給与明細の内訳</h3>
       <div id="payslip-detail-content"></div>
     </div>
   </div>
 
   <!-- 立替金の精算ポップアップ -->
   <div class="modal-overlay hidden" id="advance-settle-modal">
-    <div class="modal-box">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="advance-settle-title">
       <button type="button" class="modal-close" id="advance-settle-close" aria-label="閉じる">×</button>
-      <h3 class="modal-title">立替金を精算する</h3>
+      <h3 class="modal-title" id="advance-settle-title">立替金を精算する</h3>
       <div id="advance-settle-summary" class="advance-settle-summary"></div>
       <div class="form-group">
         <label for="advance-settle-date">返金された日</label>

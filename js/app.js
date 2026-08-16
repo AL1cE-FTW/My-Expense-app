@@ -321,6 +321,7 @@ const el = {
   payslipDetailClose: document.getElementById("payslip-detail-close"),
   exportCsvBtn: document.getElementById("export-csv-btn"),
   importCsvInput: document.getElementById("import-csv-input"),
+  importCsvBtn: document.getElementById("import-csv-btn"),
   gmailImportBtn: document.getElementById("gmail-import-btn"),
 };
 
@@ -503,6 +504,28 @@ function render() {
 // 立替金 (仮払い)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// モーダル共通
+// ---------------------------------------------------------------------------
+
+// モーダルを開く前にフォーカスがあった要素。閉じたときにここへ戻す
+// (戻さないとページ先頭に飛ばされ、キーボード操作だと元の位置を見失う)
+let modalReturnFocus = null;
+
+function openModal(overlay, focusTarget) {
+  modalReturnFocus = document.activeElement;
+  overlay.classList.remove("hidden");
+  if (focusTarget) focusTarget.focus();
+}
+
+function closeModal(overlay) {
+  overlay.classList.add("hidden");
+  if (modalReturnFocus && document.contains(modalReturnFocus)) {
+    modalReturnFocus.focus();
+  }
+  modalReturnFocus = null;
+}
+
 /**
  * 立替金の精算状態は保存せず、返金記録の有無から導出する。
  * (「精算済み」フラグを両方に書くと、片方を消したときに整合性が崩れるため)
@@ -579,11 +602,11 @@ function openAdvanceSettleModal(entry) {
     `${entry.date} ${entry.category} ${formatYen(entry.amount)}` +
     (entry.memo ? ` (${entry.memo})` : "");
   el.advanceSettleDate.value = toDateInputValue(new Date());
-  el.advanceSettleModal.classList.remove("hidden");
+  openModal(el.advanceSettleModal, el.advanceSettleDate);
 }
 
 function closeAdvanceSettleModal() {
-  el.advanceSettleModal.classList.add("hidden");
+  closeModal(el.advanceSettleModal);
   settlingAdvance = null;
 }
 
@@ -1184,6 +1207,10 @@ function updateSortIndicators() {
     th.classList.remove("sort-asc", "sort-desc");
     if (th.dataset.sort === sortColumn) {
       th.classList.add(sortDirection === "asc" ? "sort-asc" : "sort-desc");
+      // 矢印は目で見ないと分からないので、読み上げにも現在の並び順を伝える
+      th.setAttribute("aria-sort", sortDirection === "asc" ? "ascending" : "descending");
+    } else {
+      th.setAttribute("aria-sort", "none");
     }
   });
 }
@@ -1407,11 +1434,11 @@ function showPayslipDetailModal(entry) {
     );
   }
 
-  el.payslipDetailModal.classList.remove("hidden");
+  openModal(el.payslipDetailModal, el.payslipDetailClose);
 }
 
 function hidePayslipDetailModal() {
-  el.payslipDetailModal.classList.add("hidden");
+  closeModal(el.payslipDetailModal);
 }
 
 function renderCategoryOptions(type, selected) {
@@ -2743,6 +2770,8 @@ function setupAppEventListeners() {
   el.cancelIncomeBudgetBtn.addEventListener("click", closeIncomeBudgetForm);
   el.incomeBudgetForm.addEventListener("submit", handleIncomeBudgetSubmit);
 
+  el.importCsvBtn.addEventListener("click", () => el.importCsvInput.click());
+
   el.importCsvInput.addEventListener("change", () => {
     const file = el.importCsvInput.files[0];
     if (file) importCsv(file);
@@ -2753,6 +2782,12 @@ function setupAppEventListeners() {
 
   document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
     th.addEventListener("click", () => handleSortClick(th.dataset.sort));
+    // th はボタンではないので、Enter/Space を自分で拾う
+    th.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      handleSortClick(th.dataset.sort);
+    });
   });
 
   el.filterType.addEventListener("change", () => {
@@ -2795,7 +2830,7 @@ function setupAppEventListeners() {
   // ただし単に隠すだけだと選択中の立替金などの状態が残るため、専用の閉じる処理を経由する。
   const closeOverlay = (overlay) => {
     if (overlay === el.advanceSettleModal) closeAdvanceSettleModal();
-    else overlay.classList.add("hidden");
+    else closeModal(overlay);
   };
   for (const overlay of document.querySelectorAll(".modal-overlay")) {
     overlay.addEventListener("click", (event) => {

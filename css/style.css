@@ -357,8 +357,21 @@ html {
   flex: 1;
 }
 
+/* display:none だとアクセシビリティツリーとタブ順から完全に外れ、
+   キーボードだけでは種別を選べなくなる。見えないが操作できる形にする。 */
 .type-option input {
-  display: none;
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* キーボードでフォーカスしている項目が分かるようにする */
+.type-option input:focus-visible + span {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .type-option span {
