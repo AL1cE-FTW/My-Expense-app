@@ -1942,12 +1942,20 @@ const CATEGORY_ALIASES = {
   },
 };
 
+// 種別ごとの「分類できなかったとき」の受け皿
+const FALLBACK_CATEGORY = {
+  expense: "その他支出",
+  income: "その他収入",
+  save: "その他貯蓄",
+};
+
 function resolveCategory(rawCategory, type) {
   const trimmed = String(rawCategory ?? "").trim();
   if (CATEGORIES[type].includes(trimmed)) return trimmed;
-  const alias = CATEGORY_ALIASES[type][trimmed];
+  // 貯蓄には読み替え表がないため、存在しないキーで落ちないようにする
+  const alias = CATEGORY_ALIASES[type]?.[trimmed];
   if (alias) return alias;
-  return type === "expense" ? "その他支出" : "その他収入";
+  return FALLBACK_CATEGORY[type] || "その他支出";
 }
 
 /**
@@ -1965,7 +1973,7 @@ function parseSimpleFormat(rows) {
     const lineNo = i + 1;
     const date = normalizeDate(cols[0] ?? "");
     const type = parseType(cols[1] ?? "");
-    const category = String(cols[2] ?? "").trim();
+    const rawCategory = String(cols[2] ?? "").trim();
     const amount = parseCsvAmount(cols[3]);
     const memo = String(cols[4] ?? "").trim();
 
@@ -1979,7 +1987,7 @@ function parseSimpleFormat(rows) {
       );
       continue;
     }
-    if (!category) {
+    if (!rawCategory) {
       errors.push(`${lineNo}行目: カテゴリが空です`);
       continue;
     }
@@ -1988,7 +1996,11 @@ function parseSimpleFormat(rows) {
       continue;
     }
 
-    imported.push({ date, type, category, amount, memo });
+    // 他の形式と同じくアプリのカテゴリに解決する。既知のカテゴリはそのまま通るので、
+    // 自分でエクスポートしたCSVの往復は壊れない。
+    // (生の文字列のまま保存すると、予算と紐づかない・絞り込みに出ない・
+    //  編集画面の<select>が先頭にフォールバックして無言で「食費」に化ける)
+    imported.push({ date, type, category: resolveCategory(rawCategory, type), amount, memo });
   }
 
   return { imported, errors };
@@ -2081,7 +2093,12 @@ function parseCardUsageFormat(rows) {
 
   const imported = [];
   const errors = [];
-  let expectedTotal = null;
+  // 小計行が複数あるファイルもあるため、候補を集めて最大のもの(＝全体の合計)を使う。
+  // 最後の1つで上書きすると、末尾が小計だったときに誤検知する。
+  const totalCandidates = [];
+  // 検算はCSVの合計行と同じ「今回支払金額」ベースで行う。取り込む金額は
+  // 「利用金額」なので、分割払いがあると両者は一致しない。
+  let paymentTotal = 0;
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
@@ -2089,7 +2106,9 @@ function parseCardUsageFormat(rows) {
     const dateRaw = String(cols[0] ?? "").trim();
     if (!dateRaw) {
       const totalCandidate = parseCsvAmount(cols[5]);
-      if (Number.isFinite(totalCandidate) && totalCandidate > 0) expectedTotal = totalCandidate;
+      if (Number.isFinite(totalCandidate) && totalCandidate > 0) {
+        totalCandidates.push(totalCandidate);
+      }
       continue;
     }
 
@@ -2105,38 +2124,62 @@ function parseCardUsageFormat(rows) {
       errors.push(`${lineNo}行目: 利用先が空です`);
       continue;
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!Number.isFinite(amount) || amount === 0) {
       errors.push(`${lineNo}行目: 金額を認識できません (${cols[2] ?? ""})`);
       continue;
     }
 
-    imported.push({
-      date,
-      type: "expense",
-      category: guessCategoryFromMerchant(merchant),
-      amount,
-      memo: merchant,
-    });
+    const payment = parseCsvAmount(cols[5]);
+    paymentTotal += Number.isFinite(payment) && payment !== 0 ? payment : amount;
+
+    if (amount < 0) {
+      // 返金・キャンセル行。支出のマイナスではなく収入として相殺する
+      // (これまでは「金額を認識できません」として捨てられていた)
+      imported.push({
+        date,
+        type: "income",
+        category: "その他収入",
+        amount: -amount,
+        memo: `返金: ${merchant}`,
+      });
+    } else {
+      imported.push({
+        date,
+        type: "expense",
+        category: guessCategoryFromMerchant(merchant),
+        amount,
+        memo: merchant,
+      });
+    }
   }
 
-  return { imported, errors, expectedTotal };
+  const expectedTotal = totalCandidates.length > 0 ? Math.max(...totalCandidates) : null;
+  return { imported, errors, expectedTotal, parsedTotal: paymentTotal };
 }
 
 // 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・メモ) が
 // 完全一致するものを重複とみなしてスキップする。同じCSVを誤って2回読み込んだ
 // 場合などに二重登録されるのを防ぐ。件数ベースで比較するため、同じ内容の取引が
 // 本当に複数回あった場合(同日同額の別々の買い物など)は正しく残す。
+// 区切り文字は使わず JSON 化する。スペース区切りだと
+// {カテゴリ:"食費", 金額:500, メモ:"1000 コンビニ"} と
+// {カテゴリ:"食費 500", 金額:1000, メモ:"コンビニ"} が同じキーになり、
+// 別物が重複としてスキップされてしまう。
+function dedupeKey(e) {
+  return JSON.stringify([e.date, e.type, e.category, e.amount, e.memo || ""]);
+}
+
 function dedupeAgainstExisting(imported) {
   const existingCounts = new Map();
   for (const e of entries) {
-    const key = [e.date, e.type, e.category, e.amount, e.memo || ""].join(" ");
+    const key = dedupeKey(e);
     existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
   }
 
   const deduped = [];
   let skippedCount = 0;
   for (const item of imported) {
-    const key = [item.date, item.type, item.category, item.amount, item.memo || ""].join(" ");
+    const key = dedupeKey(item);
     const remaining = existingCounts.get(key) || 0;
     if (remaining > 0) {
       existingCounts.set(key, remaining - 1);
@@ -2170,7 +2213,7 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors, expectedTotal } =
+    const { imported, errors, expectedTotal, parsedTotal } =
       parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
@@ -2182,12 +2225,12 @@ function importCsv(file) {
     // 金額の合計を突き合わせ、正しく取り込めているかを確認する
     let verificationNote = "";
     if (expectedTotal != null) {
-      const parsedTotal = imported.reduce((sum, e) => sum + e.amount, 0);
+      const total = parsedTotal ?? imported.reduce((sum, e) => sum + e.amount, 0);
       verificationNote =
-        parsedTotal === expectedTotal
+        total === expectedTotal
           ? `\n\n✓ CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
           : `\n\n⚠️ CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
-              parsedTotal
+              total
             )})が一致しません。一部の行が正しく取り込めていない可能性があります。`;
     }
 
