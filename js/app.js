@@ -593,8 +593,23 @@ async function confirmAdvanceSettle() {
     return;
   }
 
-  const advance = settlingAdvance;
-  el.advanceSettleConfirm.disabled = true;
+  // モーダルを開いている間に別の端末・タブで変更されている可能性があるため、
+  // 保持しているオブジェクトではなく id で引き直す。
+  const advance = entries.find((e) => e.id === settlingAdvance.id);
+  if (!advance || advance.advance !== true) {
+    alert("この立替金は既に削除されたか、立替ではなくなっています。");
+    closeAdvanceSettleModal();
+    return;
+  }
+  if (refundsByAdvanceId().has(advance.id)) {
+    alert("この立替金は既に精算済みです。");
+    closeAdvanceSettleModal();
+    return;
+  }
+
+  // オフラインだと addDoc はサーバー応答まで解決しないため、先にモーダルを閉じる。
+  // (待っているとボタンが無効のまま固まり、その裏で記録だけ現れる)
+  closeAdvanceSettleModal();
   try {
     await addEntryToDb({
       date: refundDate,
@@ -609,12 +624,7 @@ async function confirmAdvanceSettle() {
     });
   } catch (err) {
     alert("精算の記録に失敗しました: " + err.message);
-    return;
-  } finally {
-    el.advanceSettleConfirm.disabled = false;
   }
-
-  closeAdvanceSettleModal();
 }
 
 // 縦軸の目盛り幅をキリの良い数値 (1, 2, 5 × 10^n) から選ぶ
@@ -853,9 +863,14 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
   );
 
   const totalIncomeBudget = computeIncomeBudgetTotal(targetMultiplier);
+  // 立替金の返金は「収入」ではなく立て替えたお金が戻ってきただけなので、
+  // 目標側 (incomeBudgetCategories) と同じく実績側からも除く。
+  // 含めると、給与目標30万・給与30万・立替精算5万で「117%達成」に見えてしまう。
   let totalIncomeActual = 0;
   for (const e of monthEntries) {
-    if (e.type === "income") totalIncomeActual += e.amount;
+    if (e.type === "income" && e.category !== ADVANCE_REFUND_CATEGORY) {
+      totalIncomeActual += e.amount;
+    }
   }
 
   renderPlanActualChart(
@@ -1689,9 +1704,19 @@ async function deleteEntry(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
   const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
-  if (!confirm(`この記録を削除しますか?\n${label}`)) return;
+
+  // 精算済みの立替を消すと、対になる返金の収入だけが残って累計貯金額が
+  // 永久にずれるため、返金もまとめて消す。
+  const refund = entry.advance === true ? refundsByAdvanceId().get(entry.id) : null;
+  const message = refund
+    ? `この記録を削除しますか?\n${label}\n\n` +
+      `対になる返金の記録も一緒に削除されます。\n` +
+      `${refund.date} ${refund.category} ${formatYen(refund.amount)}`
+    : `この記録を削除しますか?\n${label}`;
+  if (!confirm(message)) return;
 
   try {
+    if (refund) await deleteEntryFromDb(refund.id);
     await deleteEntryFromDb(id);
   } catch (err) {
     alert("削除に失敗しました: " + err.message);
@@ -1723,11 +1748,28 @@ async function handleSubmit(event) {
   };
 
   const editingId = el.entryId.value;
+
+  // 立替のチェックを外す / 種別を支出以外に変えると未回収リストから消えるが、
+  // 対になる返金の収入が残ると累計貯金額がずれるため、一緒に消すか確認する。
+  let refundToDelete = null;
+  if (editingId && !data.advance) {
+    const refund = refundsByAdvanceId().get(editingId);
+    if (refund) {
+      const ok = confirm(
+        "この記録は精算済みの立替金です。立替でなくすと、対になる返金の記録も削除されます。\n\n" +
+          `${refund.date} ${refund.category} ${formatYen(refund.amount)}\n\nよろしいですか?`
+      );
+      if (!ok) return;
+      refundToDelete = refund;
+    }
+  }
+
   el.submitBtn.disabled = true;
   try {
     if (editingId) {
       // 登録日 (createdAt) は最初に記録したときのものを保つため、更新時は触らない
       await updateEntryInDb(editingId, data);
+      if (refundToDelete) await deleteEntryFromDb(refundToDelete.id);
     } else {
       await addEntryToDb({ ...data, createdAt: nowTimestamp() });
     }
@@ -2645,16 +2687,21 @@ function setupAppEventListeners() {
   el.advanceSettleCancel.addEventListener("click", closeAdvanceSettleModal);
   el.advanceSettleConfirm.addEventListener("click", confirmAdvanceSettle);
 
-  // モーダルは複数あるので、背景クリックとEscapeは全ての .modal-overlay に対して共通で処理する
+  // モーダルは複数あるので、背景クリックとEscapeは全ての .modal-overlay に対して共通で処理する。
+  // ただし単に隠すだけだと選択中の立替金などの状態が残るため、専用の閉じる処理を経由する。
+  const closeOverlay = (overlay) => {
+    if (overlay === el.advanceSettleModal) closeAdvanceSettleModal();
+    else overlay.classList.add("hidden");
+  };
   for (const overlay of document.querySelectorAll(".modal-overlay")) {
     overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) overlay.classList.add("hidden");
+      if (event.target === overlay) closeOverlay(overlay);
     });
   }
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
-      overlay.classList.add("hidden");
+      closeOverlay(overlay);
     }
   });
 
