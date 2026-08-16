@@ -1,5 +1,7 @@
-// このファイルは .gitignore 対象です。あなた自身の Firebase プロジェクト
-// の設定値なので、Git にはコミットされません。
+// Firebase プロジェクトの設定値。GitHub Pages で公開するために意図的に
+// コミットしています。Web APIキーはブラウザに配信される公開前提の値で、
+// アクセス制御は firestore.rules と Firebase Authentication で行っています。
+// 本当の機密情報 (パスワードなど) はここに書かないでください。
 
 export const firebaseConfig = {
   apiKey: "AIzaSyAullvj3MVQj5y7t5zcqc3iN-VCAaZ4pgE",

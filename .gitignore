@@ -1,5 +1,14 @@
-# あなた自身の Firebase プロジェクト設定 (js/firebase-config.example.js をコピーして作成)
-js/firebase-config.js
+# 設定ファイル (js/firebase-config.js / js/google-config.js) について
+#
+# これらは以前 .gitignore の対象にしていましたが、GitHub Pages で
+# 公開するにはリポジトリに含まれている必要があるため、意図的にコミットしています。
+# 中身は Firebase の Web APIキーと Google OAuth のクライアントIDだけで、
+# どちらもブラウザに配信される公開前提の値です。アクセス制御は APIキーではなく
+# firestore.rules と Firebase Authentication で行っています。
+#
+# 本当の機密情報 (パスワード、アプリパスワード、サービスアカウントの鍵など) は
+# これらのファイルに書かないでください。そのままコミットされ、公開されます。
 
-# あなた自身の Google OAuth クライアントID (js/google-config.example.js をコピーして作成)
-js/google-config.js
+.DS_Store
+Thumbs.db
+node_modules/
