@@ -28,7 +28,7 @@ const CATEGORIES = {
     "衣服・美容",
     "その他支出",
   ],
-  income: ["給与", "賞与", "副収入", "その他収入"],
+  income: ["給与", "賞与", "副収入", "立替金返金", "その他収入"],
   save: ["株式", "投資信託", "定期預金", "その他貯蓄"],
 };
 
@@ -36,6 +36,17 @@ const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
 
 // 収入目標の「賞与」は月額ではなく、ボーナス月・給与の何か月分かで計算する
 const BONUS_CATEGORY = "賞与";
+
+// 立替金(仮払い)の精算で自動作成される収入のカテゴリ。
+// 賞与と同じく「目標を立てる収入」ではないため、収入目標の入力欄からは除外する。
+const ADVANCE_REFUND_CATEGORY = "立替金返金";
+
+// 収入目標を設定できるカテゴリ (賞与・立替金返金は別扱いのため除外)
+function incomeBudgetCategories() {
+  return CATEGORIES.income.filter(
+    (c) => c !== BONUS_CATEGORY && c !== ADVANCE_REFUND_CATEGORY
+  );
+}
 
 // 給与明細の内訳入力を出すカテゴリ (給与=通常の給与明細、賞与=賞与明細で項目が異なる)
 const PAYSLIP_CATEGORY = "給与";
@@ -114,7 +125,13 @@ let authMode = "login";
 // 記録一覧の並び替え
 let sortColumn = "date";
 let sortDirection = "desc";
-const SORT_DEFAULT_DIRECTION = { date: "desc", type: "asc", category: "asc", amount: "desc" };
+const SORT_DEFAULT_DIRECTION = {
+  date: "desc",
+  type: "asc",
+  category: "asc",
+  amount: "desc",
+  createdAt: "desc",
+};
 
 // 記録一覧の絞り込み
 let filterType = "all";
@@ -146,6 +163,20 @@ function toDateInputValue(date) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+// 記録を作成した日時 (ISO文字列)。取引日 (entry.date) とは別に、
+// 「いつ記入・インポートしたか」を残しておくために使う。
+function nowTimestamp() {
+  return new Date().toISOString();
+}
+
+// createdAt (ISO文字列) を表示用の M/D に整形する。未設定の古い記録は "—"。
+function formatCreatedAt(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function entriesForMonth(monthDate) {
@@ -210,6 +241,16 @@ const el = {
   entryCategory: document.getElementById("entry-category"),
   entryAmount: document.getElementById("entry-amount"),
   entryMemo: document.getElementById("entry-memo"),
+  advanceToggle: document.getElementById("advance-toggle"),
+  entryAdvance: document.getElementById("entry-advance"),
+  advanceOutstandingTotal: document.getElementById("advance-outstanding-total"),
+  advanceList: document.getElementById("advance-list"),
+  advanceSettleModal: document.getElementById("advance-settle-modal"),
+  advanceSettleSummary: document.getElementById("advance-settle-summary"),
+  advanceSettleDate: document.getElementById("advance-settle-date"),
+  advanceSettleConfirm: document.getElementById("advance-settle-confirm"),
+  advanceSettleCancel: document.getElementById("advance-settle-cancel"),
+  advanceSettleClose: document.getElementById("advance-settle-close"),
   payslipSection: document.getElementById("payslip-section"),
   payslipToggleBtn: document.getElementById("payslip-toggle-btn"),
   payslipBreakdown: document.getElementById("payslip-breakdown"),
@@ -358,11 +399,16 @@ async function deleteEntryFromDb(id) {
 
 async function importEntriesToDb(items) {
   const CHUNK_SIZE = 400;
+  // インポートした日時を記録しておく (CSV・メールからの取り込み共通)
+  const importedAt = nowTimestamp();
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
     const chunk = items.slice(i, i + CHUNK_SIZE);
     const batch = firestoreApi.writeBatch(db);
     for (const item of chunk) {
-      batch.set(firestoreApi.doc(entriesCollection(currentUid)), item);
+      batch.set(firestoreApi.doc(entriesCollection(currentUid)), {
+        createdAt: importedAt,
+        ...item,
+      });
     }
     await batch.commit();
   }
@@ -435,8 +481,129 @@ function render() {
   renderMonthlyBarChart();
   const budgetTotals = renderBudget(entriesInPeriod, targetMultiplier);
   renderPlanActual(entriesInPeriod, targetMultiplier, budgetTotals);
+  renderAdvances();
   renderNeedWantSave(entriesInPeriod);
   renderList(entriesInPeriod);
+}
+
+// ---------------------------------------------------------------------------
+// 立替金 (仮払い)
+// ---------------------------------------------------------------------------
+
+/**
+ * 立替金の精算状態は保存せず、返金記録の有無から導出する。
+ * (「精算済み」フラグを両方に書くと、片方を消したときに整合性が崩れるため)
+ * 立替entryのid -> 返金entry の Map を1回の走査で作る。
+ */
+function refundsByAdvanceId() {
+  const map = new Map();
+  for (const e of entries) {
+    if (e.advanceRefundFor) map.set(e.advanceRefundFor, e);
+  }
+  return map;
+}
+
+// 未回収の立替金。期間(今月/今年)では絞り込まない —
+// 先月の立替でも返金されるまでは未回収のままなので、常に全期間が対象。
+function outstandingAdvances(refundMap = refundsByAdvanceId()) {
+  return entries
+    .filter((e) => e.advance === true && !refundMap.has(e.id))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function renderAdvances() {
+  const outstanding = outstandingAdvances();
+  const total = outstanding.reduce((sum, e) => sum + e.amount, 0);
+  el.advanceOutstandingTotal.textContent = formatYen(total);
+
+  el.advanceList.innerHTML = "";
+
+  if (outstanding.length === 0) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent = "未回収の立替金はありません。";
+    el.advanceList.appendChild(p);
+    return;
+  }
+
+  for (const entry of outstanding) {
+    const row = document.createElement("div");
+    row.className = "advance-row";
+
+    const dateEl = document.createElement("span");
+    dateEl.className = "advance-row-date";
+    const [, m, d] = entry.date.split("-");
+    dateEl.textContent = `${Number(m)}/${Number(d)}`;
+
+    const categoryEl = document.createElement("span");
+    categoryEl.textContent = entry.category;
+
+    const memoEl = document.createElement("span");
+    memoEl.className = "advance-row-memo";
+    memoEl.textContent = entry.memo || "";
+
+    const amountEl = document.createElement("span");
+    amountEl.className = "advance-row-amount";
+    amountEl.textContent = formatYen(entry.amount);
+
+    const settleBtn = document.createElement("button");
+    settleBtn.type = "button";
+    settleBtn.className = "icon-btn";
+    settleBtn.textContent = "精算";
+    settleBtn.addEventListener("click", () => openAdvanceSettleModal(entry));
+
+    row.append(dateEl, categoryEl, memoEl, amountEl, settleBtn);
+    el.advanceList.appendChild(row);
+  }
+}
+
+// 精算するために選択中の立替entry
+let settlingAdvance = null;
+
+function openAdvanceSettleModal(entry) {
+  settlingAdvance = entry;
+  el.advanceSettleSummary.textContent =
+    `${entry.date} ${entry.category} ${formatYen(entry.amount)}` +
+    (entry.memo ? ` (${entry.memo})` : "");
+  el.advanceSettleDate.value = toDateInputValue(new Date());
+  el.advanceSettleModal.classList.remove("hidden");
+}
+
+function closeAdvanceSettleModal() {
+  el.advanceSettleModal.classList.add("hidden");
+  settlingAdvance = null;
+}
+
+async function confirmAdvanceSettle() {
+  if (!settlingAdvance) return;
+  const refundDate = el.advanceSettleDate.value;
+  if (!refundDate) {
+    alert("返金された日を入力してください。");
+    return;
+  }
+
+  const advance = settlingAdvance;
+  el.advanceSettleConfirm.disabled = true;
+  try {
+    await addEntryToDb({
+      date: refundDate,
+      type: "income",
+      category: ADVANCE_REFUND_CATEGORY,
+      amount: advance.amount,
+      memo: `立替金精算: ${advance.memo || advance.category}`,
+      payslip: null,
+      advance: false,
+      advanceRefundFor: advance.id,
+      createdAt: nowTimestamp(),
+    });
+  } catch (err) {
+    alert("精算の記録に失敗しました: " + err.message);
+    return;
+  } finally {
+    el.advanceSettleConfirm.disabled = false;
+  }
+
+  closeAdvanceSettleModal();
 }
 
 // 縦軸の目盛り幅をキリの良い数値 (1, 2, 5 × 10^n) から選ぶ
@@ -694,8 +861,10 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
 // 収入目標の合計を計算する。「賞与」は月額ではなく、ボーナス月に
 // 給与の指定した月数分を上乗せする形で計算する
 function computeIncomeBudgetTotal(targetMultiplier) {
-  const baseCategories = CATEGORIES.income.filter((c) => c !== BONUS_CATEGORY);
-  const baseMonthly = baseCategories.reduce((sum, c) => sum + (incomeBudgets[c] || 0), 0);
+  const baseMonthly = incomeBudgetCategories().reduce(
+    (sum, c) => sum + (incomeBudgets[c] || 0),
+    0
+  );
 
   const bonusMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
   const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
@@ -916,6 +1085,16 @@ function sortEntries(list) {
       case "amount":
         cmp = a.amount - b.amount;
         break;
+      case "createdAt": {
+        // 登録日が未設定の古い記録は常に末尾に寄せる
+        const av = a.createdAt || "";
+        const bv = b.createdAt || "";
+        if (!av && !bv) cmp = 0;
+        else if (!av) cmp = 1;
+        else if (!bv) cmp = -1;
+        else cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        break;
+      }
       case "date":
       default:
         cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
@@ -992,6 +1171,8 @@ function renderList(monthEntries) {
       : "条件に一致する記録がありません。";
   updateSortIndicators();
 
+  const refundMap = refundsByAdvanceId();
+
   for (const entry of sortEntries(filtered)) {
     const tr = document.createElement("tr");
 
@@ -1005,6 +1186,15 @@ function renderList(monthEntries) {
     badge.textContent = TYPE_LABELS[entry.type];
     typeTd.appendChild(badge);
 
+    // 立替払いは種別セルに印を付ける (カテゴリセルに入れると並び替えの比較対象が変わるため)
+    if (entry.advance === true) {
+      const settled = refundMap.has(entry.id);
+      const advanceBadge = document.createElement("span");
+      advanceBadge.className = settled ? "advance-badge settled" : "advance-badge";
+      advanceBadge.textContent = settled ? "立替(精算済)" : "立替(未回収)";
+      typeTd.appendChild(advanceBadge);
+    }
+
     const categoryTd = document.createElement("td");
     categoryTd.textContent = entry.category;
 
@@ -1016,6 +1206,12 @@ function renderList(monthEntries) {
     const memoTd = document.createElement("td");
     memoTd.className = "memo-cell";
     memoTd.textContent = entry.memo || "";
+
+    // 記入・インポートした日 (取引日とは別)
+    const createdAtTd = document.createElement("td");
+    createdAtTd.className = "created-at-cell";
+    createdAtTd.textContent = formatCreatedAt(entry.createdAt);
+    if (entry.createdAt) createdAtTd.title = new Date(entry.createdAt).toLocaleString("ja-JP");
 
     const actionsTd = document.createElement("td");
     const actions = document.createElement("div");
@@ -1042,7 +1238,7 @@ function renderList(monthEntries) {
     actions.append(editBtn, deleteBtn);
     actionsTd.appendChild(actions);
 
-    tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, actionsTd);
+    tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, createdAtTd, actionsTd);
     el.entryList.appendChild(tr);
   }
 }
@@ -1253,6 +1449,13 @@ function updatePayslipVisibility() {
       : "給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)";
 }
 
+// 立替払いのチェックボックスは「支出」のときだけ出す
+function updateAdvanceVisibility() {
+  const isExpense = selectedType() === "expense";
+  el.advanceToggle.classList.toggle("hidden", !isExpense);
+  if (!isExpense) el.entryAdvance.checked = false;
+}
+
 // 内訳が入力されていれば payslip オブジェクトを、入力されていなければ null を返す
 function buildPayslipData() {
   if (el.payslipBreakdown.classList.contains("hidden")) return null;
@@ -1328,8 +1531,8 @@ async function handleBudgetSubmit(event) {
 
 function renderIncomeBudgetInputs() {
   el.incomeBudgetInputs.innerHTML = "";
-  // 賞与は月額ではなく、下のボーナス設定 (月・給与の何か月分か) で計算するため除外
-  for (const category of CATEGORIES.income.filter((c) => c !== BONUS_CATEGORY)) {
+  // 賞与は下のボーナス設定で、立替金返金は精算時に自動作成されるため、どちらも除外
+  for (const category of incomeBudgetCategories()) {
     const group = document.createElement("div");
     group.className = "form-group";
 
@@ -1421,6 +1624,7 @@ function resetForm() {
   el.entryDate.value = toDateInputValue(new Date());
   renderCategoryOptions("expense");
   updatePayslipVisibility();
+  updateAdvanceVisibility();
   el.formTitle.textContent = "記録を追加";
   el.submitBtn.textContent = "追加";
   el.cancelEditBtn.classList.add("hidden");
@@ -1440,6 +1644,8 @@ function startEdit(id) {
   el.entryMemo.value = entry.memo || "";
 
   updatePayslipVisibility();
+  updateAdvanceVisibility();
+  el.entryAdvance.checked = entry.advance === true;
   if (entry.payslip) {
     // 旧形式(kindなし)は給与用の内訳として復元する
     const mode = entry.payslip.kind === "bonus" ? "bonus" : "salary";
@@ -1480,22 +1686,27 @@ async function handleSubmit(event) {
     return;
   }
 
+  const type = selectedType();
   const data = {
     date: el.entryDate.value,
-    type: selectedType(),
+    type,
     category: el.entryCategory.value,
     amount,
     memo: el.entryMemo.value.trim(),
     payslip: buildPayslipData(),
+    // 立替払いは支出のときだけ。編集でチェックを外した場合に確実に消えるよう
+    // false も明示的に書き込む (updateDoc は指定したキーしか更新しないため)
+    advance: type === "expense" && el.entryAdvance.checked,
   };
 
   const editingId = el.entryId.value;
   el.submitBtn.disabled = true;
   try {
     if (editingId) {
+      // 登録日 (createdAt) は最初に記録したときのものを保つため、更新時は触らない
       await updateEntryInDb(editingId, data);
     } else {
-      await addEntryToDb(data);
+      await addEntryToDb({ ...data, createdAt: nowTimestamp() });
     }
   } catch (err) {
     alert("保存に失敗しました: " + err.message);
@@ -2267,6 +2478,7 @@ function setupAppEventListeners() {
     radio.addEventListener("change", () => {
       renderCategoryOptions(selectedType());
       updatePayslipVisibility();
+      updateAdvanceVisibility();
     });
   }
 
@@ -2319,12 +2531,20 @@ function setupAppEventListeners() {
   });
 
   el.payslipDetailClose.addEventListener("click", hidePayslipDetailModal);
-  el.payslipDetailModal.addEventListener("click", (event) => {
-    if (event.target === el.payslipDetailModal) hidePayslipDetailModal();
-  });
+  el.advanceSettleClose.addEventListener("click", closeAdvanceSettleModal);
+  el.advanceSettleCancel.addEventListener("click", closeAdvanceSettleModal);
+  el.advanceSettleConfirm.addEventListener("click", confirmAdvanceSettle);
+
+  // モーダルは複数あるので、背景クリックとEscapeは全ての .modal-overlay に対して共通で処理する
+  for (const overlay of document.querySelectorAll(".modal-overlay")) {
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.classList.add("hidden");
+    });
+  }
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !el.payslipDetailModal.classList.contains("hidden")) {
-      hidePayslipDetailModal();
+    if (event.key !== "Escape") return;
+    for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
+      overlay.classList.add("hidden");
     }
   });
 

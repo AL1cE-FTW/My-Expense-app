@@ -74,6 +74,7 @@
       <a class="sidebar-link" href="#summary-section">概要</a>
       <a class="sidebar-link" href="#budget-section">予算</a>
       <a class="sidebar-link" href="#plan-actual-section">予定と実績</a>
+      <a class="sidebar-link" href="#advance-section">立替金</a>
       <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
       <a class="sidebar-link" href="#list-section">記録一覧</a>
     </nav>
@@ -176,6 +177,13 @@
               <label for="entry-memo">メモ</label>
               <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
             </div>
+          </div>
+
+          <div class="advance-toggle hidden" id="advance-toggle">
+            <label class="advance-checkbox">
+              <input type="checkbox" id="entry-advance">
+              <span>立替払い(あとで会社などから返金される)</span>
+            </label>
           </div>
 
           <div class="payslip-section hidden" id="payslip-section">
@@ -344,6 +352,15 @@
         </div>
       </section>
 
+      <!-- 立替金 (仮払い) -->
+      <section class="card" id="advance-section">
+        <h2>立替金(未回収)</h2>
+        <div class="advance-total">
+          未回収合計: <strong id="advance-outstanding-total">¥0</strong>
+        </div>
+        <div id="advance-list"></div>
+      </section>
+
       <!-- Need / Want / Save -->
       <section class="card" id="nws-section">
         <h2>Need / Want / Save (50:30:20)</h2>
@@ -386,6 +403,7 @@
                 <th class="sortable" data-sort="category">カテゴリ</th>
                 <th class="sortable amount-col" data-sort="amount">金額</th>
                 <th>メモ</th>
+                <th class="sortable" data-sort="createdAt">登録日</th>
                 <th></th>
               </tr>
             </thead>
@@ -409,6 +427,26 @@
       <button type="button" class="modal-close" id="payslip-detail-close" aria-label="閉じる">×</button>
       <h3 class="modal-title">給与明細の内訳</h3>
       <div id="payslip-detail-content"></div>
+    </div>
+  </div>
+
+  <!-- 立替金の精算ポップアップ -->
+  <div class="modal-overlay hidden" id="advance-settle-modal">
+    <div class="modal-box">
+      <button type="button" class="modal-close" id="advance-settle-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title">立替金を精算する</h3>
+      <div id="advance-settle-summary" class="advance-settle-summary"></div>
+      <div class="form-group">
+        <label for="advance-settle-date">返金された日</label>
+        <input type="date" id="advance-settle-date">
+      </div>
+      <p class="advance-settle-note">
+        同額の収入(カテゴリ「立替金返金」)を自動で記録し、この立替金を精算済みにします。
+      </p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="advance-settle-confirm">精算する</button>
+        <button type="button" class="btn btn-secondary" id="advance-settle-cancel">キャンセル</button>
+      </div>
     </div>
   </div>
 

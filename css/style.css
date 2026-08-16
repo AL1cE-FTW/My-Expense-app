@@ -103,6 +103,7 @@ html {
 #summary-section,
 #budget-section,
 #plan-actual-section,
+#advance-section,
 #nws-section,
 #list-section {
   scroll-margin-top: 84px;
@@ -417,7 +418,108 @@ html {
   color: var(--color-text);
 }
 
-/* モーダル (給与明細の内訳ポップアップ) */
+/* 立替金 (仮払い) */
+.advance-toggle {
+  margin-bottom: 16px;
+}
+
+.advance-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.advance-checkbox input {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+}
+
+.advance-total {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  margin-bottom: 14px;
+}
+
+.advance-total strong {
+  font-size: 1.3rem;
+  color: var(--color-expense);
+  font-variant-numeric: tabular-nums;
+}
+
+.advance-row {
+  display: grid;
+  grid-template-columns: 4.5em 7em 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.advance-row:last-child {
+  border-bottom: none;
+}
+
+.advance-row-date,
+.advance-row-memo {
+  color: var(--color-text-muted);
+}
+
+.advance-row-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+}
+
+.advance-settle-summary {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  margin-bottom: 14px;
+}
+
+.advance-settle-note {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 10px 0 14px;
+}
+
+.advance-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  background: #fff4e5;
+  color: #b26a00;
+}
+
+.advance-badge.settled {
+  background: var(--color-income-bg);
+  color: var(--color-income);
+}
+
+.created-at-cell {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 600px) {
+  .advance-row {
+    grid-template-columns: 4.5em 1fr auto auto;
+  }
+
+  .advance-row-memo {
+    display: none;
+  }
+}
+
+/* モーダル (給与明細の内訳・立替金の精算ポップアップ) */
 .modal-overlay {
   position: fixed;
   inset: 0;
