@@ -143,6 +143,7 @@ let filterDate = "";
 let googleClientId = null;
 let googleTokenClient = null;
 let gmailAccessToken = null;
+let googleTokenGranted = false;
 
 // ---------------------------------------------------------------------------
 // ユーティリティ
@@ -2276,7 +2277,9 @@ function parseVpassEmail(text) {
   };
 }
 
-async function gmailApiFetch(path, params) {
+// アクセストークンは約1時間で切れる。期限切れ(401/403)なら黙って取り直して
+// 一度だけやり直すことで、時間を空けた2回目の読み込みが必ず失敗するのを防ぐ。
+async function gmailApiFetch(path, params, isRetry = false) {
   const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`);
   for (const [key, value] of Object.entries(params || {})) {
     url.searchParams.set(key, value);
@@ -2284,10 +2287,33 @@ async function gmailApiFetch(path, params) {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${gmailAccessToken}` },
   });
+  if (res.status === 401 && !isRetry) {
+    gmailAccessToken = null;
+    await requestGmailAccessToken();
+    return gmailApiFetch(path, params, true);
+  }
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("Googleの認証が切れました。もう一度お試しください。");
+    }
     throw new Error(`Gmail APIエラー (${res.status})`);
   }
   return res.json();
+}
+
+// 該当メールが maxResults を超えても古い分を取りこぼさないよう、
+// nextPageToken を辿って集める(暴走を避けるため上限あり)。
+async function gmailListAllMessages(query, limit = 300) {
+  const collected = [];
+  let pageToken = null;
+  do {
+    const params = { q: query, maxResults: "100" };
+    if (pageToken) params.pageToken = pageToken;
+    const page = await gmailApiFetch("messages", params);
+    collected.push(...(page.messages || []));
+    pageToken = page.nextPageToken || null;
+  } while (pageToken && collected.length < limit);
+  return collected;
 }
 
 function gmailImportDocRef() {
@@ -2299,16 +2325,28 @@ async function getImportedGmailIds() {
   return snap.exists() ? snap.data().importedIds || [] : [];
 }
 
+// setDoc(merge:true) + arrayUnion なら、ドキュメントが無ければ作成、あれば追記になる。
+// 以前は updateDoc の失敗を「初回で未作成」と決めつけて merge なしの setDoc に
+// フォールバックしていたため、一時的なエラー1回で取り込み済み履歴が全消えし、
+// 過去のメールが全部「新規」に戻って大量に二重登録される危険があった。
 async function markGmailIdsImported(ids) {
   if (ids.length === 0) return;
-  try {
-    await firestoreApi.updateDoc(gmailImportDocRef(), {
-      importedIds: firestoreApi.arrayUnion(...ids),
-    });
-  } catch {
-    // 初回はドキュメントがまだ存在しない
-    await firestoreApi.setDoc(gmailImportDocRef(), { importedIds: ids });
-  }
+  await firestoreApi.setDoc(
+    gmailImportDocRef(),
+    { importedIds: firestoreApi.arrayUnion(...ids) },
+    { merge: true }
+  );
+}
+
+// トークンクライアントは1つだけ作り、コールバックが掴む resolve/reject は
+// 呼び出しごとに差し替える。作成時のクロージャを使い回すと、1回目に失敗した
+// あと2回目の Promise が永久に解決せずボタンが固まったままになる。
+let pendingGmailTokenRequest = null;
+
+function settleGmailTokenRequest(fn, value) {
+  const pending = pendingGmailTokenRequest;
+  pendingGmailTokenRequest = null;
+  if (pending) pending[fn](value);
 }
 
 function requestGmailAccessToken() {
@@ -2317,22 +2355,30 @@ function requestGmailAccessToken() {
       reject(new Error("Googleの認証ライブラリを読み込めませんでした。"));
       return;
     }
+    // 前の要求が未解決のまま残っていたら打ち切ってから差し替える
+    settleGmailTokenRequest("reject", new Error("認証がやり直されました。"));
+    pendingGmailTokenRequest = { resolve, reject };
+
     if (!googleTokenClient) {
       googleTokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: googleClientId,
         scope: "https://www.googleapis.com/auth/gmail.readonly",
         callback: (response) => {
           if (response.error) {
-            reject(new Error(response.error));
+            settleGmailTokenRequest("reject", new Error(response.error));
             return;
           }
           gmailAccessToken = response.access_token;
-          resolve(gmailAccessToken);
+          googleTokenGranted = true;
+          settleGmailTokenRequest("resolve", gmailAccessToken);
         },
-        error_callback: (err) => reject(new Error(err.type || "認証に失敗しました")),
+        error_callback: (err) => {
+          settleGmailTokenRequest("reject", new Error(err.type || "認証に失敗しました"));
+        },
       });
     }
-    googleTokenClient.requestAccessToken({ prompt: gmailAccessToken ? "" : "consent" });
+    // 一度許可済みなら再同意を求めない(期限切れの取り直しを静かに行うため)
+    googleTokenClient.requestAccessToken({ prompt: googleTokenGranted ? "" : "consent" });
   });
 }
 
@@ -2356,8 +2402,7 @@ async function importFromGmail() {
     el.gmailImportBtn.textContent = "検索中...";
     const importedIds = new Set(await getImportedGmailIds());
 
-    const listResult = await gmailApiFetch("messages", { q: GMAIL_QUERY, maxResults: "50" });
-    const messages = listResult.messages || [];
+    const messages = await gmailListAllMessages(GMAIL_QUERY);
     const newMessages = messages.filter((m) => !importedIds.has(m.id));
 
     if (newMessages.length === 0) {
@@ -2383,22 +2428,45 @@ async function importFromGmail() {
       return;
     }
 
-    const total = imported.reduce((sum, e) => sum + e.amount, 0);
-    const preview = imported
+    // メールIDによる重複防止が破れたとき(履歴の記録に失敗した直後など)の安全網。
+    // CSV側と同じ判定を通し、同じ内容の記録が二重に入らないようにする。
+    const { deduped, skippedCount } = dedupeAgainstExisting(imported);
+
+    if (deduped.length === 0) {
+      await markGmailIdsImported(newIds);
+      alert(`すべて(${skippedCount}件)既に登録済みのため、新しく追加する記録はありませんでした。`);
+      return;
+    }
+
+    const total = deduped.reduce((sum, e) => sum + e.amount, 0);
+    const preview = deduped
       .slice(0, 5)
       .map((e) => `${e.date} ${e.memo} ${formatYen(e.amount)} (${e.category})`)
       .join("\n");
-    const message =
-      `${imported.length}件の利用明細が見つかりました (合計 ${formatYen(total)})。取り込みますか?\n\n` +
+    let message =
+      `${deduped.length}件の利用明細が見つかりました (合計 ${formatYen(total)})。取り込みますか?\n\n` +
       preview +
-      (imported.length > 5 ? `\n...ほか${imported.length - 5}件` : "") +
-      "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。";
+      (deduped.length > 5 ? `\n...ほか${deduped.length - 5}件` : "");
+    if (skippedCount > 0) {
+      message += `\n\n(${skippedCount}件は既に登録済みのためスキップされます)`;
+    }
+    message += "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。";
     if (!confirm(message)) return;
 
-    await importEntriesToDb(imported);
-    await markGmailIdsImported(newIds);
+    await importEntriesToDb(deduped);
 
-    alert(`${imported.length}件をインポートしました。`);
+    // 記録は入ったので、履歴の記録に失敗しても取り込み自体は成功として扱う。
+    // (次回また同じメールを拾っても、上の重複チェックで弾かれる)
+    try {
+      await markGmailIdsImported(newIds);
+      alert(`${deduped.length}件をインポートしました。`);
+    } catch {
+      alert(
+        `${deduped.length}件をインポートしました。\n\n` +
+          "ただし取り込み済みメールの記録に失敗しました。次回同じメールが再度見つかりますが、" +
+          "重複チェックで自動的にスキップされます。"
+      );
+    }
   } catch (err) {
     console.error(err);
     alert("メールの読み込みに失敗しました: " + err.message);
