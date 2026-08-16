@@ -136,6 +136,8 @@ const SORT_DEFAULT_DIRECTION = {
 // 記録一覧の絞り込み
 let filterType = "all";
 let filterCategory = "all";
+// 特定の日だけ表示する ("YYYY-MM-DD"、空文字なら日付で絞り込まない)
+let filterDate = "";
 
 // Gmail 連携 (メールからの読み込み)
 let googleClientId = null;
@@ -169,6 +171,12 @@ function toDateInputValue(date) {
 // 「いつ記入・インポートしたか」を残しておくために使う。
 function nowTimestamp() {
   return new Date().toISOString();
+}
+
+// "YYYY-MM-DD" -> "2026年8月16日"
+function formatDateLabel(value) {
+  const [y, m, d] = value.split("-");
+  return `${Number(y)}年${Number(m)}月${Number(d)}日`;
 }
 
 // createdAt (ISO文字列) を表示用の M/D に整形する。未設定の古い記録は "—"。
@@ -302,6 +310,8 @@ const el = {
   entryList: document.getElementById("entry-list"),
   filterType: document.getElementById("filter-type"),
   filterCategory: document.getElementById("filter-category"),
+  filterDate: document.getElementById("filter-date"),
+  filterDateClear: document.getElementById("filter-date-clear"),
   listEmptyMessage: document.getElementById("list-empty-message"),
   payslipDetailModal: document.getElementById("payslip-detail-modal"),
   payslipDetailContent: document.getElementById("payslip-detail-content"),
@@ -1128,8 +1138,13 @@ function applyFilters(list) {
   return list.filter((e) => {
     if (filterType !== "all" && e.type !== filterType) return false;
     if (filterCategory !== "all" && e.category !== filterCategory) return false;
+    if (filterDate && e.date !== filterDate) return false;
     return true;
   });
+}
+
+function hasActiveFilters() {
+  return filterType !== "all" || filterCategory !== "all" || filterDate !== "";
 }
 
 function renderFilterCategoryOptions() {
@@ -1159,7 +1174,7 @@ function renderFilterCategoryOptions() {
 
 function renderList(monthEntries) {
   const filtered = applyFilters(monthEntries);
-  const isFiltered = filterType !== "all" || filterCategory !== "all";
+  const isFiltered = hasActiveFilters();
 
   el.entryList.innerHTML = "";
   el.listEmptyMessage.classList.toggle("hidden", filtered.length > 0);
@@ -1169,6 +1184,13 @@ function renderList(monthEntries) {
     monthEntries.length === 0 && !isFiltered
       ? `${periodLabel}の記録はまだありません。上のフォームから追加してください。`
       : "条件に一致する記録がありません。";
+
+  // 日付で絞り込んでいるときは、見出しにその日を出して現在の表示条件を分かりやすくする
+  el.listSectionTitle.textContent = filterDate
+    ? `${formatDateLabel(filterDate)}の記録`
+    : `${periodLabel}の記録`;
+  el.filterDateClear.classList.toggle("hidden", !filterDate);
+
   updateSortIndicators();
 
   const refundMap = refundsByAdvanceId();
@@ -2527,6 +2549,26 @@ function setupAppEventListeners() {
 
   el.filterCategory.addEventListener("change", () => {
     filterCategory = el.filterCategory.value;
+    render();
+  });
+
+  el.filterDate.addEventListener("change", () => {
+    filterDate = el.filterDate.value;
+    // 選んだ日が今表示している期間の外だと1件も出ずに戸惑うので、
+    // その日を含む月へ自動で移動する
+    if (filterDate) {
+      const picked = new Date(filterDate + "T00:00:00");
+      const sameYear = picked.getFullYear() === currentMonth.getFullYear();
+      const inPeriod =
+        viewMode === "year" ? sameYear : sameYear && picked.getMonth() === currentMonth.getMonth();
+      if (!inPeriod) currentMonth = startOfMonth(picked);
+    }
+    render();
+  });
+
+  el.filterDateClear.addEventListener("click", () => {
+    filterDate = "";
+    el.filterDate.value = "";
     render();
   });
 
