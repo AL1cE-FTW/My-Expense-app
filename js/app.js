@@ -1612,8 +1612,28 @@ function renderBudgetInputs() {
   }
 }
 
+// 保存は開いた時点の値で全置換するため、開いている間に別の端末で変更されると
+// その変更を消してしまう。フォームを開いた時点の内容を控えておき、
+// 保存直前に変わっていないか確かめる。
+let budgetSnapshotOnOpen = null;
+let incomeBudgetSnapshotOnOpen = null;
+
+function settingsChangedSinceOpen(snapshot, current) {
+  if (!snapshot) return false;
+  return JSON.stringify(snapshot) !== JSON.stringify(current);
+}
+
+function confirmOverwriteIfChanged(snapshot, current, label) {
+  if (!settingsChangedSinceOpen(snapshot, current)) return true;
+  return confirm(
+    `このフォームを開いてから、別の端末で${label}が変更されました。\n` +
+      "このまま保存すると、その変更は上書きされます。よろしいですか?"
+  );
+}
+
 function openBudgetForm() {
   renderBudgetInputs();
+  budgetSnapshotOnOpen = { ...budgets };
   el.budgetForm.classList.remove("hidden");
   el.budgetForm.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1632,6 +1652,8 @@ async function handleBudgetSubmit(event) {
       newBudgets[input.dataset.category] = amount;
     }
   }
+
+  if (!confirmOverwriteIfChanged(budgetSnapshotOnOpen, budgets, "予算")) return;
 
   try {
     await saveBudgetsToDb(newBudgets);
@@ -1690,6 +1712,7 @@ function renderBonusSettingsInputs() {
 function openIncomeBudgetForm() {
   renderIncomeBudgetInputs();
   renderBonusSettingsInputs();
+  incomeBudgetSnapshotOnOpen = { ...incomeBudgets };
   el.incomeBudgetForm.classList.remove("hidden");
   el.incomeBudgetForm.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1717,6 +1740,8 @@ async function handleIncomeBudgetSubmit(event) {
   if (Number.isFinite(bonusMultiplier) && bonusMultiplier > 0) {
     newIncomeBudgets.bonusMultiplier = bonusMultiplier;
   }
+
+  if (!confirmOverwriteIfChanged(incomeBudgetSnapshotOnOpen, incomeBudgets, "収入目標")) return;
 
   try {
     await saveIncomeBudgetsToDb(newIncomeBudgets);
@@ -2349,17 +2374,29 @@ const GMAIL_QUERY = 'from:statement@vpass.ne.jp subject:"ご利用のお知ら�
 
 // お店の名前からカテゴリを推測する。Suica/PASMO等の交通系は確実、それ以外は
 // よくある業態のキーワードで大まかに振り分け、当てはまらなければ「その他支出」。
+// 店名のルールは toHalfWidthAscii で半角化したあとの文字列に対して判定するため、
+// 英数字は半角で書く (全角のまま書くと絶対に一致しない)。
+// 「GU」「ETC」のような短い英字は他の語の一部に紛れ込みやすいので、前後が
+// 英字でないことを条件にする (SKETCH の ETC、GUCCI の GU などを避ける)。
+// exclude は「パターンには一致するが、このカテゴリではないもの」の除外指定。
 const MERCHANT_CATEGORY_RULES = [
   {
     category: "交通",
-    pattern: /Ｓｕｉｃａ|Suica|ＰＡＳＭＯ|PASMO|ＪＲ|(?:^|[^A-Za-z])JR(?:[^A-Za-z]|$)|地下鉄|バス|タクシー|ＥＴＣ|ICOCA|みどりの窓口|東京メトロ|モノレール/i,
+    pattern:
+      /Suica|PASMO|(?:^|[^A-Za-z])JR(?:[^A-Za-z]|$)|地下鉄|バス|タクシー|(?:^|[^A-Za-z])ETC(?:[^A-Za-z]|$)|ICOCA|みどりの窓口|東京メトロ|モノレール/i,
+    // 駅ナカの売店は交通費ではなく食費 (「JR東日本 ニューデイズ」など)
+    exclude: /ニューデイズ|NEWDAYS|キオスク|KIOSK/i,
   },
   {
     category: "食費",
     // 「フアミリ―マ―ト」のようにカード会社のCSVでは小さい「ァ」や長音記号「ー」が
     // 通常サイズの文字やダッシュに置き換わっていることがあるため、それも拾えるように
     // 「フアミリ」で判定する
-    pattern: /ファミリーマート|フアミリ|セブン|ローソン|ミニストップ|デイリーヤマザキ|ニューデイズ|キオスク|コンビニ|スーパー|イオン|やまか|西友|マルエツ|東急ストア|ライフ|カフェ|スターバックス|ドトール|ベックス|コージーコーナー|カルディ|珈琲|マクドナルド|吉野家|すき家|松屋|ラーメン|餃子|食堂|レストラン|居酒屋|もんじゃ|大戸屋|ピザ|寿司/i,
+    pattern:
+      /ファミリーマート|フアミリ|セブン|ローソン|ミニストップ|デイリーヤマザキ|ニューデイズ|キオスク|コンビニ|スーパー|イオン|やまか|西友|マルエツ|東急ストア|ライフ|カフェ|スターバックス|ドトール|ベックス|コージーコーナー|カルディ|珈琲|マクドナルド|吉野家|すき家|松屋|ラーメン|餃子|食堂|レストラン|居酒屋|もんじゃ|大戸屋|ピザ|寿司/i,
+    // 「スーパーオートバックス」(カー用品)「ライフカード」(カード会社) のように、
+    // 食べ物と無関係なのに部分一致してしまうもの
+    exclude: /オートバックス|ライフカード|スーパーホテル|イオンカード|イオン銀行/i,
   },
   {
     category: "日用品",
@@ -2371,15 +2408,47 @@ const MERCHANT_CATEGORY_RULES = [
   },
   {
     category: "衣服・美容",
-    pattern: /ユニクロ|UNIQLO|ＧＵ|美容室|ヘアサロン|理容/i,
+    pattern: /ユニクロ|UNIQLO|(?:^|[^A-Za-z])GU(?:[^A-Za-z]|$)|美容室|ヘアサロン|理容/i,
   },
 ];
 
 // 全角英数字・全角スペースを半角に変換する。カード利用履歴CSVでは
 // 「ＢＯＯＴＨ」「ＧＯＯＧＬＥ　ＰＬＡＹ　ＪＡＰＡＮ」のように国内加盟店名が
 // 全角化されていることが多く、半角前提のカテゴリ判定パターンに掛からないため。
+// 半角カナ -> 全角カナ。カード会社のCSVでは「ﾌｧﾐﾘｰﾏｰﾄ」のように半角カナで
+// 出ることがあり、そのままだと全角カナ前提のルールを全て素通りしてしまう。
+// 濁点・半濁点は独立した文字として続くため、先に合成する。
+const HALFWIDTH_KANA = "｡｢｣､･ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ";
+const FULLWIDTH_KANA =
+  "。「」、・ヲァィゥェォャュョッーアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン゛゜";
+const VOICED_KANA = "ガギグゲゴザジズゼゾダヂヅデドバビブベボヴ";
+const VOICED_BASE = "カキクケコサシスセソタチツテトハヒフヘホウ";
+
+function toFullWidthKana(text) {
+  let result = "";
+  for (let i = 0; i < text.length; i++) {
+    const index = HALFWIDTH_KANA.indexOf(text[i]);
+    if (index === -1) {
+      result += text[i];
+      continue;
+    }
+    const ch = FULLWIDTH_KANA[index];
+    const next = text[i + 1];
+    if (next === "ﾞ" && VOICED_BASE.includes(ch)) {
+      result += VOICED_KANA[VOICED_BASE.indexOf(ch)];
+      i++;
+    } else if (next === "ﾟ" && "ハヒフヘホ".includes(ch)) {
+      result += "パピプペポ"["ハヒフヘホ".indexOf(ch)];
+      i++;
+    } else {
+      result += ch;
+    }
+  }
+  return result;
+}
+
 function toHalfWidthAscii(text) {
-  return text
+  return toFullWidthKana(text)
     .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
     .replace(/　/g, " ");
 }
@@ -2387,6 +2456,7 @@ function toHalfWidthAscii(text) {
 function guessCategoryFromMerchant(merchant) {
   const normalized = toHalfWidthAscii(merchant);
   for (const rule of MERCHANT_CATEGORY_RULES) {
+    if (rule.exclude && rule.exclude.test(normalized)) continue;
     if (rule.pattern.test(normalized)) return rule.category;
   }
   return "その他支出";
@@ -2416,25 +2486,37 @@ function findPlainTextPart(payload) {
  * Vpass「ご利用のお知らせ」メールの本文から利用明細を1件抽出する。
  * 解析できなければ null を返す。
  */
-function parseVpassEmail(text) {
-  const dateMatch = text.match(/◇利用日[:：]\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-  const merchantMatch = text.match(/◇利用先[:：]\s*(.+)/);
-  const amountMatch = text.match(/◇利用金額[:：]\s*([\d,]+)円/);
-  if (!dateMatch || !merchantMatch || !amountMatch) return null;
+/**
+ * Vpassの利用通知メールから明細を取り出す。1通に複数件が並ぶことがあるため、
+ * 「◇利用日」ごとに区切って全件を返す。
+ * (以前は最初の1件しか読まず、残りはメールが「取り込み済み」になることで
+ *  二度と取り込まれず永久に失われていた)
+ */
+function parseVpassEmails(text) {
+  const results = [];
+  // 「◇利用日」の位置で区切り、各ブロックの中で利用先・利用金額を探す
+  const blocks = text.split(/(?=◇利用日[:：])/);
+  for (const block of blocks) {
+    const dateMatch = block.match(/◇利用日[:：]\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    const merchantMatch = block.match(/◇利用先[:：]\s*(.+)/);
+    const amountMatch = block.match(/◇利用金額[:：]\s*([\d,]+)円/);
+    if (!dateMatch || !merchantMatch || !amountMatch) continue;
 
-  const [, y, mo, d] = dateMatch;
-  const amount = Number(amountMatch[1].replace(/,/g, ""));
-  if (!Number.isFinite(amount) || amount <= 0) return null;
-  const merchant = merchantMatch[1].trim();
-  if (!merchant) return null;
+    const [, y, mo, d] = dateMatch;
+    const amount = Number(amountMatch[1].replace(/,/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const merchant = merchantMatch[1].trim();
+    if (!merchant) continue;
 
-  return {
-    date: `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
-    type: "expense",
-    category: guessCategoryFromMerchant(merchant),
-    amount,
-    memo: merchant,
-  };
+    results.push({
+      date: `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`,
+      type: "expense",
+      category: guessCategoryFromMerchant(merchant),
+      amount,
+      memo: merchant,
+    });
+  }
+  return results;
 }
 
 // アクセストークンは約1時間で切れる。期限切れ(401/403)なら黙って取り直して
@@ -2489,8 +2571,29 @@ async function getImportedGmailIds() {
 // 以前は updateDoc の失敗を「初回で未作成」と決めつけて merge なしの setDoc に
 // フォールバックしていたため、一時的なエラー1回で取り込み済み履歴が全消えし、
 // 過去のメールが全部「新規」に戻って大量に二重登録される危険があった。
+// 取り込み済みIDは無制限には増やさない。ドキュメントが1MiB上限に達すると
+// 以降の記録が全て失敗し、毎回同じメールを取り込もうとするループになるため、
+// 古いものから捨てる (検索対象は直近60日なので、この件数あれば十分)
+const IMPORTED_GMAIL_ID_LIMIT = 2000;
+
 async function markGmailIdsImported(ids) {
   if (ids.length === 0) return;
+
+  // 件数を減らす書き込みは、現在の内容を確実に読めたときだけ行う。
+  // 読めていないのに全置換すると履歴を失う。
+  let existing = null;
+  try {
+    existing = await getImportedGmailIds();
+  } catch {
+    existing = null;
+  }
+
+  if (existing && existing.length + ids.length > IMPORTED_GMAIL_ID_LIMIT) {
+    const trimmed = [...new Set([...existing, ...ids])].slice(-IMPORTED_GMAIL_ID_LIMIT);
+    await firestoreApi.setDoc(gmailImportDocRef(), { importedIds: trimmed }, { merge: true });
+    return;
+  }
+
   await firestoreApi.setDoc(
     gmailImportDocRef(),
     { importedIds: firestoreApi.arrayUnion(...ids) },
@@ -2578,8 +2681,7 @@ async function importFromGmail() {
       const text = findPlainTextPart(full.payload);
       newIds.push(m.id); // 解析できなくても既読扱いにし、毎回取得し直さないようにする
       if (!text) continue;
-      const entry = parseVpassEmail(text);
-      if (entry) imported.push(entry);
+      imported.push(...parseVpassEmails(text));
     }
 
     if (imported.length === 0) {
@@ -2686,7 +2788,13 @@ function setupAuthForm() {
     }
   });
 
-  el.logoutBtn.addEventListener("click", () => authApi.signOut(auth));
+  el.logoutBtn.addEventListener("click", () => {
+    // 共有端末で別の人がログインしたときに、前の人のGmailを読めてしまわないよう
+    // アクセストークンを捨てる
+    gmailAccessToken = null;
+    googleTokenGranted = false;
+    authApi.signOut(auth);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2941,4 +3049,9 @@ async function main() {
   });
 }
 
-main();
+// 想定外の例外で「読み込み中...」のまま固まらないよう、最後に必ず受け止めて
+// 原因を示す画面に切り替える (設定値の誤りなどで initializeApp が落ちる場合など)
+main().catch((err) => {
+  console.error("起動に失敗しました:", err);
+  showOnly("sdk-error");
+});
