@@ -8,17 +8,23 @@ service cloud.firestore {
       return ["al1cealwayswithu@gmail.com"];
     }
 
+    // メールアドレスが「確認済み」であることも求めるかどうか。
+    // 有効にするには、下の行を
+    //   return request.auth.token.email_verified == true;
+    // に書き換える。ただし現在ログイン中のアカウントが未確認だと、有効にした
+    // 瞬間に自分も締め出されるので、先にメールの確認を済ませること。
+    // (このアプリは確認メールを送っていないため、通常は未確認のまま。
+    //  Firebase Authentication は同じメールでの重複登録を拒否するので、
+    //  これが無くても他人が同じメールで入ってくることはない)
+    function emailIsVerifiedEnough() {
+      return true;
+    }
+
     function isOwner(userId) {
       return request.auth != null
         && request.auth.uid == userId
-        && request.auth.token.email in allowedEmails();
-        // さらに厳しくしたい場合は、次の行を有効にしてメールアドレスが
-        // 確認済みであることも求められる。ただし現在ログイン中のアカウントが
-        // 未確認だと、有効にした瞬間に自分も締め出されるため、
-        // 先にメールの確認を済ませてから有効にすること。
-        // (Firebase Authentication は同じメールでの重複登録を拒否するため、
-        //  これが無くても他人が同じメールで入ってくることはない)
-        // && request.auth.token.email_verified == true;
+        && request.auth.token.email in allowedEmails()
+        && emailIsVerifiedEnough();
     }
 
     // 許可されたメールアドレスの本人のみ、自分の記録 (users/{uid}/entries/*) に

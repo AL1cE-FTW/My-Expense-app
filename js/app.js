@@ -1832,11 +1832,24 @@ async function deleteEntry(id) {
     : `この記録を削除しますか?\n${label}`;
   if (!confirm(message)) return;
 
+  // 2件消す場合、片方だけ成功して終わることがある。何が残っているかを
+  // 伝えないと、ユーザーは「何も起きなかった」と思って先に進んでしまう。
+  let refundDeleted = false;
   try {
-    if (refund) await deleteEntryFromDb(refund.id);
+    if (refund) {
+      await deleteEntryFromDb(refund.id);
+      refundDeleted = true;
+    }
     await deleteEntryFromDb(id);
   } catch (err) {
-    alert("削除に失敗しました: " + err.message);
+    alert(
+      "削除に失敗しました: " +
+        err.message +
+        (refundDeleted
+          ? "\n\n返金の記録は削除済みで、立替金の記録が残っています。" +
+            "そのため未回収の立替金として再び表示されます。もう一度削除してください。"
+          : "")
+    );
     return;
   }
   if (el.entryId.value === id) resetForm();
@@ -1882,17 +1895,34 @@ async function handleSubmit(event) {
   }
 
   el.submitBtn.disabled = true;
+  // 更新が通ったあとに返金の削除だけ失敗すると、記録自体は保存済みなのに
+  // 「保存に失敗しました」と出て、ユーザーは更新されていないと誤解する。
+  // どこまで完了したかを分けて扱う。
+  let entrySaved = false;
   try {
     if (editingId) {
       // 登録日 (createdAt) は最初に記録したときのものを保つため、更新時は触らない
       await updateEntryInDb(editingId, data);
+      entrySaved = true;
       if (refundToDelete) await deleteEntryFromDb(refundToDelete.id);
     } else {
       await addEntryToDb({ ...data, createdAt: nowTimestamp() });
+      entrySaved = true;
     }
   } catch (err) {
-    alert("保存に失敗しました: " + err.message);
-    return;
+    if (entrySaved) {
+      // 記録自体は保存済み。残っている問題だけを伝えてフォームは通常どおり閉じる
+      alert(
+        "記録は保存できましたが、対になる返金の記録を削除できませんでした: " +
+          err.message +
+          "\n\n返金の収入だけが残っているため、累計貯金額がその分ずれています。" +
+          "記録一覧から手動で削除してください。"
+      );
+    } else {
+      alert("保存に失敗しました: " + err.message);
+      el.submitBtn.disabled = false;
+      return;
+    }
   } finally {
     el.submitBtn.disabled = false;
   }
