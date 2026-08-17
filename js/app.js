@@ -28,7 +28,7 @@ const CATEGORIES = {
     "衣服・美容",
     "その他支出",
   ],
-  income: ["給与", "賞与", "副収入", "立替金返金", "その他収入"],
+  income: ["給与", "賞与", "副収入", "立替金返金", "カード返金", "その他収入"],
   save: ["株式", "投資信託", "定期預金", "その他貯蓄"],
 };
 
@@ -41,10 +41,22 @@ const BONUS_CATEGORY = "賞与";
 // 賞与と同じく「目標を立てる収入」ではないため、収入目標の入力欄からは除外する。
 const ADVANCE_REFUND_CATEGORY = "立替金返金";
 
-// 収入目標を設定できるカテゴリ (賞与・立替金返金は別扱いのため除外)
+// カード利用履歴CSVのマイナス金額(返金・キャンセル)から作られる収入のカテゴリ。
+const CARD_REFUND_CATEGORY = "カード返金";
+
+// 「稼いだお金」ではなく、払ったお金が戻ってきただけの収入。
+// 目標・達成率・Need/Want/Save の収入ベースからは除く
+// (含めると、10万円のキャンセルだけで「収入目標133%達成」に見えてしまう)。
+const REFUND_CATEGORIES = [ADVANCE_REFUND_CATEGORY, CARD_REFUND_CATEGORY];
+
+function isRefundIncome(entry) {
+  return entry.type === "income" && REFUND_CATEGORIES.includes(entry.category);
+}
+
+// 収入目標を設定できるカテゴリ (賞与・返金系は別扱いのため除外)
 function incomeBudgetCategories() {
   return CATEGORIES.income.filter(
-    (c) => c !== BONUS_CATEGORY && c !== ADVANCE_REFUND_CATEGORY
+    (c) => c !== BONUS_CATEGORY && !REFUND_CATEGORIES.includes(c)
   );
 }
 
@@ -782,8 +794,10 @@ function renderSummary(monthEntries) {
 function elapsedMonthsInYear() {
   const now = new Date();
   const shownYear = currentMonth.getFullYear();
-  if (shownYear < now.getFullYear()) return 12;
-  if (shownYear > now.getFullYear()) return 0;
+  // 未来の年はまだ実績が無いだけなので、年間フルの目標を素直に見せる。
+  // 0 を返すと目標が全て 0 になり、設定済みの予算が「予算未設定」と
+  // 表示されてしまう (設定が消えたように見える)。
+  if (shownYear !== now.getFullYear()) return 12;
   return now.getMonth() + 1;
 }
 
@@ -918,12 +932,12 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
   );
 
   const totalIncomeBudget = computeIncomeBudgetTotal(targetMultiplier);
-  // 立替金の返金は「収入」ではなく立て替えたお金が戻ってきただけなので、
+  // 返金(立替金の精算・カードのキャンセル)は「稼いだお金」ではないので、
   // 目標側 (incomeBudgetCategories) と同じく実績側からも除く。
   // 含めると、給与目標30万・給与30万・立替精算5万で「117%達成」に見えてしまう。
   let totalIncomeActual = 0;
   for (const e of monthEntries) {
-    if (e.type === "income" && e.category !== ADVANCE_REFUND_CATEGORY) {
+    if (e.type === "income" && !isRefundIncome(e)) {
       totalIncomeActual += e.amount;
     }
   }
@@ -1063,7 +1077,10 @@ function renderNeedWantSave(monthEntries) {
   let wantSpent = 0;
   for (const e of monthEntries) {
     if (e.type === "income") {
-      totalIncome += e.amount;
+      // 返金は稼いだお金ではないので、50:30:20 の基準となる収入には数えない。
+      // (5万円の立替精算で Need の目標が2.5万円水増しされるのを防ぐ。
+      //  対になる支出も同じ期間にあれば Save 実績で自然に相殺される)
+      if (!isRefundIncome(e)) totalIncome += e.amount;
     } else if (e.type === "save") {
       // 貯蓄・投資は使ったお金ではないので Need/Want に数えない。
       // Save実績 (income - need - want) には自然に残る形で反映される。
@@ -2193,12 +2210,14 @@ function parseCardUsageFormat(rows) {
 
   const imported = [];
   const errors = [];
-  // 小計行が複数あるファイルもあるため、候補を集めて最大のもの(＝全体の合計)を使う。
-  // 最後の1つで上書きすると、末尾が小計だったときに誤検知する。
-  const totalCandidates = [];
-  // 検算はCSVの合計行と同じ「今回支払金額」ベースで行う。取り込む金額は
-  // 「利用金額」なので、分割払いがあると両者は一致しない。
-  let paymentTotal = 0;
+  // 日付のない行(合計行・小計行)に書かれた金額。どれが全体の合計かは
+  // ファイル次第なので、最後に現れたものを全体の合計とみなす。
+  let expectedTotal = null;
+  // 取り込む金額(利用金額)の符号つき合計。CSVの合計行と同じ土俵で比べる。
+  let parsedTotal = 0;
+  // 分割払い・リボ払いの行があるか。ある場合、CSVの合計行は「今回支払金額」の
+  // 合計なので、取り込む「利用金額」の合計とは原理的に一致しない。
+  let hasInstallment = false;
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
@@ -2206,8 +2225,8 @@ function parseCardUsageFormat(rows) {
     const dateRaw = String(cols[0] ?? "").trim();
     if (!dateRaw) {
       const totalCandidate = parseCsvAmount(cols[5]);
-      if (Number.isFinite(totalCandidate) && totalCandidate > 0) {
-        totalCandidates.push(totalCandidate);
+      if (Number.isFinite(totalCandidate) && totalCandidate !== 0) {
+        expectedTotal = totalCandidate;
       }
       continue;
     }
@@ -2229,8 +2248,11 @@ function parseCardUsageFormat(rows) {
       continue;
     }
 
-    const payment = parseCsvAmount(cols[5]);
-    paymentTotal += Number.isFinite(payment) && payment !== 0 ? payment : amount;
+    // 支払回数が2回以上なら分割払い。CSVの合計行と噛み合わなくなる印
+    const installments = parseCsvAmount(toHalfWidthAscii(String(cols[3] ?? "")));
+    if (Number.isFinite(installments) && installments > 1) hasInstallment = true;
+
+    parsedTotal += amount;
 
     if (amount < 0) {
       // 返金・キャンセル行。支出のマイナスではなく収入として相殺する
@@ -2238,7 +2260,7 @@ function parseCardUsageFormat(rows) {
       imported.push({
         date,
         type: "income",
-        category: "その他収入",
+        category: CARD_REFUND_CATEGORY,
         amount: -amount,
         memo: `返金: ${merchant}`,
       });
@@ -2253,8 +2275,7 @@ function parseCardUsageFormat(rows) {
     }
   }
 
-  const expectedTotal = totalCandidates.length > 0 ? Math.max(...totalCandidates) : null;
-  return { imported, errors, expectedTotal, parsedTotal: paymentTotal };
+  return { imported, errors, expectedTotal, parsedTotal, hasInstallment };
 }
 
 // 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・メモ) が
@@ -2313,7 +2334,7 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors, expectedTotal, parsedTotal } =
+    const { imported, errors, expectedTotal, parsedTotal, hasInstallment } =
       parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
@@ -2326,12 +2347,21 @@ function importCsv(file) {
     let verificationNote = "";
     if (expectedTotal != null) {
       const total = parsedTotal ?? imported.reduce((sum, e) => sum + e.amount, 0);
-      verificationNote =
-        total === expectedTotal
-          ? `\n\n✓ CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
-          : `\n\n⚠️ CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
-              total
-            )})が一致しません。一部の行が正しく取り込めていない可能性があります。`;
+      if (hasInstallment) {
+        // 分割払いがあると、CSVの合計行(今回支払金額の合計)と
+        // 取り込む金額(利用金額)は原理的に一致しない。
+        // ここで✓や⚠を出すと、どちらも実態と食い違う案内になる。
+        verificationNote =
+          `\n\n※ 分割払いが含まれるため、CSV記載の合計金額(${formatYen(expectedTotal)}=今回の支払額)と` +
+          `取り込む金額の合計(${formatYen(total)}=買い物の総額)は一致しません。`;
+      } else {
+        verificationNote =
+          total === expectedTotal
+            ? `\n\n✓ CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
+            : `\n\n⚠️ CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
+                total
+              )})が一致しません。一部の行が正しく取り込めていない可能性があります。`;
+      }
     }
 
     const { deduped, skippedCount } = dedupeAgainstExisting(imported);
