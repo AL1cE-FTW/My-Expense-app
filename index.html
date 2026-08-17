@@ -20,8 +20,16 @@
     <div class="auth-card">
       <h1>📡 読み込みエラー</h1>
       <p>
-        Firebaseとの通信に失敗しました。インターネット接続をご確認いただくか、
-        広告ブロッカーなどの拡張機能を無効にしたうえで、ページを再読み込みしてください。
+        アプリの起動に失敗しました。次のいずれかが原因の可能性があります。
+      </p>
+      <ul class="error-causes">
+        <li>インターネットに接続できていない</li>
+        <li>広告ブロッカーなどの拡張機能が Firebase の読み込みを止めている</li>
+        <li><code>js/firebase-config.js</code> の設定値が正しくない</li>
+      </ul>
+      <p>
+        接続と拡張機能を確認してページを再読み込みしても直らない場合は、
+        ブラウザの開発者ツールのコンソールに詳しい原因が出ています。
       </p>
     </div>
   </div>
@@ -46,8 +54,8 @@
       <h1>📒 家計簿</h1>
       <p class="auth-sub">スマホとPCでデータを同期するには、ログインしてください。</p>
       <div class="auth-tabs">
-        <button type="button" class="auth-tab active" data-mode="login">ログイン</button>
-        <button type="button" class="auth-tab" data-mode="signup">新規登録</button>
+        <button type="button" class="auth-tab active" data-mode="login" aria-pressed="true">ログイン</button>
+        <button type="button" class="auth-tab" data-mode="signup" aria-pressed="false">新規登録</button>
       </div>
       <form id="auth-form">
         <div class="form-group">
@@ -82,12 +90,12 @@
     <header class="app-header">
       <h1>📒 家計簿</h1>
       <div class="view-toggle">
-        <button type="button" class="view-tab active" data-view="month">月別</button>
-        <button type="button" class="view-tab" data-view="year">年間</button>
+        <button type="button" class="view-tab active" data-view="month" aria-pressed="true">月別</button>
+        <button type="button" class="view-tab" data-view="year" aria-pressed="false">年間</button>
       </div>
       <div class="month-nav">
         <button id="prev-month" class="nav-btn" aria-label="前へ">◀</button>
-        <span id="current-month" class="current-month"></span>
+        <span id="current-month" class="current-month" aria-live="polite"></span>
         <button id="next-month" class="nav-btn" aria-label="次へ">▶</button>
         <button id="today-btn" class="today-btn">今月</button>
       </div>
@@ -148,8 +156,8 @@
               <label for="entry-date">日付</label>
               <input type="date" id="entry-date" required>
             </div>
-            <div class="form-group">
-              <label>種別</label>
+            <fieldset class="form-group type-fieldset">
+              <legend>種別</legend>
               <div class="type-toggle">
                 <label class="type-option">
                   <input type="radio" name="entry-type" value="expense" checked>
@@ -164,7 +172,7 @@
                   <span>貯蓄</span>
                 </label>
               </div>
-            </div>
+            </fieldset>
             <div class="form-group">
               <label for="entry-category">カテゴリ</label>
               <select id="entry-category" required></select>
@@ -375,7 +383,7 @@
       <!-- 記録一覧 -->
       <section class="card" id="list-section">
         <div class="list-header">
-          <h2 id="list-section-title">今月の記録</h2>
+          <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
           <div class="csv-actions">
             <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
             <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
@@ -386,13 +394,13 @@
           </div>
         </div>
         <div class="list-filters">
-          <select id="filter-type" class="filter-select">
+          <select id="filter-type" class="filter-select" aria-label="種別で絞り込み">
             <option value="all">すべての種別</option>
             <option value="expense">支出</option>
             <option value="income">収入</option>
             <option value="save">貯蓄</option>
           </select>
-          <select id="filter-category" class="filter-select">
+          <select id="filter-category" class="filter-select" aria-label="カテゴリで絞り込み">
             <option value="all">すべてのカテゴリ</option>
           </select>
           <input type="date" id="filter-date" class="filter-select" aria-label="この日だけ表示">
@@ -404,13 +412,13 @@
           <table class="entry-table">
             <thead>
               <tr>
-                <th class="sortable" data-sort="date" tabindex="0" role="columnheader" aria-sort="none">日付</th>
-                <th class="sortable" data-sort="type" tabindex="0" role="columnheader" aria-sort="none">種別</th>
-                <th class="sortable" data-sort="category" tabindex="0" role="columnheader" aria-sort="none">カテゴリ</th>
-                <th class="sortable amount-col" data-sort="amount" tabindex="0" role="columnheader" aria-sort="none">金額</th>
+                <th class="sortable" data-sort="date" aria-sort="none"><button type="button" class="sort-btn">日付</button></th>
+                <th class="sortable" data-sort="type" aria-sort="none"><button type="button" class="sort-btn">種別</button></th>
+                <th class="sortable" data-sort="category" aria-sort="none"><button type="button" class="sort-btn">カテゴリ</button></th>
+                <th class="sortable amount-col" data-sort="amount" aria-sort="none"><button type="button" class="sort-btn">金額</button></th>
                 <th>メモ</th>
-                <th class="sortable" data-sort="createdAt" tabindex="0" role="columnheader" aria-sort="none">登録日</th>
-                <th></th>
+                <th class="sortable" data-sort="createdAt" aria-sort="none"><button type="button" class="sort-btn">登録日</button></th>
+                <th><span class="visually-hidden">操作</span></th>
               </tr>
             </thead>
             <tbody id="entry-list"></tbody>

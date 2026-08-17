@@ -346,6 +346,9 @@ function selectedType() {
 // ---------------------------------------------------------------------------
 
 function showOnly(screen) {
+  // モーダルは #app-root の外にあるので、明示的に閉じないと
+  // ログイン画面などの上に浮いたまま残る
+  closeAllModals();
   el.loadingScreen.classList.toggle("hidden", screen !== "loading");
   el.setupScreen.classList.toggle("hidden", screen !== "setup");
   el.sdkErrorScreen.classList.toggle("hidden", screen !== "sdk-error");
@@ -524,17 +527,66 @@ function render() {
 // (戻さないとページ先頭に飛ばされ、キーボード操作だと元の位置を見失う)
 let modalReturnFocus = null;
 
+const FOCUSABLE_IN_MODAL =
+  'button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function focusableElementsIn(overlay) {
+  return [...overlay.querySelectorAll(FOCUSABLE_IN_MODAL)].filter(
+    (elem) => !elem.disabled && elem.offsetParent !== null
+  );
+}
+
+// Tab がモーダルの外へ抜けないようにする。aria-modal は読み上げの範囲を
+// 絞るだけでフォーカス順には影響しないため、暗幕の下の「ログアウト」などに
+// たどり着けてしまう。
+function trapFocus(event) {
+  if (event.key !== "Tab") return;
+  const overlay = document.querySelector(".modal-overlay:not(.hidden)");
+  if (!overlay) return;
+  const items = focusableElementsIn(overlay);
+  if (items.length === 0) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+
+  if (event.shiftKey && (active === first || !overlay.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !overlay.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function openModal(overlay, focusTarget) {
-  modalReturnFocus = document.activeElement;
+  // 既に開いているモーダルがある場合、復帰先を上書きすると元の位置を失う
+  if (!document.querySelector(".modal-overlay:not(.hidden)")) {
+    modalReturnFocus = document.activeElement;
+  }
   overlay.classList.remove("hidden");
   if (focusTarget) focusTarget.focus();
 }
 
 function closeModal(overlay) {
   overlay.classList.add("hidden");
+  // 復帰先が再描画で消えていることがある (一覧は毎回作り直されるため)。
+  // その場合はページ先頭に飛ばさず、せめて記録一覧の見出しへ移す。
   if (modalReturnFocus && document.contains(modalReturnFocus)) {
     modalReturnFocus.focus();
+  } else if (modalReturnFocus) {
+    el.listSectionTitle?.focus();
   }
+  modalReturnFocus = null;
+}
+
+// 画面を切り替えるときは開いているモーダルも閉じる。
+// モーダルは #app-root の外にあるため、本体を隠すだけでは
+// ログイン画面の上に浮いたまま残ってしまう。
+function closeAllModals() {
+  for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
+    overlay.classList.add("hidden");
+  }
+  settlingAdvance = null;
   modalReturnFocus = null;
 }
 
@@ -598,6 +650,10 @@ function renderAdvances() {
     settleBtn.type = "button";
     settleBtn.className = "icon-btn";
     settleBtn.textContent = "精算";
+    settleBtn.setAttribute(
+      "aria-label",
+      `${entry.date} ${entry.category} ${formatYen(entry.amount)} の立替金を精算`
+    );
     settleBtn.addEventListener("click", () => openAdvanceSettleModal(entry));
 
     row.append(dateEl, categoryEl, memoEl, amountEl, settleBtn);
@@ -1347,10 +1403,15 @@ function renderList(monthEntries) {
     const actions = document.createElement("div");
     actions.className = "row-actions";
 
+    // ボタン名が全行「編集」「削除」だと、読み上げの要素一覧でどの行のものか
+    // 判別できない。どの記録に対する操作かを添える。
+    const rowLabel = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
+
     if (entry.payslip) {
       const detailBtn = document.createElement("button");
       detailBtn.className = "icon-btn";
       detailBtn.textContent = "内訳";
+      detailBtn.setAttribute("aria-label", `${rowLabel} の内訳を見る`);
       detailBtn.addEventListener("click", () => showPayslipDetailModal(entry));
       actions.appendChild(detailBtn);
     }
@@ -1358,11 +1419,13 @@ function renderList(monthEntries) {
     const editBtn = document.createElement("button");
     editBtn.className = "icon-btn";
     editBtn.textContent = "編集";
+    editBtn.setAttribute("aria-label", `${rowLabel} を編集`);
     editBtn.addEventListener("click", () => startEdit(entry.id));
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "icon-btn delete";
     deleteBtn.textContent = "削除";
+    deleteBtn.setAttribute("aria-label", `${rowLabel} を削除`);
     deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
 
     actions.append(editBtn, deleteBtn);
@@ -2558,7 +2621,9 @@ function parseVpassEmails(text) {
   const blocks = text.split(/(?=◇利用日[:：])/);
   for (const block of blocks) {
     const dateMatch = block.match(/◇利用日[:：]\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-    const merchantMatch = block.match(/◇利用先[:：]\s*(.+)/);
+    // \s* だと改行にマッチし、利用先が空のとき次の行(◇利用金額…)を
+    // 店名として取り込んでしまうため、行内の空白だけに限定する
+    const merchantMatch = block.match(/◇利用先[:：][^\S\r\n]*(.+)/);
     const amountMatch = block.match(/◇利用金額[:：]\s*([\d,]+)円/);
     if (!dateMatch || !merchantMatch || !amountMatch) continue;
 
@@ -2595,8 +2660,19 @@ async function gmailApiFetch(path, params, isRetry = false) {
     return gmailApiFetch(path, params, true);
   }
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
+      // 取り直しても401なら、Google側でアクセスを取り消された可能性が高い。
+      // 同意済みフラグも落として、次回は同意画面から始められるようにする。
+      gmailAccessToken = null;
+      googleTokenGranted = false;
       throw new Error("Googleの認証が切れました。もう一度お試しください。");
+    }
+    if (res.status === 403) {
+      // 403 の大半はレート超過やAPI無効。「もう一度」と促すと連打で悪化する
+      throw new Error(
+        "Gmailへのアクセスが拒否されました (403)。短時間に多く読み込むと" +
+          "一時的に制限されることがあります。しばらく待ってからお試しください。"
+      );
     }
     throw new Error(`Gmail APIエラー (${res.status})`);
   }
@@ -2806,7 +2882,12 @@ function setupAuthForm() {
   for (const tab of el.authTabs) {
     tab.addEventListener("click", () => {
       authMode = tab.dataset.mode;
-      for (const t of el.authTabs) t.classList.toggle("active", t === tab);
+      for (const t of el.authTabs) {
+        const isActive = t === tab;
+        t.classList.toggle("active", isActive);
+        // 選択中かどうかを色だけでなく読み上げにも伝える
+        t.setAttribute("aria-pressed", String(isActive));
+      }
       el.authSubmitBtn.textContent = authMode === "login" ? "ログイン" : "新規登録";
       el.authError.classList.add("hidden");
     });
@@ -2899,7 +2980,11 @@ function setupAppEventListeners() {
     tab.addEventListener("click", () => {
       clearDateFilter();
       viewMode = tab.dataset.view;
-      for (const t of el.viewTabs) t.classList.toggle("active", t === tab);
+      for (const t of el.viewTabs) {
+        const isActive = t === tab;
+        t.classList.toggle("active", isActive);
+        t.setAttribute("aria-pressed", String(isActive));
+      }
       el.todayBtn.textContent = viewMode === "year" ? "今年" : "今月";
       render();
     });
@@ -2948,14 +3033,9 @@ function setupAppEventListeners() {
 
   el.gmailImportBtn.addEventListener("click", importFromGmail);
 
+  // 見出しの中は <button> なので、Enter/Space はブラウザが click に変換してくれる
   document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
     th.addEventListener("click", () => handleSortClick(th.dataset.sort));
-    // th はボタンではないので、Enter/Space を自分で拾う
-    th.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      handleSortClick(th.dataset.sort);
-    });
   });
 
   el.filterType.addEventListener("change", () => {
@@ -3006,6 +3086,10 @@ function setupAppEventListeners() {
     });
   }
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      trapFocus(event);
+      return;
+    }
     if (event.key !== "Escape") return;
     for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
       closeOverlay(overlay);
@@ -3080,7 +3164,16 @@ async function main() {
   let firebaseConfig;
   try {
     ({ firebaseConfig } = await import("./firebase-config.js"));
-  } catch {
+  } catch (err) {
+    // ファイルが無い場合と、あるが構文エラーの場合を区別する。
+    // 一緒くたにすると「作成してください」と案内された既存ファイルを
+    // もう一度作ろうとして詰まる。
+    console.error("firebase-config.js を読み込めませんでした:", err);
+    showOnly("setup");
+    return;
+  }
+  if (!firebaseConfig) {
+    console.error("firebase-config.js から firebaseConfig が export されていません");
     showOnly("setup");
     return;
   }
