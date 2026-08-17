@@ -100,13 +100,17 @@ html {
   min-width: 0;
 }
 
+/* サイドバーのリンクで飛んだとき、sticky なヘッダーの裏に見出しが隠れないよう
+   ヘッダーの高さぶん余白を取る。ヘッダーは flex-wrap するので、幅が狭いと
+   2段になって高くなる。JSでヘッダーの実寸を測って設定する
+   (--header-height)。読み込み前の初期値として84pxを置いておく。 */
 #summary-section,
 #budget-section,
 #plan-actual-section,
 #advance-section,
 #nws-section,
 #list-section {
-  scroll-margin-top: 84px;
+  scroll-margin-top: calc(var(--header-height, 84px) + 12px);
 }
 
 @media (max-width: 768px) {

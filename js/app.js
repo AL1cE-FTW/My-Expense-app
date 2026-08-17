@@ -987,6 +987,17 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
     "expense"
   );
 
+  // 実績は予算を設定したカテゴリの支出だけ。サマリーの「支出」と額が違うので、
+  // 差がどこから来ているのかを添える (何も書かないと集計漏れに見える)。
+  if (budgetTotals.totalBudget > 0 && budgetTotals.unbudgetedActual > 0) {
+    const note = document.createElement("p");
+    note.className = "plan-actual-note";
+    note.textContent =
+      `実績は予算を設定したカテゴリのみ。ほかに予算外の支出が ` +
+      `${formatYen(budgetTotals.unbudgetedActual)} あります。`;
+    el.expensePlanActual.appendChild(note);
+  }
+
   const totalIncomeBudget = computeIncomeBudgetTotal(targetMultiplier);
   // 返金(立替金の精算・カードのキャンセル)は「稼いだお金」ではないので、
   // 目標側 (incomeBudgetCategories) と同じく実績側からも除く。
@@ -1174,7 +1185,9 @@ function renderNeedWantSave(monthEntries) {
     group.appendChild(nwsArc(offset, segmentLength, NWS_BG_COLORS[bucket.key]));
 
     const ratio = bucket.target > 0 ? bucket.actual / bucket.target : 0;
-    const isOver = bucket.key === "save" ? ratio < 0 : ratio > 1;
+    // 予算バー (budgetBarClass) と同じく 100% ちょうども超過扱いにする。
+    // 閾値が食い違うと、同じ画面で予算バーは赤・ドーナツは青と色が割れる。
+    const isOver = bucket.key === "save" ? ratio < 0 : ratio >= 1;
     // 収入以上に使った月は Save がマイナスになる。0で塗ると弧が空になり
     // 「ちょうど0円貯金」と見分けがつかないので、警告として赤で埋める。
     const fillRatio = isOver && bucket.key === "save" ? 1 : Math.min(Math.max(ratio, 0), 1);
@@ -2177,6 +2190,9 @@ function parseSimpleFormat(rows) {
 
   const imported = [];
   const errors = [];
+  // 読み替えられたカテゴリ (元の名前 -> 変換後)。大量に潰れたときに気づけるよう、
+  // 確認ダイアログで知らせる
+  const convertedCategories = new Map();
 
   for (let i = start; i < rows.length; i++) {
     const cols = rows[i];
@@ -2210,10 +2226,12 @@ function parseSimpleFormat(rows) {
     // 自分でエクスポートしたCSVの往復は壊れない。
     // (生の文字列のまま保存すると、予算と紐づかない・絞り込みに出ない・
     //  編集画面の<select>が先頭にフォールバックして無言で「食費」に化ける)
-    imported.push({ date, type, category: resolveCategory(rawCategory, type), amount, memo });
+    const category = resolveCategory(rawCategory, type);
+    if (category !== rawCategory) convertedCategories.set(rawCategory, category);
+    imported.push({ date, type, category, amount, memo });
   }
 
-  return { imported, errors };
+  return { imported, errors, convertedCategories };
 }
 
 function isWideFormatHeaderRow(cols) {
@@ -2427,7 +2445,7 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors, expectedTotal, parsedTotal, hasInstallment } =
+    const { imported, errors, expectedTotal, parsedTotal, hasInstallment, convertedCategories } =
       parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
@@ -2474,6 +2492,14 @@ function importCsv(file) {
     if (errors.length > 0) {
       message += `\n\n(${errors.length}件の行はスキップされます)\n` + errors.slice(0, 5).join("\n");
     }
+    // カテゴリが無言で書き換わっていたことに気づけるようにする
+    if (convertedCategories && convertedCategories.size > 0) {
+      const pairs = [...convertedCategories.entries()].map(([from, to]) => `${from} → ${to}`);
+      message +=
+        `\n\n(${convertedCategories.size}種類のカテゴリを読み替えます)\n` +
+        pairs.slice(0, 5).join("\n") +
+        (pairs.length > 5 ? `\n...ほか${pairs.length - 5}種類` : "");
+    }
     message += verificationNote;
     if (!confirm(message)) return;
 
@@ -2506,7 +2532,7 @@ const MERCHANT_CATEGORY_RULES = [
   {
     category: "交通",
     pattern:
-      /Suica|PASMO|(?:^|[^A-Za-z])JR(?:[^A-Za-z]|$)|地下鉄|バス|タクシー|(?:^|[^A-Za-z])ETC(?:[^A-Za-z]|$)|ICOCA|みどりの窓口|東京メトロ|モノレール/i,
+      /Suica|スイカ|PASMO|パスモ|(?:^|[^A-Za-z])JR(?:[^A-Za-z]|$)|地下鉄|バス|タクシー|(?:^|[^A-Za-z])ETC(?:[^A-Za-z]|$)|ICOCA|イコカ|みどりの窓口|東京メトロ|モノレール|鉄道|交通局/i,
     // 駅ナカの売店は交通費ではなく食費 (「JR東日本 ニューデイズ」など)
     exclude: /ニューデイズ|NEWDAYS|キオスク|KIOSK/i,
   },
@@ -3106,9 +3132,30 @@ function setupAppEventListeners() {
 //  ことがあるため、IntersectionObserverの領域判定ではなく通過判定を使う)
 let sidebarScrollSpyBound = false;
 
+// ヘッダーは flex-wrap するため、幅によって高さが変わる。アンカー移動したときに
+// 見出しがヘッダーの裏に隠れないよう、実寸を CSS 変数として渡す。
+function trackHeaderHeight() {
+  const header = document.querySelector(".app-header");
+  if (!header) return;
+  const update = () => {
+    document.documentElement.style.setProperty(
+      "--header-height",
+      `${Math.round(header.getBoundingClientRect().height)}px`
+    );
+  };
+  update();
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(update).observe(header);
+  } else {
+    window.addEventListener("resize", update);
+  }
+}
+
 function setupSidebarScrollSpy() {
   if (sidebarScrollSpyBound) return;
   sidebarScrollSpyBound = true;
+
+  trackHeaderHeight();
 
   const links = [...document.querySelectorAll(".sidebar-link")];
   if (links.length === 0) return;
