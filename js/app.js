@@ -1067,6 +1067,7 @@ function renderPlanActual(monthEntries, targetMultiplier, budgetTotals) {
   if (budgetTotals.totalBudget > 0 && budgetTotals.unbudgetedActual > 0) {
     const note = document.createElement("p");
     note.className = "plan-actual-note";
+    note.id = "unbudgeted-note";
     note.textContent =
       `実績は予算を設定したカテゴリのみ。ほかに予算外の支出が ` +
       `${formatYen(budgetTotals.unbudgetedActual)} あります。`;
@@ -1120,8 +1121,8 @@ function computeIncomeBudgetTotal(targetMultiplier) {
 }
 
 function renderBonusNote() {
-  const existing = el.incomePlanActual.parentElement.querySelector(".plan-actual-note");
-  if (existing) existing.remove();
+  // 予算外の注記も同じクラスを使うので、id で確実に賞与の注記だけを消す
+  document.getElementById("bonus-note")?.remove();
 
   const bonusMonths = Array.isArray(incomeBudgets.bonusMonths) ? incomeBudgets.bonusMonths : [];
   const bonusMultiplier = Number(incomeBudgets.bonusMultiplier) || 0;
@@ -1133,6 +1134,7 @@ function renderBonusNote() {
 
   const note = document.createElement("p");
   note.className = "plan-actual-note";
+  note.id = "bonus-note";
   const monthsLabel = [...bonusMonths].sort((a, b) => a - b).map((m) => `${m}月`).join("・");
   note.textContent =
     `賞与: ${monthsLabel}に給与${bonusMultiplier}か月分 (${formatYen(bonusPerOccurrence)}) を計上`;

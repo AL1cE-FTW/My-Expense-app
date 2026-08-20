@@ -13,5 +13,6 @@
 Thumbs.db
 node_modules/
 
-# テスト実行時のスクリーンショット
+# テスト実行時に生成される一時ファイル
 test/*.png
+test/*.csv
