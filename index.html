@@ -147,7 +147,9 @@
       </section>
 
       <!-- 入力フォーム -->
-      <section class="card form-card">
+      <!-- 編集のときは、このフォーム要素をそのまま下のポップアップへ移動する
+           (記録一覧はページ最下部にあるため、編集のたびに上まで戻るのを避ける) -->
+      <section class="card form-card" id="entry-form-slot">
         <h2 id="form-title">記録を追加</h2>
         <form id="entry-form">
           <input type="hidden" id="entry-id">
@@ -432,6 +434,15 @@
     </footer>
     </div>
    </div>
+  </div>
+
+  <!-- 記録の編集ポップアップ (入力フォームをここへ移動して使う) -->
+  <div class="modal-overlay hidden" id="entry-edit-modal">
+    <div class="modal-box modal-box-wide" role="dialog" aria-modal="true" aria-labelledby="entry-edit-title">
+      <button type="button" class="modal-close" id="entry-edit-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="entry-edit-title">記録を編集</h3>
+      <div id="entry-edit-body"></div>
+    </div>
   </div>
 
   <!-- 給与明細の内訳ポップアップ -->

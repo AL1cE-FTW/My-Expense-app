@@ -1,0 +1,254 @@
+import { chromium } from "playwright";
+import http from "http";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// このファイルからの相対パスで解決する (どこから実行しても動くように)
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(here, "..");
+const scratch = process.env.TEST_OUT_DIR || here;
+const stubRoot = path.join(here, "stubs");
+const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
+
+const server = http.createServer((req, res) => {
+  const p = path.join(root, req.url === "/" ? "index.html" : req.url);
+  try {
+    const data = fs.readFileSync(p);
+    res.writeHead(200, { "content-type": mime[path.extname(p)] || "text/plain" });
+    res.end(data);
+  } catch {
+    res.writeHead(404); res.end("nf");
+  }
+});
+await new Promise((r) => server.listen(8981, r));
+
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+// スマホ相当。フォームと一覧の距離がいちばん問題になるサイズ
+const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const errors = [];
+page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+page.on("console", (m) => {
+  if (m.type() !== "error") return;
+  const text = m.text();
+  if (text.includes("Failed to load resource") || text.includes("net::ERR_")) return;
+  errors.push("console: " + text);
+});
+page.on("dialog", (d) => d.accept());
+
+await page.route("https://www.gstatic.com/firebasejs/**/*.js", async (route) => {
+  const url = new URL(route.request().url());
+  await route.fulfill({
+    status: 200,
+    contentType: "text/javascript",
+    body: fs.readFileSync(path.join(stubRoot, url.pathname.split("/").pop()), "utf-8"),
+  });
+});
+
+const NOW = new Date();
+const CUR_Y = NOW.getFullYear();
+const MM = String(NOW.getMonth() + 1).padStart(2, "0");
+
+await page.goto("http://localhost:8981/", { waitUntil: "networkidle" });
+await page.waitForTimeout(300);
+
+await page.click('.auth-tab[data-mode="signup"]');
+await page.fill("#auth-email", "edit-modal-test@example.com");
+await page.fill("#auth-password", "password123");
+await page.click("#auth-submit-btn");
+await page.waitForTimeout(300);
+
+// 一覧が画面下まで伸びるよう、そこそこの件数を入れる
+for (let i = 1; i <= 12; i++) {
+  await page.fill("#entry-date", `${CUR_Y}-${MM}-${String(i).padStart(2, "0")}`);
+  await page.selectOption("#entry-category", "食費");
+  await page.fill("#entry-amount", String(1000 + i));
+  await page.fill("#entry-memo", `記録${i}`);
+  await page.click("#submit-btn");
+  await page.waitForTimeout(80);
+}
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+
+const targetRow = () => page.locator("#entry-list tr", { hasText: "記録7" });
+
+// ---------------------------------------------------------------------------
+// 1. 「編集」を押してもページがスクロールしない
+// ---------------------------------------------------------------------------
+await targetRow().locator("button", { hasText: "編集" }).scrollIntoViewIfNeeded();
+await page.waitForTimeout(200);
+const scrollBefore = await page.evaluate(() => window.scrollY);
+const rowTopBefore = await targetRow().evaluate((elem) => elem.getBoundingClientRect().top);
+
+await targetRow().locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(500); // スムーススクロールが起きるなら十分な時間
+
+if (!(await page.locator("#entry-edit-modal").isVisible())) {
+  throw new Error("editing should open the popup");
+}
+
+const scrollAfter = await page.evaluate(() => window.scrollY);
+console.log("scrollY:", scrollBefore, "->", scrollAfter);
+if (Math.abs(scrollAfter - scrollBefore) > 4) {
+  throw new Error(
+    `editing must not scroll the page (was ${scrollBefore}, now ${scrollAfter})`
+  );
+}
+
+// フォームを抜いた分だけページが縮んで一覧がずり上がっていないこと
+const rowTopDuring = await targetRow().evaluate((elem) => elem.getBoundingClientRect().top);
+console.log("row top:", Math.round(rowTopBefore), "->", Math.round(rowTopDuring));
+if (Math.abs(rowTopDuring - rowTopBefore) > 4) {
+  throw new Error(
+    `the list must not shift when the form moves out (was ${rowTopBefore}, now ${rowTopDuring})`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 2. ポップアップの中に入力フォームがあり、値が入っている
+// ---------------------------------------------------------------------------
+const formInModal = await page.evaluate(
+  () => !!document.getElementById("entry-edit-body")?.contains(document.getElementById("entry-form"))
+);
+if (!formInModal) throw new Error("the entry form should be inside the popup");
+
+if ((await page.locator("#entry-memo").inputValue()) !== "記録7") {
+  throw new Error("the popup should be populated with the row's values");
+}
+if ((await page.locator("#submit-btn").textContent()).trim() !== "更新") {
+  throw new Error("the submit button should read 更新 while editing");
+}
+// 開いた直後はカテゴリにフォーカスがある (直したいのはたいていカテゴリなので)
+const focusedId = await page.evaluate(() => document.activeElement?.id);
+if (focusedId !== "entry-category") {
+  throw new Error("opening the popup should focus the category select, got " + focusedId);
+}
+// 追加用の見出しは「記録を追加」のまま、ポップアップ側が「記録を編集」
+if ((await page.locator("#form-title").textContent()).trim() !== "記録を追加") {
+  throw new Error("the inline heading should stay as the add-form heading");
+}
+if ((await page.locator("#entry-edit-title").textContent()).trim() !== "記録を編集") {
+  throw new Error("the popup title should read 記録を編集");
+}
+
+// ---------------------------------------------------------------------------
+// 3. カテゴリを変えて更新 -> 反映され、ポップアップが閉じ、フォームが元に戻る
+// ---------------------------------------------------------------------------
+await page.selectOption("#entry-category", "交通");
+await page.click("#submit-btn");
+await page.waitForTimeout(500);
+
+if (await page.locator("#entry-edit-modal").isVisible()) {
+  throw new Error("the popup should close after updating");
+}
+const backInPlace = await page.evaluate(
+  () => !!document.getElementById("entry-form-slot")?.contains(document.getElementById("entry-form"))
+);
+if (!backInPlace) throw new Error("the form must be moved back into the page after closing");
+if ((await page.locator("#form-title").textContent()).trim() !== "記録を追加") {
+  throw new Error("the inline form should be back in add mode");
+}
+if ((await page.locator("#submit-btn").textContent()).trim() !== "追加") {
+  throw new Error("the submit button should read 追加 again");
+}
+// 予約していた高さが解除されている
+const reservedHeight = await page.evaluate(
+  () => document.getElementById("entry-form-slot").style.minHeight
+);
+if (reservedHeight !== "") throw new Error("the reserved height should be cleared, got " + reservedHeight);
+
+const updatedRow = await targetRow().textContent();
+if (!updatedRow.includes("交通")) throw new Error("the change should be saved: " + updatedRow);
+
+// 更新後、フォーカスは同じ行の「編集」ボタンへ戻る
+const focusedAfter = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+if (!focusedAfter || !focusedAfter.includes("を編集")) {
+  throw new Error("focus should return to the edited row's edit button, got " + focusedAfter);
+}
+
+// ---------------------------------------------------------------------------
+// 4. キャンセル・× ・Escape・背景クリックのどれで閉じてもフォームが戻る
+// ---------------------------------------------------------------------------
+for (const [name, close] of [
+  ["キャンセルボタン", async () => page.click("#cancel-edit-btn")],
+  ["×ボタン", async () => page.click("#entry-edit-close")],
+  ["Escape", async () => page.keyboard.press("Escape")],
+  ["背景クリック", async () => page.locator("#entry-edit-modal").click({ position: { x: 5, y: 5 } })],
+]) {
+  await targetRow().locator("button", { hasText: "編集" }).click();
+  await page.waitForTimeout(300);
+  if (!(await page.locator("#entry-edit-modal").isVisible())) {
+    throw new Error(`popup should be open before closing via ${name}`);
+  }
+  await close();
+  await page.waitForTimeout(300);
+  if (await page.locator("#entry-edit-modal").isVisible()) {
+    throw new Error(`${name} should close the popup`);
+  }
+  const restored = await page.evaluate(
+    () => !!document.getElementById("entry-form-slot")?.contains(document.getElementById("entry-form"))
+  );
+  if (!restored) throw new Error(`${name} should move the form back into the page`);
+  if ((await page.locator("#entry-id").inputValue()) !== "") {
+    throw new Error(`${name} should leave edit mode`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. 給与明細の内訳を含む編集もポップアップの中で完結する
+// ---------------------------------------------------------------------------
+await page.click('.type-option:has(input[value="income"]) span');
+await page.selectOption("#entry-category", "給与");
+await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
+await page.click("#payslip-toggle-btn");
+await page.waitForTimeout(200);
+await page.fill("#payslip-base-salary", "300000");
+await page.fill("#payslip-health-insurance", "15000");
+await page.fill("#entry-memo", "給与テスト");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+
+const payslipRow = page.locator("#entry-list tr", { hasText: "給与テスト" });
+await payslipRow.locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(400);
+
+if (!(await page.locator("#entry-edit-modal").isVisible())) {
+  throw new Error("editing a payslip entry should also open the popup");
+}
+if ((await page.locator("#payslip-base-salary").inputValue()) !== "300000") {
+  throw new Error("the payslip breakdown should be restored inside the popup");
+}
+// 長いフォームでもポップアップの中でスクロールし、画面からはみ出さない
+const boxFits = await page.evaluate(() => {
+  const box = document.querySelector("#entry-edit-modal .modal-box");
+  return box.getBoundingClientRect().height <= window.innerHeight + 1;
+});
+if (!boxFits) throw new Error("the popup must not overflow the viewport with a long form");
+
+await page.click("#cancel-edit-btn");
+await page.waitForTimeout(300);
+
+// ---------------------------------------------------------------------------
+// 6. ポップアップを開いたままログアウトしても、フォームが行方不明にならない
+// ---------------------------------------------------------------------------
+await targetRow().locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.locator("#logout-btn").dispatchEvent("click");
+await page.waitForTimeout(500);
+
+if (await page.locator("#entry-edit-modal").isVisible()) {
+  throw new Error("the popup must not stay open over the login screen");
+}
+const restoredAfterLogout = await page.evaluate(
+  () => !!document.getElementById("entry-form-slot")?.contains(document.getElementById("entry-form"))
+);
+if (!restoredAfterLogout) throw new Error("the form must be back in the page after logging out");
+
+await page.screenshot({ path: path.join(scratch, "edit-modal.png"), fullPage: true });
+
+if (errors.length) throw new Error("JS errors: " + errors.join("; "));
+console.log("ALL EDIT POPUP CHECKS PASSED");
+await browser.close();
+server.close();

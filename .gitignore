@@ -12,3 +12,6 @@
 .DS_Store
 Thumbs.db
 node_modules/
+
+# テスト実行時のスクリーンショット
+test/*.png

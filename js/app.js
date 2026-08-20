@@ -259,6 +259,10 @@ const el = {
   totalSave: document.getElementById("total-save"),
   form: document.getElementById("entry-form"),
   formTitle: document.getElementById("form-title"),
+  entryFormSlot: document.getElementById("entry-form-slot"),
+  entryEditModal: document.getElementById("entry-edit-modal"),
+  entryEditBody: document.getElementById("entry-edit-body"),
+  entryEditClose: document.getElementById("entry-edit-close"),
   entryId: document.getElementById("entry-id"),
   entryDate: document.getElementById("entry-date"),
   entryCategory: document.getElementById("entry-category"),
@@ -586,8 +590,47 @@ function closeAllModals() {
   for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
     overlay.classList.add("hidden");
   }
+  restoreEntryForm();
   settlingAdvance = null;
   modalReturnFocus = null;
+}
+
+// ---------------------------------------------------------------------------
+// 記録の編集ポップアップ
+//
+// 入力フォームはページの上のほう、記録一覧はいちばん下にあるため、
+// 「編集」を押すたびに長い距離をスクロールで往復することになっていた。
+// 編集のあいだだけフォーム要素そのものをポップアップへ移し、
+// 閉じたら元の場所へ戻す。要素ごと動かすのでイベントリスナーは付いたまま。
+// ---------------------------------------------------------------------------
+
+function entryFormIsInModal() {
+  return el.entryEditBody.contains(el.form);
+}
+
+function openEntryEditModal() {
+  if (!entryFormIsInModal()) {
+    // フォームを抜くとページがその高さぶん縮み、下にある記録一覧がずり上がって
+    // 見ていた行を見失う。Chrome のスクロールアンカリングは効くが Safari は
+    // 効かないため、元の高さを確保しておく。
+    el.entryFormSlot.style.minHeight = `${el.entryFormSlot.offsetHeight}px`;
+    el.entryEditBody.appendChild(el.form);
+  }
+  // 直したいのはたいていカテゴリなので、そこにフォーカスを置く
+  openModal(el.entryEditModal, el.entryCategory);
+}
+
+function restoreEntryForm() {
+  // 元の場所は見出し (#form-title) の直後。appendChild で並び順も戻る
+  if (!entryFormIsInModal()) return;
+  el.entryFormSlot.appendChild(el.form);
+  el.entryFormSlot.style.minHeight = "";
+}
+
+function closeEntryEditModal() {
+  if (el.entryEditModal.classList.contains("hidden")) return;
+  closeModal(el.entryEditModal);
+  restoreEntryForm();
 }
 
 /**
@@ -1433,6 +1476,8 @@ function renderList(monthEntries) {
     editBtn.className = "icon-btn";
     editBtn.textContent = "編集";
     editBtn.setAttribute("aria-label", `${rowLabel} を編集`);
+    // 更新後にこの行のボタンへフォーカスを戻すための目印
+    editBtn.dataset.editId = entry.id;
     editBtn.addEventListener("click", () => startEdit(entry.id));
 
     const deleteBtn = document.createElement("button");
@@ -1850,6 +1895,8 @@ async function handleIncomeBudgetSubmit(event) {
 // ---------------------------------------------------------------------------
 
 function resetForm() {
+  // 編集ポップアップを開いたままだと、追加用のフォームが行方不明になる
+  closeEntryEditModal();
   el.entryId.value = "";
   el.form.reset();
   el.entryDate.value = toDateInputValue(new Date());
@@ -1887,10 +1934,11 @@ function startEdit(id) {
     el.entryAmount.value = entry.amount;
   }
 
-  el.formTitle.textContent = "記録を編集";
   el.submitBtn.textContent = "更新";
   el.cancelEditBtn.classList.remove("hidden");
-  el.form.scrollIntoView({ behavior: "smooth", block: "center" });
+  // 一覧まで戻らずに直せるよう、その場でポップアップとして開く。
+  // 見出し (#form-title) は追加用のフォームのものなので触らない
+  openEntryEditModal();
 }
 
 async function deleteEntry(id) {
@@ -2003,11 +2051,23 @@ async function handleSubmit(event) {
     el.submitBtn.disabled = false;
   }
 
+  // ポップアップから編集していたか (resetForm でフォームが元に戻る前に見る)
+  const wasModalEdit = Boolean(editingId) && entryFormIsInModal();
+
   resetForm();
 
   // 追加・更新した記録の月を表示する
   currentMonth = startOfMonth(new Date(data.date + "T00:00:00"));
   render();
+
+  // render() で一覧が作り直され、フォーカスを戻した「編集」ボタンごと
+  // 消えてしまうため、作り直された同じ行のボタンへ改めて戻す。
+  // preventScroll: ポップアップだったので画面は動いていない
+  if (wasModalEdit) {
+    document
+      .querySelector(`#entry-list [data-edit-id="${editingId}"]`)
+      ?.focus({ preventScroll: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3095,6 +3155,9 @@ function setupAppEventListeners() {
     render();
   });
 
+  // 編集ポップアップの×は「編集をやめる」なので、キャンセルと同じ扱いにする
+  el.entryEditClose.addEventListener("click", resetForm);
+
   el.payslipDetailClose.addEventListener("click", hidePayslipDetailModal);
   el.advanceSettleClose.addEventListener("click", closeAdvanceSettleModal);
   el.advanceSettleCancel.addEventListener("click", closeAdvanceSettleModal);
@@ -3104,6 +3167,8 @@ function setupAppEventListeners() {
   // ただし単に隠すだけだと選択中の立替金などの状態が残るため、専用の閉じる処理を経由する。
   const closeOverlay = (overlay) => {
     if (overlay === el.advanceSettleModal) closeAdvanceSettleModal();
+    // 編集ポップアップは、閉じるときにフォームを元の場所へ戻す必要がある
+    else if (overlay === el.entryEditModal) resetForm();
     else closeModal(overlay);
   };
   for (const overlay of document.querySelectorAll(".modal-overlay")) {

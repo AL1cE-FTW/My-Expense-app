@@ -590,6 +590,12 @@ html {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
 
+/* 入力フォームを収めるポップアップ。フォームは2列に並ぶので少し広くする
+   (高さは .modal-box の max-height: 85vh + overflow-y で中がスクロールする) */
+.modal-box-wide {
+  max-width: 680px;
+}
+
 .modal-title {
   font-size: 1.05rem;
   margin-bottom: 14px;
