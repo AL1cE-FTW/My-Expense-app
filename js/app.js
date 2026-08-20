@@ -638,12 +638,22 @@ function entryFormIsInModal() {
   return el.entryEditBody.contains(el.form);
 }
 
+// フォームを抜くとページがその高さぶん縮み、下にある記録一覧がずり上がって
+// 見ていた行を見失う。Chrome のスクロールアンカリングは効くが Safari は
+// 効かないため、元の高さを確保しておく。
+//
+// 確保は「フォームの中身を書き換える前」に行う必要がある。編集内容を流し込むと
+// 給与明細の内訳が開閉して高さが変わるため、あとから測ると縮んだ後の高さを
+// 覚えてしまい、一覧が大きくずれる。
+function reserveEntryFormHeight() {
+  if (entryFormIsInModal()) return;
+  if (el.entryFormSlot.style.minHeight) return;
+  el.entryFormSlot.style.minHeight = `${el.entryFormSlot.offsetHeight}px`;
+}
+
 function openEntryEditModal() {
   if (!entryFormIsInModal()) {
-    // フォームを抜くとページがその高さぶん縮み、下にある記録一覧がずり上がって
-    // 見ていた行を見失う。Chrome のスクロールアンカリングは効くが Safari は
-    // 効かないため、元の高さを確保しておく。
-    el.entryFormSlot.style.minHeight = `${el.entryFormSlot.offsetHeight}px`;
+    reserveEntryFormHeight();
     el.entryEditBody.appendChild(el.form);
   }
   // 直したいのはたいていカテゴリなので、そこにフォーカスを置く
@@ -663,6 +673,37 @@ function closeEntryEditModal() {
   // 逆にするとスクロール位置を復元した直後に高さが変わり、位置がずれる
   restoreEntryForm();
   closeModal(el.entryEditModal);
+  restoreEditAnchor();
+}
+
+// 編集していた行を目印に、閉じたあとも同じ位置に見えるようにする。
+//
+// スクロール位置の数値をそのまま戻すだけでは足りない。編集を始めると入力欄の
+// 中身が入れ替わってフォームの高さが変わるため、閉じたときのページは開く前より
+// 短い(または長い)ことがあり、同じ数値に戻すと別の場所が映る。
+// 行そのものを基準にすれば、高さがどう変わっても見た目の位置を保てる。
+let editAnchor = null;
+
+function editRowElement(id) {
+  return document.querySelector(`#entry-list [data-edit-id="${CSS.escape(id)}"]`)?.closest("tr");
+}
+
+function rememberEditAnchor(id) {
+  const row = editRowElement(id);
+  editAnchor = row ? { id, top: row.getBoundingClientRect().top } : null;
+}
+
+function restoreEditAnchor() {
+  const anchor = editAnchor;
+  editAnchor = null;
+  if (!anchor) return;
+  // 一覧の作り直し (render) まで終わってから測りたいので、次の描画直前に回す
+  requestAnimationFrame(() => {
+    const row = editRowElement(anchor.id);
+    if (!row) return;
+    const delta = row.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(delta) > 1) window.scrollBy({ top: delta, left: 0, behavior: "instant" });
+  });
 }
 
 /**
@@ -1944,6 +1985,11 @@ function resetForm() {
 function startEdit(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
+
+  // 中身を書き換えると高さが変わるので、まず今の高さを確保し、
+  // 閉じたときに戻る位置の目印としてこの行を覚えておく
+  reserveEntryFormHeight();
+  rememberEditAnchor(id);
 
   el.entryId.value = entry.id;
   el.entryDate.value = entry.date;

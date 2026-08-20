@@ -164,14 +164,19 @@ if (reservedHeight !== "") throw new Error("the reserved height should be cleare
 const updatedRow = await targetRow().textContent();
 if (!updatedRow.includes("交通")) throw new Error("the change should be saved: " + updatedRow);
 
-// 閉じたらスクロール位置が元どおりに戻っている
-const scrollRestored = await page.evaluate(() => window.scrollY);
-console.log("scrollY:", scrollBefore, "-> (locked) ->", scrollRestored);
-if (Math.abs(scrollRestored - scrollBefore) > 4) {
-  throw new Error(`closing should restore the scroll position (was ${scrollBefore}, now ${scrollRestored})`);
+// 閉じたら、編集していた行が元と同じ位置に見えている。
+// (スクロール量の数値ではなく行の位置で見る。更新でページの高さが変わることが
+//  あるため、同じ数値に戻すと別の場所が映ってしまう)
+const rowTopAfterClose = await targetRow().evaluate((elem) => elem.getBoundingClientRect().top);
+console.log("row top after closing:", Math.round(rowTopBefore), "->", Math.round(rowTopAfterClose));
+if (Math.abs(rowTopAfterClose - rowTopBefore) > 4) {
+  throw new Error(`closing should leave the row where it was (${rowTopBefore} -> ${rowTopAfterClose})`);
 }
 if (await page.evaluate(() => document.body.classList.contains("modal-open"))) {
   throw new Error("the scroll lock should be released after closing");
+}
+if (await page.evaluate(() => document.body.style.top !== "" || document.body.style.paddingRight !== "")) {
+  throw new Error("the scroll lock should clean up its inline styles");
 }
 
 // 更新後、フォーカスは同じ行の「編集」ボタンへ戻る
@@ -245,7 +250,87 @@ await page.click("#cancel-edit-btn");
 await page.waitForTimeout(300);
 
 // ---------------------------------------------------------------------------
-// 6. ポップアップを開いたままログアウトしても、フォームが行方不明にならない
+// 6. 一覧の途中の行を編集しても、見ていた位置が動かない
+// ---------------------------------------------------------------------------
+// Safari にはスクロールアンカリング (高さが変わったときの自動補正) が無いため、
+// それを切った状態で確かめる。切らないと Chrome が補正してしまい、
+// iPhone でだけ起きるずれを見逃す。
+await page.addStyleTag({ content: "*{overflow-anchor:none !important}" });
+
+// 一覧を長くして、編集する行が画面の途中に来るようにする
+for (let i = 13; i <= 34; i++) {
+  await page.fill("#entry-date", `${CUR_Y}-${MM}-${String((i % 28) + 1).padStart(2, "0")}`);
+  await page.selectOption("#entry-category", "食費");
+  await page.fill("#entry-amount", String(1000 + i));
+  await page.fill("#entry-memo", `記録${i}`);
+  await page.click("#submit-btn");
+  await page.waitForTimeout(50);
+}
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+
+const rowTopOf = (memo) =>
+  page.evaluate((m) => {
+    const tr = [...document.querySelectorAll("#entry-list tr")].find((r) => r.textContent.includes(m));
+    return tr ? Math.round(tr.getBoundingClientRect().top) : null;
+  }, memo);
+const centerOn = (memo) =>
+  page.evaluate((m) => {
+    const tr = [...document.querySelectorAll("#entry-list tr")].find((r) => r.textContent.includes(m));
+    tr.scrollIntoView({ block: "center", behavior: "instant" });
+  }, memo);
+const clickEditOf = (memo) =>
+  page.evaluate((m) => {
+    const tr = [...document.querySelectorAll("#entry-list tr")].find((r) => r.textContent.includes(m));
+    [...tr.querySelectorAll("button")].find((b) => b.textContent.trim() === "編集").click();
+  }, memo);
+
+// 入力フォームに給与明細の内訳を開いておく。この状態で支出の行を編集すると
+// フォームの高さが 900px 以上変わるので、位置がずれやすい
+async function openTallAddForm() {
+  await page.click('.type-option:has(input[value="income"]) span');
+  await page.selectOption("#entry-category", "給与");
+  await page.waitForTimeout(200);
+  await page.click("#payslip-toggle-btn");
+  await page.waitForTimeout(300);
+}
+
+for (const [name, prepare, close] of [
+  ["そのまま閉じる", null, async () => page.keyboard.press("Escape")],
+  ["更新して閉じる", null, async () => {
+    await page.selectOption("#entry-category", "交通");
+    await page.click("#submit-btn");
+  }],
+  ["内訳を開いた状態から閉じる", openTallAddForm, async () => page.keyboard.press("Escape")],
+  ["内訳を開いた状態から更新", openTallAddForm, async () => {
+    await page.selectOption("#entry-category", "日用品");
+    await page.click("#submit-btn");
+  }],
+]) {
+  await page.click("#today-btn");
+  await page.waitForTimeout(300);
+  if (prepare) await prepare();
+  await centerOn("記録20");
+  await page.waitForTimeout(400);
+
+  const top0 = await rowTopOf("記録20");
+  await clickEditOf("記録20");
+  await page.waitForTimeout(500);
+  const topOpen = await rowTopOf("記録20");
+  if (Math.abs(topOpen - top0) > 4) {
+    throw new Error(`[${name}] 開いた瞬間に一覧がずれた: ${top0} -> ${topOpen}`);
+  }
+  await close();
+  await page.waitForTimeout(700);
+  const topClosed = await rowTopOf("記録20");
+  if (Math.abs(topClosed - top0) > 4) {
+    throw new Error(`[${name}] 閉じたあとに一覧がずれた: ${top0} -> ${topClosed}`);
+  }
+  console.log(`  ${name}: ${top0} -> ${topOpen} -> ${topClosed}`);
+}
+
+// ---------------------------------------------------------------------------
+// 7. ポップアップを開いたままログアウトしても、フォームが行方不明にならない
 // ---------------------------------------------------------------------------
 await targetRow().locator("button", { hasText: "編集" }).click();
 await page.waitForTimeout(300);
