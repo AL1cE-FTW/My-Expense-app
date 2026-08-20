@@ -258,7 +258,6 @@ const el = {
   balance: document.getElementById("balance"),
   totalSave: document.getElementById("total-save"),
   form: document.getElementById("entry-form"),
-  formTitle: document.getElementById("form-title"),
   entryFormSlot: document.getElementById("entry-form-slot"),
   entryEditModal: document.getElementById("entry-edit-modal"),
   entryEditBody: document.getElementById("entry-edit-body"),
@@ -562,23 +561,53 @@ function trapFocus(event) {
   }
 }
 
+// モーダルを開いている間、裏のページがスクロールしてしまうのを止める。
+// iOS Safari は body の overflow:hidden を無視するため、位置を固定して
+// スクロール量ぶんずらす方式にする (見た目は動かない)。
+let scrollLockY = 0;
+
+function lockBodyScroll() {
+  if (document.body.classList.contains("modal-open")) return;
+  scrollLockY = window.scrollY;
+  // スクロールバーが消えるぶん内容が右にずれるのを防ぐ (PC)
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+  document.body.style.top = `-${scrollLockY}px`;
+  document.body.classList.add("modal-open");
+}
+
+function unlockBodyScroll() {
+  if (!document.body.classList.contains("modal-open")) return;
+  document.body.classList.remove("modal-open");
+  document.body.style.top = "";
+  document.body.style.paddingRight = "";
+  // html { scroll-behavior: smooth } が効くとアニメーションになってしまうので、
+  // 復元は必ず一瞬で行う
+  window.scrollTo({ top: scrollLockY, left: 0, behavior: "instant" });
+}
+
 function openModal(overlay, focusTarget) {
   // 既に開いているモーダルがある場合、復帰先を上書きすると元の位置を失う
   if (!document.querySelector(".modal-overlay:not(.hidden)")) {
     modalReturnFocus = document.activeElement;
   }
+  lockBodyScroll();
   overlay.classList.remove("hidden");
-  if (focusTarget) focusTarget.focus();
+  // フォーカス時にブラウザが勝手にスクロールしないようにする
+  // (位置を固定しているあいだにずれると、閉じたときに元へ戻せなくなる)
+  if (focusTarget) focusTarget.focus({ preventScroll: true });
 }
 
 function closeModal(overlay) {
   overlay.classList.add("hidden");
+  // 他にまだ開いているものが無ければスクロールを戻す
+  if (!document.querySelector(".modal-overlay:not(.hidden)")) unlockBodyScroll();
   // 復帰先が再描画で消えていることがある (一覧は毎回作り直されるため)。
   // その場合はページ先頭に飛ばさず、せめて記録一覧の見出しへ移す。
   if (modalReturnFocus && document.contains(modalReturnFocus)) {
-    modalReturnFocus.focus();
+    modalReturnFocus.focus({ preventScroll: true });
   } else if (modalReturnFocus) {
-    el.listSectionTitle?.focus();
+    el.listSectionTitle?.focus({ preventScroll: true });
   }
   modalReturnFocus = null;
 }
@@ -591,6 +620,7 @@ function closeAllModals() {
     overlay.classList.add("hidden");
   }
   restoreEntryForm();
+  unlockBodyScroll();
   settlingAdvance = null;
   modalReturnFocus = null;
 }
@@ -629,8 +659,10 @@ function restoreEntryForm() {
 
 function closeEntryEditModal() {
   if (el.entryEditModal.classList.contains("hidden")) return;
-  closeModal(el.entryEditModal);
+  // 先にフォームを元の場所へ戻してページの高さを確定させてから閉じる。
+  // 逆にするとスクロール位置を復元した直後に高さが変わり、位置がずれる
   restoreEntryForm();
+  closeModal(el.entryEditModal);
 }
 
 /**
@@ -1903,7 +1935,6 @@ function resetForm() {
   renderCategoryOptions("expense");
   updatePayslipVisibility();
   updateAdvanceVisibility();
-  el.formTitle.textContent = "記録を追加";
   el.submitBtn.textContent = "追加";
   el.cancelEditBtn.classList.add("hidden");
 }
@@ -2064,9 +2095,8 @@ async function handleSubmit(event) {
   // 消えてしまうため、作り直された同じ行のボタンへ改めて戻す。
   // preventScroll: ポップアップだったので画面は動いていない
   if (wasModalEdit) {
-    document
-      .querySelector(`#entry-list [data-edit-id="${editingId}"]`)
-      ?.focus({ preventScroll: true });
+    const selector = `#entry-list [data-edit-id="${CSS.escape(editingId)}"]`;
+    document.querySelector(selector)?.focus({ preventScroll: true });
   }
 }
 

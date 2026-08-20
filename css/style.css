@@ -590,10 +590,23 @@ html {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
 
-/* 入力フォームを収めるポップアップ。フォームは2列に並ぶので少し広くする
-   (高さは .modal-box の max-height: 85vh + overflow-y で中がスクロールする) */
+/* モーダルを開いているあいだ、裏のページをスクロールさせない。
+   iOS Safari は body の overflow:hidden を無視するため位置ごと固定する。
+   ずらす量 (top) と横位置の補正は JS 側で設定する。 */
+body.modal-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 入力フォームを収めるポップアップ。日付・種別・カテゴリ・金額が
+   2列ずつ並ぶ幅にすると収まりがよい (.form-row は 150px を下限に
+   auto-fit するため、この幅だと自然に2列になる)。
+   高さは .modal-box の max-height: 85vh + overflow-y で中がスクロールする */
 .modal-box-wide {
-  max-width: 680px;
+  max-width: 520px;
 }
 
 .modal-title {

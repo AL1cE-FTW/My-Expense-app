@@ -87,20 +87,24 @@ if (!(await page.locator("#entry-edit-modal").isVisible())) {
   throw new Error("editing should open the popup");
 }
 
-const scrollAfter = await page.evaluate(() => window.scrollY);
-console.log("scrollY:", scrollBefore, "->", scrollAfter);
-if (Math.abs(scrollAfter - scrollBefore) > 4) {
-  throw new Error(
-    `editing must not scroll the page (was ${scrollBefore}, now ${scrollAfter})`
-  );
-}
-
-// フォームを抜いた分だけページが縮んで一覧がずり上がっていないこと
+// 見ていた行が画面上の同じ位置に留まっていること。
+// (背景スクロールを止めるため body を位置固定するので window.scrollY は 0 になる。
+//  実際に効くのは「見えている位置が動かないこと」なのでそちらで確かめる)
 const rowTopDuring = await targetRow().evaluate((elem) => elem.getBoundingClientRect().top);
 console.log("row top:", Math.round(rowTopBefore), "->", Math.round(rowTopDuring));
 if (Math.abs(rowTopDuring - rowTopBefore) > 4) {
   throw new Error(
-    `the list must not shift when the form moves out (was ${rowTopBefore}, now ${rowTopDuring})`
+    `the row must stay put while editing (was ${rowTopBefore}, now ${rowTopDuring})`
+  );
+}
+
+// 開いているあいだは裏のページがスクロールしない
+await page.mouse.wheel(0, 500);
+await page.waitForTimeout(200);
+const rowTopAfterWheel = await targetRow().evaluate((elem) => elem.getBoundingClientRect().top);
+if (Math.abs(rowTopAfterWheel - rowTopBefore) > 4) {
+  throw new Error(
+    `the background must not scroll while the popup is open (row moved to ${rowTopAfterWheel})`
   );
 }
 
@@ -159,6 +163,16 @@ if (reservedHeight !== "") throw new Error("the reserved height should be cleare
 
 const updatedRow = await targetRow().textContent();
 if (!updatedRow.includes("交通")) throw new Error("the change should be saved: " + updatedRow);
+
+// 閉じたらスクロール位置が元どおりに戻っている
+const scrollRestored = await page.evaluate(() => window.scrollY);
+console.log("scrollY:", scrollBefore, "-> (locked) ->", scrollRestored);
+if (Math.abs(scrollRestored - scrollBefore) > 4) {
+  throw new Error(`closing should restore the scroll position (was ${scrollBefore}, now ${scrollRestored})`);
+}
+if (await page.evaluate(() => document.body.classList.contains("modal-open"))) {
+  throw new Error("the scroll lock should be released after closing");
+}
 
 // 更新後、フォーカスは同じ行の「編集」ボタンへ戻る
 const focusedAfter = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
