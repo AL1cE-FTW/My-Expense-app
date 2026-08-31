@@ -87,40 +87,71 @@ if (await page.locator("#payslip-bonus-fields").isVisible()) {
   throw new Error("the bonus fields should be hidden for 給与");
 }
 
+// 実際の給与明細の数字をそのまま入れて、差引支給額が一致することを確かめる
 await page.fill("#payslip-base-salary", "281200");
-await page.fill("#payslip-commute", "45182");
-await page.fill("#payslip-overtime-pay", "6017");
-await page.fill("#payslip-health-insurance", "14582");
-await page.fill("#payslip-pension-insurance", "29280");
-await page.fill("#payslip-employment-insurance", "1661");
-await page.fill("#payslip-income-tax", "5790");
-await page.fill("#payslip-other-deductions", "2805");
+await page.fill("#payslip-location-allowance", "12500");
+await page.fill("#payslip-commute", "61418");
+await page.fill("#payslip-overtime-pay", "7111");
+await page.fill("#payslip-salary-adjustment", "80");
+// 控除。会社独自の小額の項目 (慶弔掛金・福祉会費・組合費など) は
+// その他控除にまとめる: 200+550+1590+7453+1330 = 11,123
+await page.fill("#payslip-housing", "16935");
+await page.fill("#payslip-health-insurance", "13671");
+await page.fill("#payslip-nursing-insurance", "0");
+await page.fill("#payslip-pension-insurance", "27450");
+await page.fill("#payslip-employment-insurance", "1811");
+await page.fill("#payslip-income-tax", "6430");
+await page.fill("#payslip-resident-tax", "0");
+await page.fill("#payslip-other-deductions", "11468");
 await page.waitForTimeout(300);
 
-// 支給 332,399 / 控除 54,118 / 手取り 278,281
-if ((await txt("#payslip-gross-value")) !== "¥332,399") {
+// 支給 362,309 / 控除 77,765 / 差引支給額 284,544 (給与明細の振込金額と一致)
+if ((await txt("#payslip-gross-value")) !== "¥362,309") {
   throw new Error("gross wrong: " + (await txt("#payslip-gross-value")));
 }
-if ((await txt("#payslip-deduction-value")) !== "¥54,118") {
+if ((await txt("#payslip-deduction-value")) !== "¥77,765") {
   throw new Error("deductions wrong: " + (await txt("#payslip-deduction-value")));
 }
-if ((await txt("#payslip-net-value")) !== "¥278,281") {
+if ((await txt("#payslip-net-value")) !== "¥284,544") {
   throw new Error("net wrong: " + (await txt("#payslip-net-value")));
 }
-if ((await page.locator("#entry-amount").inputValue()) !== "278281") {
-  throw new Error("the amount field should follow the net pay");
+// 家賃は「受け取って払った」形にするので、収入の金額は振込額+寮社宅費
+if ((await page.locator("#entry-amount").inputValue()) !== "301479") {
+  throw new Error(
+    "the amount should be the deposit plus the rent, got " +
+      (await page.locator("#entry-amount").inputValue())
+  );
+}
+// なぜ振込額と違うのかがその場に書いてある
+const housingNote = await txt("#payslip-housing-note");
+if (!housingNote.includes("¥16,935") || !housingNote.includes("¥301,479")) {
+  throw new Error("the rent note should explain the amount: " + housingNote);
 }
 
 await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
 await page.fill("#entry-memo", "今月の給与");
 await page.click("#submit-btn");
-await page.waitForTimeout(400);
+await page.waitForTimeout(500);
 await page.click("#today-btn");
 await page.waitForTimeout(300);
 
-// 家計簿の収入は手取りだけ (額面ではない)
-if ((await txt("#total-income")) !== "¥278,281") {
-  throw new Error("only the net pay should count as income: " + (await txt("#total-income")));
+// 家賃は「支出・住居」として自動で記録される
+const housingRow = page.locator("#entry-list tr", { hasText: "給与天引き: 寮社宅費" });
+if ((await housingRow.count()) !== 1) throw new Error("the rent should be recorded as an expense");
+const housingText = await housingRow.textContent();
+if (!housingText.includes("住居") || !housingText.includes("¥16,935")) {
+  throw new Error("the rent expense is wrong: " + housingText);
+}
+
+// 収入 301,479 / 支出 16,935 / 収支 284,544 (= 実際に増えたお金)
+if ((await txt("#total-income")) !== "¥301,479") {
+  throw new Error("income wrong: " + (await txt("#total-income")));
+}
+if ((await txt("#total-expense")) !== "¥16,935") {
+  throw new Error("expense wrong: " + (await txt("#total-expense")));
+}
+if ((await txt("#balance")) !== "¥284,544") {
+  throw new Error("the balance should equal the actual deposit: " + (await txt("#balance")));
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +165,7 @@ if (!(await page.locator("#payslip-detail-modal").isVisible())) {
 }
 const detail = await txt("#payslip-detail-content");
 console.log("detail:", detail);
-for (const expected of ["¥281,200", "¥45,182", "¥332,399", "¥54,118", "¥278,281"]) {
+for (const expected of ["¥281,200", "¥12,500", "¥61,418", "¥16,935", "¥362,309", "¥77,765", "¥284,544", "¥301,479"]) {
   if (!detail.includes(expected)) throw new Error(`breakdown missing ${expected}: ` + detail);
 }
 await page.click("#payslip-detail-close");
@@ -215,6 +246,77 @@ await page.click("#payslip-clear-btn");
 await page.waitForTimeout(250);
 if ((await page.locator("#payslip-base-salary").inputValue()) !== "") {
   throw new Error("clearing should empty the breakdown fields");
+}
+
+// ---------------------------------------------------------------------------
+// 7. 家賃の支出は給与の記録と連動する (幽霊レコードを残さない)
+// ---------------------------------------------------------------------------
+const salaryRowAgain = page.locator("#entry-list tr", { hasText: "今月の給与" });
+
+// 金額を変えると、対になる住居の支出も追従する
+await salaryRowAgain.locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(400);
+if ((await page.locator("#payslip-housing").inputValue()) !== "16935") {
+  throw new Error("the rent should be restored when editing");
+}
+await page.fill("#payslip-housing", "20000");
+await page.waitForTimeout(300);
+await page.click("#submit-btn");
+await page.waitForTimeout(600);
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+
+let rentRow = page.locator("#entry-list tr", { hasText: "給与天引き: 寮社宅費" });
+if ((await rentRow.count()) !== 1) throw new Error("there should still be exactly one rent expense");
+if (!(await rentRow.textContent()).includes("¥20,000")) {
+  throw new Error("the rent expense should follow the payslip: " + (await rentRow.textContent()));
+}
+if ((await txt("#total-expense")) !== "¥20,000") {
+  throw new Error("expense total should follow: " + (await txt("#total-expense")));
+}
+
+// 家賃を0にすると、対になる支出は消える
+await page.locator("#entry-list tr", { hasText: "今月の給与" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(400);
+await page.fill("#payslip-housing", "0");
+await page.waitForTimeout(300);
+await page.click("#submit-btn");
+await page.waitForTimeout(600);
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+if ((await page.locator("#entry-list tr", { hasText: "給与天引き: 寮社宅費" }).count()) !== 0) {
+  throw new Error("clearing the rent should remove the linked expense");
+}
+
+// 戻して、今度は給与そのものを削除する -> 家賃の支出も一緒に消える
+await page.locator("#entry-list tr", { hasText: "今月の給与" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(400);
+await page.fill("#payslip-housing", "16935");
+await page.waitForTimeout(300);
+await page.click("#submit-btn");
+await page.waitForTimeout(600);
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+if ((await page.locator("#entry-list tr", { hasText: "給与天引き: 寮社宅費" }).count()) !== 1) {
+  throw new Error("the rent expense should come back");
+}
+
+const cumulativeBefore = await txt("#cumulative-savings");
+await page.locator("#entry-list tr", { hasText: "今月の給与" }).locator("button", { hasText: "削除" }).click();
+await page.waitForTimeout(700);
+if ((await page.locator("#entry-list tr", { hasText: "給与天引き: 寮社宅費" }).count()) !== 0) {
+  throw new Error("deleting the salary must also delete the rent expense");
+}
+// 両方消えたので、累計は「収入301,479 − 支出16,935 = 284,544」ちょうど減る。
+// 家賃の支出だけが残ると、減り方が16,935円足りなくなる
+const cumulativeAfter = await txt("#cumulative-savings");
+const yen = (t) => Number(t.replace(/[¥,]/g, ""));
+console.log("cumulative:", cumulativeBefore, "->", cumulativeAfter);
+if (yen(cumulativeBefore) - yen(cumulativeAfter) !== 284544) {
+  throw new Error(
+    `deleting the salary should remove exactly its net effect ` +
+      `(${cumulativeBefore} -> ${cumulativeAfter})`
+  );
 }
 
 await page.screenshot({ path: path.join(scratch, "payslip.png"), fullPage: true });

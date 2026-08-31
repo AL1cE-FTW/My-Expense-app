@@ -209,17 +209,30 @@
                     <input type="number" id="payslip-base-salary" min="0" step="1" placeholder="281200">
                   </div>
                   <div class="form-group">
+                    <label for="payslip-location-allowance">勤務地手当</label>
+                    <input type="number" id="payslip-location-allowance" min="0" step="1" placeholder="12500">
+                  </div>
+                  <div class="form-group">
                     <label for="payslip-commute">通勤手当</label>
-                    <input type="number" id="payslip-commute" min="0" step="1" placeholder="45182">
+                    <input type="number" id="payslip-commute" min="0" step="1" placeholder="61418">
                   </div>
                   <div class="form-group">
                     <label for="payslip-overtime-pay">時間外勤務手当</label>
-                    <input type="number" id="payslip-overtime-pay" min="0" step="1" placeholder="6017">
+                    <input type="number" id="payslip-overtime-pay" min="0" step="1" placeholder="7111">
+                  </div>
+                  <div class="form-group">
+                    <!-- 遡及差額などで マイナスになることがあるので min を付けない -->
+                    <label for="payslip-salary-adjustment">給与調整</label>
+                    <input type="number" id="payslip-salary-adjustment" step="1" placeholder="80">
                   </div>
                 </div>
 
                 <p class="payslip-group-label">控除</p>
                 <div class="form-row">
+                  <div class="form-group">
+                    <label for="payslip-housing">寮社宅費 (家賃の天引き)</label>
+                    <input type="number" id="payslip-housing" min="0" step="1" placeholder="16935">
+                  </div>
                   <div class="form-group">
                     <label for="payslip-health-insurance">健康保険</label>
                     <input type="number" id="payslip-health-insurance" min="0" step="1" placeholder="14582">
@@ -291,7 +304,8 @@
 
               <p class="payslip-net-preview">
                 支給合計 <strong id="payslip-gross-value">¥0</strong> − 控除合計 <strong id="payslip-deduction-value">¥0</strong>
-                = 差引支給額(手取り・上の「金額」に自動反映): <strong id="payslip-net-value">¥0</strong>
+                = 差引支給額(振込額): <strong id="payslip-net-value">¥0</strong>
+                <span id="payslip-housing-note" class="payslip-housing-note hidden"></span>
               </p>
               <button type="button" class="btn btn-secondary btn-small" id="payslip-clear-btn">内訳をクリアする</button>
             </div>

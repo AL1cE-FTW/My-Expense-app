@@ -62,8 +62,15 @@ function incomeBudgetCategories() {
 
 // 給与明細の内訳入力を出すカテゴリ (給与=通常の給与明細、賞与=賞与明細で項目が異なる)
 const PAYSLIP_CATEGORY = "給与";
-const PAYSLIP_SALARY_EARNING_FIELDS = ["baseSalary", "commute", "overtimePay"];
+const PAYSLIP_SALARY_EARNING_FIELDS = [
+  "baseSalary",
+  "locationAllowance",
+  "commute",
+  "overtimePay",
+  "salaryAdjustment",
+];
 const PAYSLIP_SALARY_DEDUCTION_FIELDS = [
+  "housing",
   "healthInsurance",
   "nursingInsurance",
   "pensionInsurance",
@@ -282,6 +289,9 @@ const el = {
   payslipBreakdown: document.getElementById("payslip-breakdown"),
   payslipSalaryFields: document.getElementById("payslip-salary-fields"),
   payslipBaseSalary: document.getElementById("payslip-base-salary"),
+  payslipLocationAllowance: document.getElementById("payslip-location-allowance"),
+  payslipHousing: document.getElementById("payslip-housing"),
+  payslipSalaryAdjustment: document.getElementById("payslip-salary-adjustment"),
   payslipCommute: document.getElementById("payslip-commute"),
   payslipOvertimePay: document.getElementById("payslip-overtime-pay"),
   payslipHealthInsurance: document.getElementById("payslip-health-insurance"),
@@ -302,6 +312,7 @@ const el = {
   payslipGrossValue: document.getElementById("payslip-gross-value"),
   payslipDeductionValue: document.getElementById("payslip-deduction-value"),
   payslipNetValue: document.getElementById("payslip-net-value"),
+  payslipHousingNote: document.getElementById("payslip-housing-note"),
   payslipClearBtn: document.getElementById("payslip-clear-btn"),
   submitBtn: document.getElementById("submit-btn"),
   cancelEditBtn: document.getElementById("cancel-edit-btn"),
@@ -418,7 +429,8 @@ function subscribeEntries(uid) {
 }
 
 async function addEntryToDb(data) {
-  await firestoreApi.addDoc(entriesCollection(currentUid), data);
+  const ref = await firestoreApi.addDoc(entriesCollection(currentUid), data);
+  return ref?.id;
 }
 
 async function updateEntryInDb(id, data) {
@@ -711,6 +723,50 @@ function restoreEditAnchor() {
  * (「精算済み」フラグを両方に書くと、片方を消したときに整合性が崩れるため)
  * 立替entryのid -> 返金entry の Map を1回の走査で作る。
  */
+// 給与から天引きされた家賃 (寮社宅費) に対応する「支出・住居」の記録。
+// 立替金と返金と同じく、給与の記録と対にして扱う。
+// 別々に管理すると、給与を消したときに家賃だけ残って累計貯金額がずれる。
+const PAYSLIP_HOUSING_CATEGORY = "住居";
+const PAYSLIP_HOUSING_MEMO = "給与天引き: 寮社宅費";
+
+function payslipHousingAmount(entry) {
+  if (!entry || entry.type !== "income" || !entry.payslip) return 0;
+  if (entry.payslip.kind === "bonus") return 0;
+  return entry.payslip.housing || 0;
+}
+
+function housingEntryFor(salaryId) {
+  return entries.find((e) => e.payslipHousingFor === salaryId);
+}
+
+// 給与の記録に合わせて、対になる住居の支出を作る・直す・消す
+async function syncPayslipHousingEntry(salaryId, data) {
+  const housing = payslipHousingAmount(data);
+  const existing = housingEntryFor(salaryId);
+
+  if (housing <= 0) {
+    if (existing) await deleteEntryFromDb(existing.id);
+    return;
+  }
+
+  const housingData = {
+    date: data.date,
+    type: "expense",
+    category: PAYSLIP_HOUSING_CATEGORY,
+    amount: housing,
+    memo: PAYSLIP_HOUSING_MEMO,
+    payslip: null,
+    advance: false,
+    payslipHousingFor: salaryId,
+  };
+
+  if (existing) {
+    await updateEntryInDb(existing.id, housingData);
+  } else {
+    await addEntryToDb({ ...housingData, createdAt: nowTimestamp() });
+  }
+}
+
 function refundsByAdvanceId() {
   const map = new Map();
   for (const e of entries) {
@@ -1605,6 +1661,7 @@ function showPayslipDetailModal(entry) {
       payslipModalRow("賞与額", p.bonusAmount || 0),
       payslipModalRow("支給合計", gross, { total: true }),
       payslipModalGroupLabel("控除"),
+      payslipModalRow("寮社宅費", p.housing || 0),
       payslipModalRow("健康保険", p.healthInsurance || 0),
       payslipModalRow("介護保険", p.nursingInsurance || 0),
       payslipModalRow("子ども支援金", p.childSupportLevy || 0),
@@ -1621,10 +1678,13 @@ function showPayslipDetailModal(entry) {
     el.payslipDetailContent.append(
       payslipModalGroupLabel("支給"),
       payslipModalRow("本給", p.baseSalary || 0),
+      payslipModalRow("勤務地手当", p.locationAllowance || 0),
       payslipModalRow("通勤手当", p.commute || 0),
       payslipModalRow("時間外勤務手当", p.overtimePay || 0),
+      payslipModalRow("給与調整", p.salaryAdjustment || 0),
       payslipModalRow("支給合計", gross, { total: true }),
       payslipModalGroupLabel("控除"),
+      payslipModalRow("寮社宅費", p.housing || 0),
       payslipModalRow("健康保険", p.healthInsurance || 0),
       payslipModalRow("介護保険", p.nursingInsurance || 0),
       payslipModalRow("厚生年金", p.pensionInsurance || 0),
@@ -1633,8 +1693,18 @@ function showPayslipDetailModal(entry) {
       payslipModalRow("住民税", p.residentTax || 0),
       payslipModalRow("その他控除", p.otherDeductions || 0),
       payslipModalRow("控除合計", deductions, { total: true }),
-      payslipModalRow("差引支給額(手取り)", entry.amount, { total: true })
+      payslipModalRow("差引支給額(振込額)", gross - deductions, { total: true })
     );
+
+    // 家賃は「受け取って払った」形にしているため、記録の金額は振込額と違う。
+    // どういう内訳でそうなっているのかを添える
+    const housing = p.housing || 0;
+    if (housing > 0) {
+      el.payslipDetailContent.append(
+        payslipModalRow("寮社宅費 (支出・住居として別に記録)", housing),
+        payslipModalRow("この記録の金額", entry.amount, { total: true })
+      );
+    }
   } else {
     // 旧形式(総支給額・社会保険料まとめ)で保存された記録との互換表示
     el.payslipDetailContent.append(
@@ -1671,8 +1741,11 @@ function renderCategoryOptions(type, selected) {
 
 const PAYSLIP_SALARY_INPUT_MAP = {
   baseSalary: () => el.payslipBaseSalary,
+  locationAllowance: () => el.payslipLocationAllowance,
+  salaryAdjustment: () => el.payslipSalaryAdjustment,
   commute: () => el.payslipCommute,
   overtimePay: () => el.payslipOvertimePay,
+  housing: () => el.payslipHousing,
   healthInsurance: () => el.payslipHealthInsurance,
   nursingInsurance: () => el.payslipNursingInsurance,
   pensionInsurance: () => el.payslipPensionInsurance,
@@ -1723,15 +1796,32 @@ function computePayslipTotals() {
     (sum, field) => sum + payslipFieldValue(field, mode),
     0
   );
-  return { gross, deductions, net: Math.max(0, gross - deductions) };
+  const net = Math.max(0, gross - deductions);
+
+  // 家賃 (寮社宅費) は税金や社会保険料と違い、「生活に使ったお金」。
+  // 控除に含めたまま手取りだけを収入にすると、住居の予算にも
+  // Need/Want/Save にも家賃が出てこなくなり、天引きになる前の月と
+  // 数字が地続きでなくなる。
+  // そこで「受け取って、家賃として払った」形にする:
+  //   収入 = 振込額 + 家賃 / 支出 = 家賃  (収支は振込額のまま正しい)
+  const housing = mode === "salary" ? payslipFieldValue("housing", mode) : 0;
+  return { gross, deductions, net, housing, incomeAmount: net + housing };
 }
 
 function updatePayslipPreview() {
-  const { gross, deductions, net } = computePayslipTotals();
+  const { gross, deductions, net, housing, incomeAmount } = computePayslipTotals();
   el.payslipGrossValue.textContent = formatYen(gross);
   el.payslipDeductionValue.textContent = formatYen(deductions);
   el.payslipNetValue.textContent = formatYen(net);
-  el.entryAmount.value = net;
+  el.entryAmount.value = incomeAmount;
+
+  // 家賃があるときは、金額欄が振込額と違う理由をその場で示す
+  el.payslipHousingNote.classList.toggle("hidden", housing <= 0);
+  if (housing > 0) {
+    el.payslipHousingNote.textContent =
+      `寮社宅費 ${formatYen(housing)} は「支出・住居」として自動で記録します。` +
+      `そのため上の「金額」には ${formatYen(incomeAmount)} (振込額 + 寮社宅費) が入ります。`;
+  }
 }
 
 function openPayslipBreakdown() {
@@ -2026,31 +2116,34 @@ async function deleteEntry(id) {
   const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
 
   // 精算済みの立替を消すと、対になる返金の収入だけが残って累計貯金額が
-  // 永久にずれるため、返金もまとめて消す。
+  // 永久にずれるため、返金もまとめて消す。給与と、そこから天引きされた
+  // 家賃の支出も同じ関係にある。
   const refund = entry.advance === true ? refundsByAdvanceId().get(entry.id) : null;
-  const message = refund
+  const housing = housingEntryFor(entry.id);
+  const linked = [refund, housing].filter(Boolean);
+  const message = linked.length
     ? `この記録を削除しますか?\n${label}\n\n` +
-      `対になる返金の記録も一緒に削除されます。\n` +
-      `${refund.date} ${refund.category} ${formatYen(refund.amount)}`
+      `対になる記録も一緒に削除されます。\n` +
+      linked.map((e) => `${e.date} ${e.category} ${formatYen(e.amount)}`).join("\n")
     : `この記録を削除しますか?\n${label}`;
   if (!confirm(message)) return;
 
   // 2件消す場合、片方だけ成功して終わることがある。何が残っているかを
   // 伝えないと、ユーザーは「何も起きなかった」と思って先に進んでしまう。
-  let refundDeleted = false;
+  let linkedDeleted = 0;
   try {
-    if (refund) {
-      await deleteEntryFromDb(refund.id);
-      refundDeleted = true;
+    for (const e of linked) {
+      await deleteEntryFromDb(e.id);
+      linkedDeleted++;
     }
     await deleteEntryFromDb(id);
   } catch (err) {
     alert(
       "削除に失敗しました: " +
         err.message +
-        (refundDeleted
-          ? "\n\n返金の記録は削除済みで、立替金の記録が残っています。" +
-            "そのため未回収の立替金として再び表示されます。もう一度削除してください。"
+        (linkedDeleted > 0
+          ? `\n\n対になる記録 ${linkedDeleted}件 は削除済みで、この記録が残っています。` +
+            "もう一度削除してください。"
           : "")
     );
     return;
@@ -2108,18 +2201,20 @@ async function handleSubmit(event) {
       await updateEntryInDb(editingId, data);
       entrySaved = true;
       if (refundToDelete) await deleteEntryFromDb(refundToDelete.id);
+      await syncPayslipHousingEntry(editingId, data);
     } else {
-      await addEntryToDb({ ...data, createdAt: nowTimestamp() });
+      const newId = await addEntryToDb({ ...data, createdAt: nowTimestamp() });
       entrySaved = true;
+      if (newId) await syncPayslipHousingEntry(newId, data);
     }
   } catch (err) {
     if (entrySaved) {
       // 記録自体は保存済み。残っている問題だけを伝えてフォームは通常どおり閉じる
       alert(
-        "記録は保存できましたが、対になる返金の記録を削除できませんでした: " +
+        "記録は保存できましたが、対になる記録の作成・削除に失敗しました: " +
           err.message +
-          "\n\n返金の収入だけが残っているため、累計貯金額がその分ずれています。" +
-          "記録一覧から手動で削除してください。"
+          "\n\n記録一覧を確認し、必要なら手動で直してください。" +
+          "(返金の収入や、給与から天引きされた家賃の支出が対象です)"
       );
     } else {
       alert("保存に失敗しました: " + err.message);
