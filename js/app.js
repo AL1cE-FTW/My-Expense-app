@@ -346,6 +346,7 @@ const el = {
   payslipDetailContent: document.getElementById("payslip-detail-content"),
   payslipDetailClose: document.getElementById("payslip-detail-close"),
   exportCsvBtn: document.getElementById("export-csv-btn"),
+  exportAnalysisBtn: document.getElementById("export-analysis-btn"),
   importCsvInput: document.getElementById("import-csv-input"),
   importCsvBtn: document.getElementById("import-csv-btn"),
   gmailImportBtn: document.getElementById("gmail-import-btn"),
@@ -2257,6 +2258,105 @@ function csvEscape(value) {
   return s;
 }
 
+/**
+ * Claude などに読ませて分析してもらうためのエクスポート。
+ *
+ * CSVは5列しかないため、予算・収入目標・立替・給与明細の内訳が落ちてしまう。
+ * それらを含めて1ファイルにまとめる。
+ *
+ * 合わせて「読み方」も書き出す。このアプリは貯蓄を中立に扱う・返金を収入に
+ * 数えないなど独自の集計ルールがあり、それを知らずに素の記録から集計すると
+ * アプリの画面と違う数字が出てしまうため。
+ */
+function exportForAnalysis() {
+  if (entries.length === 0) {
+    alert("エクスポートする記録がありません。");
+    return;
+  }
+
+  const data = {
+    generatedAt: nowTimestamp(),
+    app: "My-Expense-app (家計簿)",
+    currency: "JPY",
+
+    howToRead: {
+      種別: "expense=支出 / income=収入 / save=貯蓄・投資",
+      貯蓄の扱い:
+        "save は現金が資産に形を変えただけなので支出に数えない。" +
+        "収支も累計貯金額も動かさない (中立)",
+      収支: "その月の income の合計 − expense の合計",
+      累計貯金額: "全期間の収支の合計",
+      返金の扱い:
+        "カテゴリ「立替金返金」「カード返金」は、払ったお金が戻ってきただけで" +
+        "稼いだお金ではない。収入目標の達成率と Need/Want/Save の収入には数えない。" +
+        "ただし収支の相殺のため、月の収入合計には含める",
+      立替金:
+        "advance:true の支出は「自分が先に払って後で返金されるお金」。" +
+        "通常の支出として計上し、返金時に advanceRefundFor で紐づく収入で相殺する。" +
+        "対応する返金が無いものが未回収",
+      給与の金額:
+        "payslip がある収入の amount は手取り。ただし payslip.housing (寮社宅費) が" +
+        "ある場合は「手取り + 寮社宅費」で、同額が payslipHousingFor で紐づく" +
+        "「住居」の支出として別に記録されている (家賃を両側に立てている)",
+      予算の按分:
+        "budgets は月額。年間で見るときは、今年なら経過した月数を掛ける。" +
+        "過去の年・未来の年は12を掛ける",
+      予算バー:
+        "分子は予算を設定したカテゴリの支出だけ。予算を設定していない" +
+        "カテゴリの支出は「予算外」として別に見せている",
+      賞与の目標:
+        "incomeBudgets.bonusMonths の月に、給与の bonusMultiplier か月分を上乗せする。" +
+        "年間で見るときは到来済みのボーナス月の分だけ加算する",
+      登録日: "createdAt は取引日ではなく、記入・インポートした日時",
+    },
+
+    categories: CATEGORIES,
+    needWantSave: {
+      need: NEED_CATEGORIES,
+      want: WANT_CATEGORIES,
+      targetRatio: NWS_TARGET_RATIO,
+      説明:
+        "収入を基準に Need 50% / Want 30% / Save 20% を目安にする。" +
+        "Save の実績は 収入 − Need − Want (実際に残った金額)",
+    },
+
+    budgets,
+    incomeBudgets,
+
+    entries: [...entries]
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .map((e) => ({
+        date: e.date,
+        type: e.type,
+        category: e.category,
+        amount: e.amount,
+        memo: e.memo || "",
+        ...(e.advance === true ? { advance: true } : {}),
+        ...(e.advanceRefundFor ? { advanceRefundFor: e.advanceRefundFor } : {}),
+        ...(e.payslipHousingFor ? { payslipHousingFor: e.payslipHousingFor } : {}),
+        ...(e.payslip ? { payslip: e.payslip } : {}),
+        ...(e.createdAt ? { createdAt: e.createdAt } : {}),
+        id: e.id,
+      })),
+  };
+
+  downloadFile(
+    JSON.stringify(data, null, 2),
+    `kakeibo_analysis_${toDateInputValue(new Date())}.json`,
+    "application/json;charset=utf-8"
+  );
+}
+
+function downloadFile(text, filename, type) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function exportCsv() {
   if (entries.length === 0) {
     alert("エクスポートする記録がありません。");
@@ -2278,15 +2378,11 @@ function exportCsv() {
   }
 
   // BOM 付き UTF-8 (Excel で文字化けしないように)
-  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], {
-    type: "text/csv;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `kakeibo_${toDateInputValue(new Date())}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadFile(
+    "\uFEFF" + lines.join("\r\n"),
+    `kakeibo_${toDateInputValue(new Date())}.csv`,
+    "text/csv;charset=utf-8"
+  );
 }
 
 /**
@@ -3281,6 +3377,8 @@ function setupAppEventListeners() {
   });
   el.cancelIncomeBudgetBtn.addEventListener("click", closeIncomeBudgetForm);
   el.incomeBudgetForm.addEventListener("submit", handleIncomeBudgetSubmit);
+
+  el.exportAnalysisBtn.addEventListener("click", exportForAnalysis);
 
   el.importCsvBtn.addEventListener("click", () => el.importCsvInput.click());
 

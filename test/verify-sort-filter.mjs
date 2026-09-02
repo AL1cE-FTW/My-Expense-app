@@ -168,6 +168,69 @@ if (csv.length !== 5) throw new Error("expected header + 4 rows, got " + csv.len
 // 金額は ¥ やカンマを付けずに出す (読み直せる形)
 if (!csv.some((l) => l.includes(",50000,"))) throw new Error("amounts should be raw numbers: " + csv.join(" | "));
 
+// ---------------------------------------------------------------------------
+// 分析用エクスポート: 予算・収入目標・内訳・読み方まで入っている
+// ---------------------------------------------------------------------------
+await page.click("#edit-budget-btn");
+await page.waitForTimeout(250);
+await page.fill("#budget-input-食費", "30000");
+await page.locator("#budget-form button[type=submit]").click();
+await page.waitForTimeout(350);
+
+await page.click("#edit-income-budget-btn");
+await page.waitForTimeout(250);
+await page.fill("#income-budget-input-給与", "250000");
+await page.locator("#income-budget-form button[type=submit]").click();
+await page.waitForTimeout(350);
+
+// 給与明細つきの収入 (家賃の天引きあり) を1件入れる
+await page.click('.type-option:has(input[value="income"]) span');
+await page.selectOption("#entry-category", "給与");
+await page.waitForTimeout(250);
+await page.click("#payslip-toggle-btn");
+await page.waitForTimeout(250);
+await page.fill("#payslip-base-salary", "281200");
+await page.fill("#payslip-housing", "16935");
+await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
+await page.fill("#entry-memo", "給与");
+await page.click("#submit-btn");
+await page.waitForTimeout(500);
+
+const [analysisDownload] = await Promise.all([
+  page.waitForEvent("download"),
+  page.click("#export-analysis-btn"),
+]);
+const analysisPath = path.join(scratch, "analysis.json");
+await analysisDownload.saveAs(analysisPath);
+const analysis = JSON.parse(fs.readFileSync(analysisPath, "utf-8"));
+
+// CSVでは落ちてしまうものが入っている
+if (analysis.budgets?.["食費"] !== 30000) throw new Error("budgets missing from the export");
+if (analysis.incomeBudgets?.["給与"] !== 250000) throw new Error("income targets missing");
+if (!analysis.categories?.expense?.includes("食費")) throw new Error("category list missing");
+if (!analysis.needWantSave?.need?.includes("住居")) throw new Error("Need/Want/Save definition missing");
+if (analysis.needWantSave?.targetRatio?.need !== 0.5) throw new Error("NWS ratio missing");
+
+// 集計ルールの説明が入っている (これが無いと画面と違う数字で分析されてしまう)
+const howToRead = JSON.stringify(analysis.howToRead || {});
+for (const word of ["貯蓄", "立替金返金", "寮社宅費", "経過した月数"]) {
+  if (!howToRead.includes(word)) throw new Error(`howToRead should explain ${word}: ` + howToRead);
+}
+
+// 記録は日付順で、給与明細の内訳と家賃の紐づけも残っている
+const exported = analysis.entries || [];
+if (exported.length < 5) throw new Error("entries missing from the export, got " + exported.length);
+for (let i = 1; i < exported.length; i++) {
+  if (exported[i - 1].date > exported[i].date) throw new Error("entries should be sorted by date");
+}
+const salary = exported.find((e) => e.memo === "給与");
+if (!salary?.payslip) throw new Error("the payslip breakdown should be exported");
+if (salary.payslip.housing !== 16935) throw new Error("the rent should be in the payslip data");
+const rent = exported.find((e) => e.payslipHousingFor);
+if (!rent || rent.payslipHousingFor !== salary.id) {
+  throw new Error("the rent expense should stay linked to its salary entry");
+}
+
 await page.screenshot({ path: path.join(scratch, "sort.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL SORT/FILTER/EXPORT CHECKS PASSED");
