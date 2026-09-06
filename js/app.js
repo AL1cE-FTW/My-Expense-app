@@ -527,7 +527,7 @@ function render() {
   const budgetTotals = renderBudget(entriesInPeriod, targetMultiplier);
   renderPlanActual(entriesInPeriod, targetMultiplier, budgetTotals);
   renderAdvances();
-  renderNeedWantSave(entriesInPeriod);
+  renderNeedWantSave(entriesInPeriod, targetMultiplier);
   renderList(entriesInPeriod);
 }
 
@@ -1313,8 +1313,8 @@ function nwsArc(offset, length, color) {
   return circle;
 }
 
-function renderNeedWantSave(monthEntries) {
-  let totalIncome = 0;
+function renderNeedWantSave(monthEntries, targetMultiplier) {
+  let actualIncome = 0;
   let needSpent = 0;
   let wantSpent = 0;
   for (const e of monthEntries) {
@@ -1322,7 +1322,7 @@ function renderNeedWantSave(monthEntries) {
       // 返金は稼いだお金ではないので、50:30:20 の基準となる収入には数えない。
       // (5万円の立替精算で Need の目標が2.5万円水増しされるのを防ぐ。
       //  対になる支出も同じ期間にあれば Save 実績で自然に相殺される)
-      if (!isRefundIncome(e)) totalIncome += e.amount;
+      if (!isRefundIncome(e)) actualIncome += e.amount;
     } else if (e.type === "save") {
       // 貯蓄・投資は使ったお金ではないので Need/Want に数えない。
       // Save実績 (income - need - want) には自然に残る形で反映される。
@@ -1336,14 +1336,24 @@ function renderNeedWantSave(monthEntries) {
   el.nwsChart.innerHTML = "";
   el.nwsLegend.innerHTML = "";
 
-  if (totalIncome <= 0) {
+  // 給与は月末にまとめて記録することが多く、それまで収入が0のままになる。
+  // 実績だけを基準にすると、使いすぎに気づきたい月の前半こそ何も出ない。
+  // そこで収入目標を下限として使い、実績が目標を超えたら実績に切り替える。
+  const targetIncome = computeIncomeBudgetTotal(targetMultiplier);
+  const basisIncome = Math.max(actualIncome, targetIncome);
+  const usingTarget = basisIncome > actualIncome;
+
+  if (basisIncome <= 0) {
     const p = document.createElement("p");
     p.className = "empty-message";
-    p.textContent = `${viewMode === "year" ? "今年" : "今月"}の収入を登録すると表示されます`;
+    p.textContent =
+      `${viewMode === "year" ? "今年" : "今月"}の収入を登録するか、` +
+      `「収入目標を編集」から目標を設定すると表示されます`;
     el.nwsLegend.appendChild(p);
     return;
   }
 
+  const totalIncome = basisIncome;
   const saveAmount = totalIncome - needSpent - wantSpent;
   const buckets = [
     { key: "need", actual: needSpent, target: totalIncome * NWS_TARGET_RATIO.need },
@@ -1405,6 +1415,19 @@ function renderNeedWantSave(monthEntries) {
 
     item.append(main, categories);
     el.nwsLegend.appendChild(item);
+  }
+
+  // 何を基準に割合を出しているかを明示する。黙って目標を使うと、
+  // 給与を登録した瞬間に数字が動いて理由が分からなくなる
+  if (usingTarget) {
+    const note = document.createElement("p");
+    note.className = "nws-basis-note";
+    note.id = "nws-basis-note";
+    note.textContent =
+      `収入目標 ${formatYen(basisIncome)} を基準にしています` +
+      `(登録済みの収入は ${formatYen(actualIncome)})。` +
+      `実績が目標を超えると、そちらに切り替わります。`;
+    el.nwsLegend.appendChild(note);
   }
 }
 

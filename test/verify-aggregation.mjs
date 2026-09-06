@@ -50,6 +50,9 @@ const CUR_M = NOW.getMonth() + 1;
 const MM = String(CUR_M).padStart(2, "0");
 // 年間表示の目標は「経過した月数」で按分される
 const ELAPSED = CUR_M;
+const PREV = new Date(CUR_Y, NOW.getMonth() - 1, 5);
+const PREV_Y = PREV.getFullYear();
+const PREV_MM = String(PREV.getMonth() + 1).padStart(2, "0");
 
 await page.goto("http://localhost:8990/", { waitUntil: "networkidle" });
 await page.waitForTimeout(300);
@@ -229,6 +232,56 @@ if (!(await txt("#budget-overall")).includes(`¥${(120000 * 12).toLocaleString("
 
 await page.click('.view-tab[data-view="month"]');
 await page.waitForTimeout(300);
+
+// ---------------------------------------------------------------------------
+// 8. 収入がまだ登録されていない月でも Need/Want/Save が出る
+// ---------------------------------------------------------------------------
+// 給与は月末にまとめて記録するので、それまで収入0で真っ白になっていた。
+// 収入目標があるなら、それを基準にして表示する
+await page.click('.view-tab[data-view="month"]');
+await page.waitForTimeout(300);
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+await page.click("#prev-month");
+await page.waitForTimeout(300);
+if ((await page.locator("#entry-list tr").count()) !== 0) {
+  throw new Error("the previous month should be empty for this check");
+}
+
+// 支出だけある状態を作る (収入は無い)。
+// 登録するとその記録の月へ自動で移動するので、ここで先月の表示になる
+await addEntry({ date: `${PREV_Y}-${PREV_MM}-05`, category: "食費", amount: 40000, memo: "先月の食費" });
+await page.waitForTimeout(400);
+
+let nwsText = await txt("#nws-legend");
+console.log("NWS (income not recorded yet):", nwsText);
+if (nwsText.includes("収入を登録するか")) {
+  throw new Error("Need/Want/Save should still show when an income target is set");
+}
+// 収入目標 250,000 が基準 (給与のみ。先月は賞与月ではない)
+if (!nwsText.includes("¥125,000")) {
+  throw new Error("Need target should be half of the income target: " + nwsText);
+}
+if (!nwsText.includes("¥40,000 / ¥125,000")) {
+  throw new Error("Need actual should be the recorded spending: " + nwsText);
+}
+// 何を基準にしているかが書いてある
+const basisNote = await txt("#nws-basis-note");
+if (!basisNote.includes("収入目標") || !basisNote.includes("¥250,000")) {
+  throw new Error("the basis should be stated: " + basisNote);
+}
+
+// 実績が目標を超えたら実績に切り替わる
+await addEntry({ type: "income", date: `${PREV_Y}-${PREV_MM}-25`, category: "給与", amount: 300000, memo: "先月の給与" });
+await page.waitForTimeout(400);
+nwsText = await txt("#nws-legend");
+console.log("NWS (income recorded):", nwsText);
+if (!nwsText.includes("¥150,000")) {
+  throw new Error("Need target should follow the actual income once it exceeds the target: " + nwsText);
+}
+if ((await page.locator("#nws-basis-note").count()) !== 0) {
+  throw new Error("the basis note should disappear once actuals are used");
+}
 
 await page.screenshot({ path: path.join(scratch, "aggregation.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));

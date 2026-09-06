@@ -601,6 +601,14 @@ body.modal-open {
   overflow: hidden;
 }
 
+/* Need/Want/Save が何を基準に割合を出しているかの注記 */
+.nws-basis-note {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
 /* 家賃の天引きがあるとき、金額欄が振込額と違う理由を添える */
 .payslip-housing-note {
   display: block;
