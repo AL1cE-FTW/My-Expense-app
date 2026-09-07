@@ -1877,16 +1877,22 @@ function journalFor(entry) {
       lines.push(journalLine("credit", entry.category, entry.amount));
     } else {
       const bonus = p.kind === "bonus";
+      // 旧形式は「総支給額」と「社会保険料」をまとめて持っている。新形式の科目名で
+      // 集計すると支給合計が0になり、全額が差額に落ちて偽の警告が出てしまう。
+      const legacy = !bonus && p.baseSalary === undefined && p.gross !== undefined;
       const earningFields = bonus ? PAYSLIP_BONUS_EARNING_FIELDS : PAYSLIP_SALARY_EARNING_FIELDS;
-      const gross = earningFields.reduce((sum, f) => sum + (p[f] || 0), 0);
-      const insurance =
-        (p.healthInsurance || 0) +
-        (p.nursingInsurance || 0) +
-        (p.pensionInsurance || 0) +
-        (p.employmentInsurance || 0) +
-        (p.childSupportLevy || 0);
+      const gross = legacy
+        ? p.gross || 0
+        : earningFields.reduce((sum, f) => sum + (p[f] || 0), 0);
+      const insurance = legacy
+        ? p.socialInsurance || 0
+        : (p.healthInsurance || 0) +
+          (p.nursingInsurance || 0) +
+          (p.pensionInsurance || 0) +
+          (p.employmentInsurance || 0) +
+          (p.childSupportLevy || 0);
       const tax = (p.incomeTax || 0) + (p.residentTax || 0);
-      const other = p.otherDeductions || 0;
+      const other = legacy ? 0 : p.otherDeductions || 0;
 
       lines.push(journalLine("debit", received, entry.amount));
       if (insurance > 0) lines.push(journalLine("debit", SOCIAL_INSURANCE_ACCOUNT, insurance));
@@ -2031,6 +2037,24 @@ function cardPaymentDateFor(usageDate) {
   return toDateInputValue(new Date(payMonth.getFullYear(), payMonth.getMonth(), day));
 }
 
+// 指定日以降で最初に来る支払日。期首時点で残っていた請求は、期首より前の利用
+// (もう記録が無い) に対するものなので、締め日から遡って計算はできない。
+// 「次に来る支払日に落ちる」とみなす。
+function firstPaymentDateOnOrAfter(date) {
+  const { paymentDay } = cardTerms();
+  const [y, m, d] = date.split("-").map(Number);
+  let year = y;
+  let monthIndex = m - 1;
+  let day = clampDayToMonth(year, monthIndex, paymentDay);
+  if (day < d) {
+    const next = new Date(year, monthIndex + 1, 1);
+    year = next.getFullYear();
+    monthIndex = next.getMonth();
+    day = clampDayToMonth(year, monthIndex, paymentDay);
+  }
+  return toDateInputValue(new Date(year, monthIndex, day));
+}
+
 /**
  * カードの引き落としを仕訳として組み立てる。実際の記録は無く、締め日と支払日から
  * 導出する。これがないと銀行口座の残高がいつまでも減らない。
@@ -2041,21 +2065,26 @@ function cardPaymentDateFor(usageDate) {
  */
 function cardPaymentJournal(from, to) {
   const byDate = new Map();
+  const openingDate = accountSettings.openingDate;
 
   for (const e of entries) {
     if (!isCardEntry(e)) continue;
+    // 期首より前の利用の請求は、期首残高の未払金に含まれている。ここで拾うと
+    // 「請求が立った仕訳は期間外なのに引き落としだけ立つ」形になり、
+    // 同じ借金を二重に払ってしまう。
+    if (openingDate && e.date < openingDate) continue;
     const payDate = cardPaymentDateFor(e.date);
     if (payDate < from || payDate > to) continue;
-    // 支出は請求が増え、返金は減る
-    const delta = e.type === "expense" ? e.amount : -e.amount;
+    // journalFor と揃える: 支出・貯蓄は未払金を増やし (貸方)、収入(返金)は減らす
+    const delta = e.type === "income" ? -e.amount : e.amount;
     byDate.set(payDate, (byDate.get(payDate) || 0) + delta);
   }
 
   // 期首時点で残っていたカードの請求。記録が無いので、期首日以降で最初に来る
   // 支払日にまとめて引き落とされたものとして扱う。
   const opening = openingBalanceOf(PAYABLE_ACCOUNT);
-  if (opening > 0 && accountSettings.openingDate) {
-    const payDate = cardPaymentDateFor(accountSettings.openingDate);
+  if (opening > 0 && openingDate) {
+    const payDate = firstPaymentDateOnOrAfter(openingDate);
     if (payDate >= from && payDate <= to) {
       byDate.set(payDate, (byDate.get(payDate) || 0) + opening);
     }
@@ -2326,6 +2355,18 @@ function renderBalanceSheet(container, periodEnd) {
     p.textContent =
       "貸借対照表を出すには、期首日とその日の残高が必要です。" +
       "右上の「口座を設定」から1回だけ入力してください。";
+    container.appendChild(p);
+    return;
+  }
+
+  // 期首より前の期間を表示しているときは残高を出せない。期首残高をそのまま
+  // 見せると「その時点の残高」に見えてしまうので、何も出さずに理由を伝える。
+  if (periodEnd < accountSettings.openingDate) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent =
+      `期首日 (${formatDateLabel(accountSettings.openingDate)}) より前の残高は分かりません。` +
+      "これより前も見たい場合は、口座の設定で期首日を早めてください。";
     container.appendChild(p);
     return;
   }

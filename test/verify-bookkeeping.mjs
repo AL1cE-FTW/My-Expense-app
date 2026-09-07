@@ -265,16 +265,101 @@ await page.waitForTimeout(250);
 const housing = await entryText("給与天引き: 寮社宅費");
 if (!housing.includes("銀行口座")) throw new Error("天引きの家賃は口座から: " + housing);
 
-// カードの引き落としは記録が無くても仕訳として立つ。
-// 期首の未払金30,000は、期首日(1/1)の締めの支払日 = 2/26 に引き落とされる
-await page.click("#prev-month");
-for (let i = 0; i < 6; i++) await page.click("#prev-month");
+// ---------------------------------------------------------------------------
+// 4.5 旧形式の給与明細 (総支給額・社会保険料をまとめて持つ) でも仕訳が成り立つ
+// ---------------------------------------------------------------------------
+// 新形式の科目名 (baseSalary など) を持たないので、そのまま集計すると支給合計が
+// 0になり、全額が「差額 (要確認)」に落ちて偽の警告が出る。
+await page.evaluate(({ y, mm }) => {
+  window.__seedDoc(`users/uid-book-test@example.com/entries/legacy-payslip`, {
+    date: `${y}-${mm}-27`,
+    type: "income",
+    category: "副収入",
+    amount: 160000, // 手取り = 200,000 − 30,000 − 8,000 − 2,000
+    memo: "旧形式の給与明細",
+    settlement: "bank",
+    payslip: { gross: 200000, socialInsurance: 30000, incomeTax: 8000, residentTax: 2000 },
+  });
+}, { y: CUR_Y, mm: MM });
 await page.waitForTimeout(500);
-const febJournal = (await page.textContent("#bookkeeping-body")).replace(/\s+/g, " ").trim();
-console.log("2月の仕訳:", febJournal);
-if (!febJournal.includes("カードの引き落とし") || !febJournal.includes("¥30,000")) {
-  throw new Error("期首のカード未払金の引き落としが立つはず: " + febJournal);
+await page.click('.book-tab[data-book="journal"]');
+await page.waitForTimeout(300);
+const legacy = await entryText("旧形式の給与明細");
+console.log("旧形式の仕訳:", legacy);
+if (legacy.includes("差額")) {
+  throw new Error("旧形式でも貸借が合うはず (差額に落ちてはいけない): " + legacy);
 }
+for (const expected of ["銀行口座", "¥160,000", "法定福利費", "¥30,000", "租税公課", "¥10,000", "副収入", "¥200,000"]) {
+  if (!legacy.includes(expected)) throw new Error(`旧形式の仕訳に ${expected} が無い: ` + legacy);
+}
+const trialLegacy = await bookText("trial");
+if (!trialLegacy.includes("✓ 借方合計と貸方合計が一致しています")) {
+  throw new Error("旧形式を足したら貸借が崩れた: " + trialLegacy);
+}
+if (trialLegacy.includes("差額")) throw new Error("偽の差額が出ている: " + trialLegacy);
+
+// ---------------------------------------------------------------------------
+// 5. 期首より前のカード利用を二重に払わない
+// ---------------------------------------------------------------------------
+// 期首前(去年12月)のカード利用は、その請求が期首残高の未払金に含まれている。
+// 引き落としだけを拾うと、同じ借金を2回払う形になって口座残高が狂う。
+const oldCardCsv = path.join(scratch, "book-card-before-opening.csv");
+fs.writeFileSync(
+  oldCardCsv,
+  [
+    "宇津木　武　様,4980-09**-****-****,Ｏｌｉｖｅ／クレジット",
+    `${CUR_Y - 1}/12/20,ヨドバシカメラ,25000,１,１,25000,`,
+    ",,,,,25000,",
+  ].join("\n"),
+  "utf-8"
+);
+await page.setInputFiles("#import-csv-input", oldCardCsv);
+await page.waitForTimeout(700);
+await page.click("#today-btn");
+await page.waitForTimeout(500);
+
+const bsAfterOld = await bookText("bs");
+console.log("期首前のカード利用を足したあと:", bsAfterOld);
+if (!bsAfterOld.includes("銀行口座¥1,174,309")) {
+  throw new Error("期首前の利用で口座残高が動いてはいけない: " + bsAfterOld);
+}
+if (!bsAfterOld.includes("未払金¥900")) {
+  throw new Error("期首前の利用で未払金が動いてはいけない: " + bsAfterOld);
+}
+if (!bsAfterOld.includes("純資産 (資産 − 負債)¥1,535,409")) {
+  throw new Error("期首前の利用で純資産が動いてはいけない: " + bsAfterOld);
+}
+
+// ---------------------------------------------------------------------------
+// 6. 期首の未払金の引き落としは、期首日以降で最初に来る支払日に立つ
+// ---------------------------------------------------------------------------
+// 期首 1/1・支払日26日なので 1/26。締め日から数えて翌月(2/26)にしてはいけない。
+// 何回戻るかは今日の月から計算する (実行する月によって結果が変わらないように)
+for (let i = 0; i < NOW.getMonth(); i++) await page.click("#prev-month");
+await page.waitForTimeout(500);
+await page.click('.book-tab[data-book="journal"]');
+await page.waitForTimeout(300);
+const janJournal = (await page.textContent("#bookkeeping-body")).replace(/\s+/g, " ").trim();
+console.log("1月の仕訳:", janJournal);
+if (!janJournal.includes("カードの引き落とし") || !janJournal.includes("¥30,000")) {
+  throw new Error("期首のカード未払金の引き落としが1月に立つはず: " + janJournal);
+}
+if (!janJournal.includes("1/26")) {
+  throw new Error("引き落としは1/26のはず: " + janJournal);
+}
+// 期首前(12/20)の利用は帳簿の対象外なので、その引き落としは出てこない
+if (janJournal.includes("¥25,000")) {
+  throw new Error("期首前の利用の引き落としを立ててはいけない: " + janJournal);
+}
+
+// 期首より前の期間は残高を出せないと伝える (期首残高をその時点の残高に見せない)
+await page.click("#prev-month");
+await page.waitForTimeout(400);
+const beforeOpening = await bookText("bs");
+if (!beforeOpening.includes("より前の残高は分かりません")) {
+  throw new Error("期首より前は残高を出せないと伝えるはず: " + beforeOpening);
+}
+
 await page.click("#today-btn");
 await page.waitForTimeout(400);
 
