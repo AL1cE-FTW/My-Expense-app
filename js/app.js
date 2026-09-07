@@ -278,6 +278,10 @@ const el = {
   budgetSectionTitle: document.getElementById("budget-section-title"),
   listSectionTitle: document.getElementById("list-section-title"),
   listPendingNote: document.getElementById("list-pending-note"),
+  bookkeepingSectionTitle: document.getElementById("bookkeeping-section-title"),
+  bookkeepingBody: document.getElementById("bookkeeping-body"),
+  bookkeepingNote: document.getElementById("bookkeeping-note"),
+  bookTabs: document.querySelectorAll(".book-tab"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
   totalIncome: document.getElementById("total-income"),
@@ -550,6 +554,7 @@ function render() {
   el.budgetSectionTitle.textContent = `${periodLabel}の予算`;
   el.planActualSectionTitle.textContent = `${periodLabel}の予定と実績`;
   el.listSectionTitle.textContent = `${periodLabel}の記録`;
+  el.bookkeepingSectionTitle.textContent = `${periodLabel}の帳簿`;
 
   renderCumulativeSavings();
 
@@ -561,6 +566,7 @@ function render() {
   renderPlanActual(entriesInPeriod, targetMultiplier, budgetTotals);
   renderAdvances();
   renderNeedWantSave(entriesInPeriod, targetMultiplier);
+  renderBookkeeping(entriesInPeriod);
   renderList(entriesInPeriod);
 }
 
@@ -1709,6 +1715,425 @@ function renderPendingNote(monthEntries) {
     `未確定「仮」が${pending.length}件 (${formatYen(total)})。` +
     "メールの利用通知から取り込んだ速報で、確定時に金額が変わることがあります。" +
     "カード利用履歴CSVを取り込むと確定版に置き換わります。";
+}
+
+// ---------------------------------------------------------------------------
+// 帳簿 (簿記の見方)
+//
+// このアプリの入力は単式 (1件 = 日付・種別・カテゴリ・金額) だが、複式の
+// 見方は既存のデータから導出できる。ここでは記録を仕訳に変換し、そこから
+// 合計試算表と損益計算書を組み立てる。入力の手間は増やさない。
+//
+// 勘定科目は既存のカテゴリをそのまま使い、給与明細の控除だけ簿記の科目名
+// (法定福利費・租税公課) に振り分ける。
+// ---------------------------------------------------------------------------
+
+const CASH_ACCOUNT = "現金預金";
+const PAYABLE_ACCOUNT = "未払金";
+const SOCIAL_INSURANCE_ACCOUNT = "法定福利費";
+const TAX_ACCOUNT = "租税公課";
+// 給与明細の内訳が支給合計と噛み合わないとき、貸借を合わせるための受け皿。
+// ここに金額が出たら入力のどこかが間違っている。
+const IMBALANCE_ACCOUNT = "差額 (要確認)";
+
+// カードで払ったか。カード払いは現金がまだ出ていかないので、貸方は未払金になる。
+function isCardEntry(entry) {
+  return entry.source === SOURCE_GMAIL || entry.source === SOURCE_CARD;
+}
+
+// その記録でお金が動く側の科目。カードなら未払金 (負債の増加)、
+// それ以外は現金預金。
+function paymentAccount(entry) {
+  return isCardEntry(entry) ? PAYABLE_ACCOUNT : CASH_ACCOUNT;
+}
+
+const ASSET_ACCOUNTS = [CASH_ACCOUNT];
+const LIABILITY_ACCOUNTS = [PAYABLE_ACCOUNT];
+
+// 勘定科目の5要素分類。貸借対照表(資産・負債・純資産)と
+// 損益計算書(収益・費用)のどちらに載るかがこれで決まる。
+function accountType(account) {
+  if (ASSET_ACCOUNTS.includes(account)) return "asset";
+  // 貯蓄・投資は費用ではなく、現金が別の資産に形を変えただけ
+  if (CATEGORIES.save.includes(account)) return "asset";
+  if (LIABILITY_ACCOUNTS.includes(account)) return "liability";
+  if (CATEGORIES.income.includes(account)) return "revenue";
+  if (account === IMBALANCE_ACCOUNT) return "other";
+  return "expense";
+}
+
+const ACCOUNT_TYPE_LABELS = {
+  asset: "資産",
+  liability: "負債",
+  revenue: "収益",
+  expense: "費用",
+  other: "その他",
+};
+
+// 簿記の教科書どおりの扱いと、このアプリの集計が違うところ。
+// 仕訳帳の行に添えて、違いに気づけるようにする。
+const JOURNAL_NOTES = {
+  advance:
+    "簿記では (借)立替金 / (貸)現金預金 として資産に計上します。" +
+    "このアプリは支出として集計しているため、ここでも費用のまま表示しています。",
+  [ADVANCE_REFUND_CATEGORY]:
+    "簿記では立替金 (資産) の回収なので、収益にはなりません。",
+  [CARD_REFUND_CATEGORY]:
+    "簿記では費用の取り消し (戻し入れ) として、元の費用科目を減らします。",
+};
+
+function journalLine(side, account, amount) {
+  return { side, account, amount };
+}
+
+/**
+ * 記録1件を仕訳 (借方・貸方の組) に変換する。
+ *
+ * 給与明細のある収入は複合仕訳になる。このアプリは
+ *   記録の金額 = 振込額 + 寮社宅費
+ * で持っていて、寮社宅費は別に「住居」の支出として記録されている。そのため
+ * ここでは寮社宅費を控除に立てず、記録の金額をそのまま受取額として扱う:
+ *
+ *   (借) 現金預金   振込額+寮社宅費   (貸) 給与  支給合計
+ *   (借) 法定福利費 健康保険+介護+厚生年金+雇用
+ *   (借) 租税公課   所得税+住民税
+ *
+ * 支給合計 = 記録の金額 + 法定福利費 + 租税公課 + その他控除 になるので、
+ * これで貸借が一致する。
+ */
+function journalFor(entry) {
+  const lines = [];
+  const notes = [];
+
+  if (entry.type === "expense") {
+    lines.push(journalLine("debit", entry.category, entry.amount));
+    lines.push(journalLine("credit", paymentAccount(entry), entry.amount));
+    if (entry.advance === true) notes.push(JOURNAL_NOTES.advance);
+  } else if (entry.type === "save") {
+    // 貯蓄・投資は費用ではない。現金が投資資産に振り替わるだけ
+    lines.push(journalLine("debit", entry.category, entry.amount));
+    lines.push(journalLine("credit", paymentAccount(entry), entry.amount));
+  } else {
+    const p = entry.payslip;
+    const received = paymentAccount(entry);
+    if (!p) {
+      lines.push(journalLine("debit", received, entry.amount));
+      lines.push(journalLine("credit", entry.category, entry.amount));
+    } else {
+      const bonus = p.kind === "bonus";
+      const earningFields = bonus ? PAYSLIP_BONUS_EARNING_FIELDS : PAYSLIP_SALARY_EARNING_FIELDS;
+      const gross = earningFields.reduce((sum, f) => sum + (p[f] || 0), 0);
+      const insurance =
+        (p.healthInsurance || 0) +
+        (p.nursingInsurance || 0) +
+        (p.pensionInsurance || 0) +
+        (p.employmentInsurance || 0) +
+        (p.childSupportLevy || 0);
+      const tax = (p.incomeTax || 0) + (p.residentTax || 0);
+      const other = p.otherDeductions || 0;
+
+      lines.push(journalLine("debit", received, entry.amount));
+      if (insurance > 0) lines.push(journalLine("debit", SOCIAL_INSURANCE_ACCOUNT, insurance));
+      if (tax > 0) lines.push(journalLine("debit", TAX_ACCOUNT, tax));
+      if (other > 0) lines.push(journalLine("debit", "その他支出", other));
+      lines.push(journalLine("credit", entry.category, gross));
+
+      if ((p.housing || 0) > 0) {
+        notes.push(
+          "寮社宅費は「受け取って払った」形にしているため、控除に立てず、" +
+            "別の「住居」の支出として記録されています。"
+        );
+      }
+    }
+  }
+
+  if (JOURNAL_NOTES[entry.category]) notes.push(JOURNAL_NOTES[entry.category]);
+
+  // 貸借がずれるのは給与明細の内訳が支給合計と噛み合っていないときだけ。
+  // 黙って捨てず、差額の科目を立てて表に出す (入力の間違いに気づける)。
+  const debit = lines.filter((l) => l.side === "debit").reduce((s, l) => s + l.amount, 0);
+  const credit = lines.filter((l) => l.side === "credit").reduce((s, l) => s + l.amount, 0);
+  if (debit !== credit) {
+    const diff = Math.abs(debit - credit);
+    lines.push(journalLine(debit < credit ? "debit" : "credit", IMBALANCE_ACCOUNT, diff));
+    notes.push(
+      `給与明細の内訳が支給合計と ${formatYen(diff)} 合いません。内訳を確認してください。`
+    );
+  }
+
+  return { id: entry.id, date: entry.date, memo: entry.memo || "", entry, lines, notes };
+}
+
+// 期間の記録を日付順の仕訳帳にする
+function buildJournal(periodEntries) {
+  return [...periodEntries]
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .map(journalFor);
+}
+
+// 合計試算表: 科目ごとの借方合計・貸方合計。全体の借方合計と貸方合計は
+// 必ず一致する (貸借平均の原理)。
+function buildTrialBalance(journal) {
+  const rows = new Map();
+  for (const je of journal) {
+    for (const line of je.lines) {
+      if (!rows.has(line.account)) {
+        rows.set(line.account, { account: line.account, debit: 0, credit: 0 });
+      }
+      rows.get(line.account)[line.side] += line.amount;
+    }
+  }
+
+  const order = { asset: 0, liability: 1, revenue: 2, expense: 3, other: 4 };
+  const list = [...rows.values()].map((r) => ({ ...r, type: accountType(r.account) }));
+  list.sort((a, b) => order[a.type] - order[b.type] || b.debit + b.credit - (a.debit + a.credit));
+
+  return {
+    rows: list,
+    debitTotal: list.reduce((s, r) => s + r.debit, 0),
+    creditTotal: list.reduce((s, r) => s + r.credit, 0),
+  };
+}
+
+// 損益計算書: 収益 − 費用 = 当期純利益。
+// 収益は貸方、費用は借方に立つので、それぞれ純額を取る。
+function buildProfitAndLoss(journal) {
+  const totals = new Map();
+  for (const je of journal) {
+    for (const line of je.lines) {
+      const type = accountType(line.account);
+      if (type !== "revenue" && type !== "expense") continue;
+      const sign =
+        type === "revenue"
+          ? line.side === "credit" ? 1 : -1
+          : line.side === "debit" ? 1 : -1;
+      totals.set(line.account, (totals.get(line.account) || 0) + sign * line.amount);
+    }
+  }
+
+  const pick = (type) =>
+    [...totals.entries()]
+      .filter(([account]) => accountType(account) === type)
+      .map(([account, amount]) => ({ account, amount }))
+      .filter((r) => r.amount !== 0)
+      .sort((a, b) => b.amount - a.amount);
+
+  const revenues = pick("revenue");
+  const expenses = pick("expense");
+  const revenueTotal = revenues.reduce((s, r) => s + r.amount, 0);
+  const expenseTotal = expenses.reduce((s, r) => s + r.amount, 0);
+
+  return { revenues, expenses, revenueTotal, expenseTotal, netIncome: revenueTotal - expenseTotal };
+}
+
+// --- 帳簿の描画 -------------------------------------------------------------
+
+let bookView = "pl";
+
+function bookRow(label, amount, { total = false, muted = false } = {}) {
+  const row = document.createElement("div");
+  row.className = "book-row" + (total ? " total" : "") + (muted ? " muted" : "");
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  const valueEl = document.createElement("span");
+  valueEl.className = "book-value";
+  valueEl.textContent = formatYen(amount);
+  row.append(labelEl, valueEl);
+  return row;
+}
+
+function bookGroupLabel(text) {
+  const el2 = document.createElement("div");
+  el2.className = "book-group-label";
+  el2.textContent = text;
+  return el2;
+}
+
+function renderProfitAndLoss(container, journal) {
+  const pl = buildProfitAndLoss(journal);
+  if (pl.revenues.length === 0 && pl.expenses.length === 0) {
+    container.appendChild(emptyMessage("この期間の記録がありません。"));
+    return;
+  }
+
+  container.appendChild(bookGroupLabel("収益"));
+  for (const r of pl.revenues) container.appendChild(bookRow(r.account, r.amount));
+  container.appendChild(bookRow("収益合計", pl.revenueTotal, { total: true }));
+
+  container.appendChild(bookGroupLabel("費用"));
+  for (const r of pl.expenses) container.appendChild(bookRow(r.account, r.amount));
+  container.appendChild(bookRow("費用合計", pl.expenseTotal, { total: true }));
+
+  const net = bookRow("当期純利益", pl.netIncome, { total: true });
+  net.classList.add("book-net", pl.netIncome >= 0 ? "positive" : "negative");
+  container.appendChild(net);
+}
+
+function renderTrialBalance(container, journal) {
+  const tb = buildTrialBalance(journal);
+  if (tb.rows.length === 0) {
+    container.appendChild(emptyMessage("この期間の記録がありません。"));
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "table-wrapper";
+  const table = document.createElement("table");
+  table.className = "entry-table book-table";
+  table.innerHTML =
+    "<thead><tr>" +
+    '<th class="amount-col">借方</th><th>勘定科目</th><th>区分</th><th class="amount-col">貸方</th>' +
+    "</tr></thead>";
+
+  const tbody = document.createElement("tbody");
+  for (const row of tb.rows) {
+    const tr = document.createElement("tr");
+    const debit = document.createElement("td");
+    debit.className = "amount-col";
+    debit.textContent = row.debit ? formatYen(row.debit) : "";
+    const account = document.createElement("td");
+    account.textContent = row.account;
+    const type = document.createElement("td");
+    type.textContent = ACCOUNT_TYPE_LABELS[row.type];
+    const credit = document.createElement("td");
+    credit.className = "amount-col";
+    credit.textContent = row.credit ? formatYen(row.credit) : "";
+    tr.append(debit, account, type, credit);
+    tbody.appendChild(tr);
+  }
+
+  const totalRow = document.createElement("tr");
+  totalRow.className = "book-total-row";
+  const dTotal = document.createElement("td");
+  dTotal.className = "amount-col";
+  dTotal.textContent = formatYen(tb.debitTotal);
+  const label = document.createElement("td");
+  label.textContent = "合計";
+  label.colSpan = 2;
+  const cTotal = document.createElement("td");
+  cTotal.className = "amount-col";
+  cTotal.textContent = formatYen(tb.creditTotal);
+  totalRow.append(dTotal, label, cTotal);
+  tbody.appendChild(totalRow);
+
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+  container.appendChild(wrapper);
+
+  // 貸借平均の原理。ここがずれるのは仕訳の作り方が壊れているときだけなので、
+  // 一致していることを明示して確かめられるようにする。
+  const check = document.createElement("p");
+  const balanced = tb.debitTotal === tb.creditTotal;
+  check.className = balanced ? "book-check ok" : "book-check ng";
+  check.textContent = balanced
+    ? `✓ 借方合計と貸方合計が一致しています (${formatYen(tb.debitTotal)})`
+    : `⚠️ 借方合計 ${formatYen(tb.debitTotal)} と貸方合計 ${formatYen(tb.creditTotal)} が一致しません`;
+  container.appendChild(check);
+}
+
+function renderJournal(container, journal) {
+  if (journal.length === 0) {
+    container.appendChild(emptyMessage("この期間の記録がありません。"));
+    return;
+  }
+
+  for (const je of journal) {
+    const block = document.createElement("div");
+    block.className = "journal-entry";
+
+    const head = document.createElement("div");
+    head.className = "journal-head";
+    const [, m, d] = je.date.split("-");
+    const dateEl = document.createElement("span");
+    dateEl.className = "journal-date";
+    dateEl.textContent = `${Number(m)}/${Number(d)}`;
+    const memoEl = document.createElement("span");
+    memoEl.className = "journal-memo";
+    memoEl.textContent = je.memo || je.entry.category;
+    head.append(dateEl, memoEl);
+    if (isCardEntry(je.entry)) {
+      const tag = document.createElement("span");
+      tag.className = "journal-tag";
+      tag.textContent = "カード";
+      head.appendChild(tag);
+    }
+    block.appendChild(head);
+
+    // 借方と貸方を左右に並べる。行数が違うことがあるので、多い方に合わせる
+    const debits = je.lines.filter((l) => l.side === "debit");
+    const credits = je.lines.filter((l) => l.side === "credit");
+    const rows = Math.max(debits.length, credits.length);
+    const grid = document.createElement("div");
+    grid.className = "journal-lines";
+    for (let i = 0; i < rows; i++) {
+      for (const [side, list] of [["debit", debits], ["credit", credits]]) {
+        const line = list[i];
+        const accountEl = document.createElement("span");
+        accountEl.className = `journal-account ${side}`;
+        accountEl.textContent = line ? line.account : "";
+        const amountEl = document.createElement("span");
+        amountEl.className = `journal-amount ${side}`;
+        amountEl.textContent = line ? formatYen(line.amount) : "";
+        grid.append(accountEl, amountEl);
+      }
+    }
+    block.appendChild(grid);
+
+    for (const note of je.notes) {
+      const noteEl = document.createElement("p");
+      noteEl.className = "journal-note";
+      noteEl.textContent = note;
+      block.appendChild(noteEl);
+    }
+
+    container.appendChild(block);
+  }
+}
+
+function emptyMessage(text) {
+  const p = document.createElement("p");
+  p.className = "empty-message";
+  p.textContent = text;
+  return p;
+}
+
+const BOOK_NOTES = {
+  pl:
+    "収益 − 費用 = 当期純利益。貯蓄・投資は費用ではなく資産への振替なので入りません。" +
+    "給与は総支給を収益に立て、社会保険料 (法定福利費) と税金 (租税公課) を費用にしています。" +
+    "当期純利益は上の「収支」と同じ金額になります。",
+  trial:
+    "科目ごとの借方合計と貸方合計。全体の借方合計と貸方合計は必ず一致します (貸借平均の原理)。" +
+    "残高ではなく、この期間に動いた金額の合計です。",
+  journal:
+    "1件ずつを借方 / 貸方の形にしたものです。カード払いは現金がまだ出ていかないので、" +
+    "貸方が「未払金」(負債) になります。",
+};
+
+function renderBookkeeping(periodEntries) {
+  const journal = buildJournal(periodEntries);
+  const body = el.bookkeepingBody;
+  body.innerHTML = "";
+
+  if (bookView === "pl") renderProfitAndLoss(body, journal);
+  else if (bookView === "trial") renderTrialBalance(body, journal);
+  else renderJournal(body, journal);
+
+  el.bookkeepingNote.textContent = BOOK_NOTES[bookView];
+}
+
+function setupBookTabs() {
+  for (const tab of el.bookTabs) {
+    tab.addEventListener("click", () => {
+      bookView = tab.dataset.book;
+      for (const t of el.bookTabs) {
+        const active = t === tab;
+        t.classList.toggle("active", active);
+        t.setAttribute("aria-selected", String(active));
+      }
+      render();
+    });
+  }
 }
 
 function payslipModalRow(label, amount, { total = false } = {}) {
@@ -3624,6 +4049,8 @@ function setupAuthForm() {
 // ---------------------------------------------------------------------------
 
 function setupAppEventListeners() {
+  setupBookTabs();
+
   // 日付での絞り込みは特定の1日を見るためのものなので、表示する期間を動かしたら解除する。
   // 残したままだと「2026年7月」の見出しに「2026年8月5日の記録・0件」が出て、
   // 理由の分からない行き止まりになる。

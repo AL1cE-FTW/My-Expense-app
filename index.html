@@ -84,6 +84,7 @@
       <a class="sidebar-link" href="#plan-actual-section">予定と実績</a>
       <a class="sidebar-link" href="#advance-section">立替金</a>
       <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
+      <a class="sidebar-link" href="#bookkeeping-section">帳簿 (簿記)</a>
       <a class="sidebar-link" href="#list-section">記録一覧</a>
     </nav>
     <div class="app-content">
@@ -393,6 +394,23 @@
                role="img" aria-label="Need / Want / Save の達成状況。詳しい金額は下の一覧に表示されます"></svg>
           <div id="nws-legend" class="nws-legend"></div>
         </div>
+      </section>
+
+      <!-- 帳簿 (簿記の見方) -->
+      <section class="card" id="bookkeeping-section">
+        <div class="list-header">
+          <h2 id="bookkeeping-section-title">今月の帳簿</h2>
+          <div class="book-tabs" role="tablist" aria-label="帳簿の表示">
+            <button type="button" class="book-tab active" data-book="pl"
+                    role="tab" aria-selected="true">損益計算書</button>
+            <button type="button" class="book-tab" data-book="trial"
+                    role="tab" aria-selected="false">合計試算表</button>
+            <button type="button" class="book-tab" data-book="journal"
+                    role="tab" aria-selected="false">仕訳帳</button>
+          </div>
+        </div>
+        <div id="bookkeeping-body"></div>
+        <p class="book-note" id="bookkeeping-note"></p>
       </section>
 
       <!-- 記録一覧 -->

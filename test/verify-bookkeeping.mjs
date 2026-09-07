@@ -1,0 +1,221 @@
+// 帳簿 (簿記の見方) を確認する。
+// 単式で入力した記録から仕訳を組み立て、そこから合計試算表と損益計算書を出す。
+// 入力の手間は増やさないので、既存の記録がそのまま材料になる。
+import { chromium } from "playwright";
+import http from "http";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(here, "..");
+const scratch = process.env.TEST_OUT_DIR || here;
+const stubRoot = path.join(here, "stubs");
+const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
+
+const server = http.createServer((req, res) => {
+  const p = path.join(root, req.url === "/" ? "index.html" : req.url);
+  try {
+    const data = fs.readFileSync(p);
+    res.writeHead(200, { "content-type": mime[path.extname(p)] || "text/plain" });
+    res.end(data);
+  } catch {
+    res.writeHead(404); res.end("nf");
+  }
+});
+await new Promise((r) => server.listen(8988, r));
+
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const errors = [];
+page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+page.on("console", (m) => {
+  if (m.type() !== "error") return;
+  const text = m.text();
+  if (text.includes("Failed to load resource") || text.includes("net::ERR_")) return;
+  errors.push("console: " + text);
+});
+await page.route("https://www.gstatic.com/firebasejs/**/*.js", async (route) => {
+  const url = new URL(route.request().url());
+  await route.fulfill({
+    status: 200,
+    contentType: "text/javascript",
+    body: fs.readFileSync(path.join(stubRoot, url.pathname.split("/").pop()), "utf-8"),
+  });
+});
+page.on("dialog", (d) => d.accept());
+
+const NOW = new Date();
+const CUR_Y = NOW.getFullYear();
+const MM = String(NOW.getMonth() + 1).padStart(2, "0");
+
+await page.goto("http://localhost:8988/", { waitUntil: "networkidle" });
+await page.waitForTimeout(300);
+await page.click('.auth-tab[data-mode="signup"]');
+await page.fill("#auth-email", "book-test@example.com");
+await page.fill("#auth-password", "password123");
+await page.click("#auth-submit-btn");
+await page.waitForTimeout(300);
+
+const bookText = async (view) => {
+  await page.click(`.book-tab[data-book="${view}"]`);
+  await page.waitForTimeout(250);
+  return (await page.textContent("#bookkeeping-body")).replace(/\s+/g, " ").trim();
+};
+
+// --- 材料をそろえる -------------------------------------------------------
+// 現金の支出
+await page.fill("#entry-date", `${CUR_Y}-${MM}-05`);
+await page.selectOption("#entry-category", "食費");
+await page.fill("#entry-amount", "3000");
+await page.fill("#entry-memo", "現金でスーパー");
+await page.click("#submit-btn");
+await page.waitForTimeout(200);
+
+// 貯蓄・投資 (費用ではなく資産への振替)
+await page.click('.type-option:has(input[value="save"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-06`);
+await page.selectOption("#entry-category", "投資信託");
+await page.fill("#entry-amount", "20000");
+await page.fill("#entry-memo", "積立");
+await page.click("#submit-btn");
+await page.waitForTimeout(200);
+
+// 給与 (明細つき)。支給 362,309 / 控除 98,000 → 振込 264,309
+await page.click('.type-option:has(input[value="income"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
+await page.selectOption("#entry-category", "給与");
+await page.click("#payslip-toggle-btn");
+await page.waitForTimeout(250);
+for (const [sel, v] of [
+  ["#payslip-base-salary", "320000"],
+  ["#payslip-location-allowance", "20000"],
+  ["#payslip-commute", "12309"],
+  ["#payslip-overtime-pay", "10000"],
+  ["#payslip-housing", "30000"],
+  ["#payslip-health-insurance", "16000"],
+  ["#payslip-pension-insurance", "30000"],
+  ["#payslip-employment-insurance", "2000"],
+  ["#payslip-income-tax", "8000"],
+  ["#payslip-resident-tax", "12000"],
+]) await page.fill(sel, v);
+await page.waitForTimeout(200);
+await page.fill("#entry-memo", "今月の給与");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+
+// カード払いの支出 (確定明細から取り込む → source=card になる)
+const cardPath = path.join(scratch, "book-card.csv");
+fs.writeFileSync(
+  cardPath,
+  [
+    "宇津木　武　様,4980-09**-****-****,Ｏｌｉｖｅ／クレジット",
+    `${CUR_Y}/${MM}/08,ＢＯＯＴＨ,900,１,１,900,`,
+    ",,,,,900,",
+  ].join("\n"),
+  "utf-8"
+);
+await page.setInputFiles("#import-csv-input", cardPath);
+await page.waitForTimeout(700);
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+
+// ---------------------------------------------------------------------------
+// 1. 損益計算書: 収益 − 費用 = 当期純利益。上の「収支」と必ず一致する
+// ---------------------------------------------------------------------------
+const pl = await bookText("pl");
+console.log("P/L:", pl);
+// 総支給が収益に立つ (手取りではない)
+if (!pl.includes("給与¥362,309")) throw new Error("総支給を収益に立てるはず: " + pl);
+// 控除は簿記の科目に振り分ける
+if (!pl.includes("法定福利費¥48,000")) throw new Error("社会保険料は法定福利費: " + pl);
+if (!pl.includes("租税公課¥20,000")) throw new Error("所得税+住民税は租税公課: " + pl);
+// 貯蓄・投資は費用ではない
+if (pl.includes("投資信託")) throw new Error("貯蓄・投資を費用に入れてはいけない: " + pl);
+// 費用合計 = 法定福利費48,000 + 住居30,000 + 租税公課20,000 + 食費3,000 + 趣味900
+if (!pl.includes("費用合計¥101,900")) throw new Error("費用合計が違う: " + pl);
+if (!pl.includes("当期純利益¥260,409")) throw new Error("当期純利益が違う: " + pl);
+
+// 当期純利益は上の収支カードと一致する (見方を変えただけで別の数字にならない)
+const balanceCard = (await page.textContent("#balance")).trim();
+if (balanceCard !== "¥260,409") {
+  throw new Error(`当期純利益と収支カードは一致するはず: ${balanceCard}`);
+}
+
+// ---------------------------------------------------------------------------
+// 2. 合計試算表: 借方合計と貸方合計が一致する (貸借平均の原理)
+// ---------------------------------------------------------------------------
+const trial = await bookText("trial");
+console.log("試算表:", trial);
+if (!trial.includes("✓ 借方合計と貸方合計が一致しています")) {
+  throw new Error("貸借が一致しないと簿記として壊れている: " + trial);
+}
+if (!trial.includes("未払金")) throw new Error("カード払いは未払金に立つはず: " + trial);
+const totals = await page.evaluate(() => {
+  const cells = [...document.querySelectorAll(".book-total-row td")].map((td) => td.textContent);
+  return { debit: cells[0], credit: cells[cells.length - 1] };
+});
+if (totals.debit !== totals.credit) {
+  throw new Error("合計行の借方と貸方が違う: " + JSON.stringify(totals));
+}
+
+// ---------------------------------------------------------------------------
+// 3. 仕訳帳
+// ---------------------------------------------------------------------------
+await page.click('.book-tab[data-book="journal"]');
+await page.waitForTimeout(250);
+const entryText = async (memo) =>
+  (await page.locator(".journal-entry", { hasText: memo }).textContent()).replace(/\s+/g, " ").trim();
+
+// 現金の支出: (借)食費 / (貸)現金預金
+const cash = await entryText("現金でスーパー");
+if (!cash.includes("食費") || !cash.includes("現金預金")) throw new Error("現金の仕訳: " + cash);
+if (cash.includes("未払金")) throw new Error("現金払いを未払金にしてはいけない: " + cash);
+
+// カード払い: 貸方が未払金になる (現金はまだ出ていかない)
+const card = await entryText("ＢＯＯＴＨ");
+console.log("カードの仕訳:", card);
+if (!card.includes("未払金")) throw new Error("カード払いは未払金: " + card);
+if (card.includes("現金預金")) throw new Error("カード払いで現金を減らしてはいけない: " + card);
+if (!card.includes("カード")) throw new Error("カード払いだと分かる印を付けるはず: " + card);
+
+// 貯蓄: (借)投資信託(資産) / (貸)現金預金。費用科目は出てこない
+const save = await entryText("積立");
+if (!save.includes("投資信託") || !save.includes("現金預金")) throw new Error("貯蓄の仕訳: " + save);
+
+// 給与: 複合仕訳。借方に受取額と控除、貸方に総支給
+const salary = await entryText("今月の給与");
+console.log("給与の仕訳:", salary);
+for (const expected of ["現金預金", "¥294,309", "法定福利費", "¥48,000", "租税公課", "¥20,000", "給与", "¥362,309"]) {
+  if (!salary.includes(expected)) throw new Error(`給与の複合仕訳に ${expected} が無い: ` + salary);
+}
+if (!salary.includes("寮社宅費")) throw new Error("寮社宅費の扱いを説明するはず: " + salary);
+
+// 立替払いは簿記だと資産。違いを説明する注記が出る
+await page.click('.book-tab[data-book="journal"]');
+await page.click('.type-option:has(input[value="expense"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-09`);
+await page.selectOption("#entry-category", "交際費");
+await page.fill("#entry-amount", "5000");
+await page.fill("#entry-memo", "懇親会を立替");
+await page.check("#entry-advance");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+const advance = await entryText("懇親会を立替");
+if (!advance.includes("立替金")) {
+  throw new Error("立替払いは簿記だと立替金(資産)だと説明するはず: " + advance);
+}
+
+// 貸借は立替を足しても一致したまま
+const trial2 = await bookText("trial");
+if (!trial2.includes("✓ 借方合計と貸方合計が一致しています")) {
+  throw new Error("立替を足したら貸借が崩れた: " + trial2);
+}
+
+await page.screenshot({ path: path.join(scratch, "bookkeeping.png"), fullPage: true });
+if (errors.length) throw new Error("JS errors: " + errors.join("; "));
+console.log("ALL BOOKKEEPING (帳簿) CHECKS PASSED");
+await browser.close();
+server.close();

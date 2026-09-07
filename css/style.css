@@ -116,6 +116,7 @@ html {
 #plan-actual-section,
 #advance-section,
 #nws-section,
+#bookkeeping-section,
 #list-section {
   scroll-margin-top: calc(var(--header-height, 84px) + 12px);
 }
@@ -589,6 +590,164 @@ html {
   color: var(--color-text-muted);
   font-size: 0.8rem;
   line-height: 1.6;
+}
+
+/* 帳簿 (損益計算書・合計試算表・仕訳帳) */
+.book-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.book-tab {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.book-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.book-group-label {
+  margin: 14px 0 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.book-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.book-row.total {
+  font-weight: 700;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.book-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.book-net {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--color-bg);
+  border-bottom: 0;
+  font-size: 1rem;
+}
+
+.book-net.positive .book-value {
+  color: var(--color-income);
+}
+
+.book-net.negative .book-value {
+  color: var(--color-expense);
+}
+
+.book-table .amount-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.book-total-row td {
+  font-weight: 700;
+  border-top: 2px solid var(--color-border);
+}
+
+.book-check {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+}
+
+.book-check.ok {
+  color: var(--color-income);
+}
+
+.book-check.ng {
+  color: var(--color-expense);
+}
+
+.book-note {
+  margin: 14px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
+.journal-entry {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.journal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.84rem;
+}
+
+.journal-date {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+}
+
+.journal-memo {
+  font-weight: 600;
+}
+
+.journal-tag {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #eef1f6;
+  color: #5b6480;
+  font-size: 0.7rem;
+}
+
+/* 借方 / 貸方を左右に並べる。科目と金額で1組なので4列 */
+.journal-lines {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  gap: 4px 10px;
+  font-size: 0.88rem;
+}
+
+.journal-account.credit {
+  padding-left: 10px;
+  border-left: 1px solid var(--color-border);
+}
+
+.journal-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.journal-note {
+  margin: 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.7;
 }
 
 .created-at-cell {
