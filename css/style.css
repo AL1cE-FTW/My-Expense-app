@@ -567,6 +567,30 @@ html {
   color: var(--color-income);
 }
 
+/* メールの利用通知から取り込んだ、まだ確定していない記録の印。
+   立替のバッジと同じ形で、色だけ変えて並べても見分けが付くようにする */
+.pending-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  background: #eef1f6;
+  color: #5b6480;
+  border: 1px dashed #b6bfd0;
+}
+
+.list-pending-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eef1f6;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
 .created-at-cell {
   color: var(--color-text-muted);
   font-size: 0.82rem;

@@ -53,6 +53,25 @@ function isRefundIncome(entry) {
   return entry.type === "income" && REFUND_CATEGORIES.includes(entry.category);
 }
 
+// 記録の出どころ。
+//   gmail  : カード会社の「ご利用のお知らせ」メールから取り込んだもの。これは
+//            速報(未確定)で、売上が確定するときに金額や計上日が動くことがある
+//            (海外利用の為替確定、ガソリンスタンドなど)。キャンセルされれば
+//            そもそも請求に載らない。
+//   card   : カード会社サイトからダウンロードした利用履歴CSVから取り込んだもの。
+//            これが確定版で、その期間のカード利用の正解リストにあたる。
+//   manual : 手で入力したもの。現金やその他の支払いなので、カード明細とは
+//            そもそも突き合わせない。
+// 古い記録には source が無い。その場合は「不明」であり、未確定とは扱わない。
+const SOURCE_GMAIL = "gmail";
+const SOURCE_CARD = "card";
+const SOURCE_MANUAL = "manual";
+
+// 未確定(仮)の記録か。メールから取り込んだものだけが未確定。
+function isPendingEntry(entry) {
+  return entry.source === SOURCE_GMAIL;
+}
+
 // 収入目標を設定できるカテゴリ (賞与・返金系は別扱いのため除外)
 function incomeBudgetCategories() {
   return CATEGORIES.income.filter(
@@ -258,6 +277,7 @@ const el = {
   todayBtn: document.getElementById("today-btn"),
   budgetSectionTitle: document.getElementById("budget-section-title"),
   listSectionTitle: document.getElementById("list-section-title"),
+  listPendingNote: document.getElementById("list-pending-note"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
   totalIncome: document.getElementById("total-income"),
@@ -454,6 +474,19 @@ async function importEntriesToDb(items) {
         createdAt: importedAt,
         ...item,
       });
+    }
+    await batch.commit();
+  }
+}
+
+// 複数の記録をまとめて更新する。updateDoc と同じく、渡したキーだけを書き換える
+// (source を確定に変えても、手で直したカテゴリやメモはそのまま残る)。
+async function updateEntriesInDb(updates) {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+    const batch = firestoreApi.writeBatch(db);
+    for (const { id, data } of updates.slice(i, i + CHUNK_SIZE)) {
+      batch.update(firestoreApi.doc(db, `users/${currentUid}/entries/${id}`), data);
     }
     await batch.commit();
   }
@@ -1566,6 +1599,7 @@ function renderList(monthEntries) {
     : `${periodLabel}の記録`;
   el.filterDateClear.classList.toggle("hidden", !filterDate);
 
+  renderPendingNote(monthEntries);
   updateSortIndicators();
 
   const refundMap = refundsByAdvanceId();
@@ -1582,6 +1616,18 @@ function renderList(monthEntries) {
     badge.className = `type-badge ${entry.type}`;
     badge.textContent = TYPE_LABELS[entry.type];
     typeTd.appendChild(badge);
+
+    // メールから取り込んだ記録は「ご利用のお知らせ」= 速報なので、確定明細で
+    // 金額や日付が動くことがある。確定済みと見分けが付くようにする。
+    if (isPendingEntry(entry)) {
+      const pendingBadge = document.createElement("span");
+      pendingBadge.className = "pending-badge";
+      pendingBadge.textContent = "仮";
+      pendingBadge.title =
+        "メールの利用通知から取り込んだ未確定の記録。" +
+        "カード利用履歴CSVを取り込むと確定します";
+      typeTd.appendChild(pendingBadge);
+    }
 
     // 立替払いは種別セルに印を付ける (カテゴリセルに入れると並び替えの比較対象が変わるため)
     if (entry.advance === true) {
@@ -1647,6 +1693,22 @@ function renderList(monthEntries) {
     tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, createdAtTd, actionsTd);
     el.entryList.appendChild(tr);
   }
+}
+
+// 未確定(メールから取り込んだ仮の記録)が期間内にいくつあるかを一覧の上に出す。
+// 「今どこまで確定しているか」が分からないと、収支が動くかどうか判断できない。
+// 絞り込みの結果ではなく期間全体を数える (絞り込みで見えていない仮の記録も
+// 収支には効いているため)。
+function renderPendingNote(monthEntries) {
+  const pending = monthEntries.filter(isPendingEntry);
+  el.listPendingNote.classList.toggle("hidden", pending.length === 0);
+  if (pending.length === 0) return;
+
+  const total = pending.reduce((sum, e) => sum + e.amount, 0);
+  el.listPendingNote.textContent =
+    `未確定「仮」が${pending.length}件 (${formatYen(total)})。` +
+    "メールの利用通知から取り込んだ速報で、確定時に金額が変わることがあります。" +
+    "カード利用履歴CSVを取り込むと確定版に置き換わります。";
 }
 
 function payslipModalRow(label, amount, { total = false } = {}) {
@@ -2227,7 +2289,11 @@ async function handleSubmit(event) {
       if (refundToDelete) await deleteEntryFromDb(refundToDelete.id);
       await syncPayslipHousingEntry(editingId, data);
     } else {
-      const newId = await addEntryToDb({ ...data, createdAt: nowTimestamp() });
+      const newId = await addEntryToDb({
+        ...data,
+        source: SOURCE_MANUAL,
+        createdAt: nowTimestamp(),
+      });
       entrySaved = true;
       if (newId) await syncPayslipHousingEntry(newId, data);
     }
@@ -2331,6 +2397,12 @@ function exportForAnalysis() {
         "incomeBudgets.bonusMonths の月に、給与の bonusMultiplier か月分を上乗せする。" +
         "年間で見るときは到来済みのボーナス月の分だけ加算する",
       登録日: "createdAt は取引日ではなく、記入・インポートした日時",
+      取り込み元:
+        "source は記録の出どころ。gmail はカードの利用通知メールから取り込んだ" +
+        "未確定(仮)で、確定時に金額や日付が変わることがある。card はカード" +
+        "利用履歴CSVから取り込んだ確定版。manual は手入力(現金・その他)。" +
+        "source が無いのは、この区別を入れる前に登録した古い記録",
+
     },
 
     categories: CATEGORIES,
@@ -2359,6 +2431,7 @@ function exportForAnalysis() {
         ...(e.payslipHousingFor ? { payslipHousingFor: e.payslipHousingFor } : {}),
         ...(e.payslip ? { payslip: e.payslip } : {}),
         ...(e.createdAt ? { createdAt: e.createdAt } : {}),
+        ...(e.source ? { source: e.source } : {}),
         id: e.id,
       })),
   };
@@ -2726,6 +2799,7 @@ function parseCardUsageFormat(rows) {
         category: CARD_REFUND_CATEGORY,
         amount: -amount,
         memo: `返金: ${merchant}`,
+        source: SOURCE_CARD,
       });
     } else {
       imported.push({
@@ -2734,15 +2808,29 @@ function parseCardUsageFormat(rows) {
         category: guessCategoryFromMerchant(merchant),
         amount,
         memo: merchant,
+        source: SOURCE_CARD,
       });
     }
   }
 
-  return { imported, errors, expectedTotal, parsedTotal, hasInstallment };
+  // isCardStatement を立てて、呼び出し側が「確定明細」だと分かるようにする。
+  // 確定明細のときだけ、メールから取り込んだ仮の記録との突き合わせを行う。
+  return { imported, errors, expectedTotal, parsedTotal, hasInstallment, isCardStatement: true };
 }
 
-// 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・メモ) が
-// 完全一致するものを重複とみなしてスキップする。同じCSVを誤って2回読み込んだ
+// 店名の表記ゆれを吸収する。同じ「ファミリーマート」でも、
+//   メール(ご利用のお知らせ) : ファミリーマート
+//   カード利用履歴CSV        : ﾌｧﾐﾘｰﾏｰﾄ / ＢＯＯＴＨ
+// のように別の表記で出てくる。生の文字列のまま比べると、同じ取引が別物に見えて
+// 二重に登録されてしまうため、比較の前に半角カナ・全角英数・空白を揃える。
+function normalizeMemo(memo) {
+  return toHalfWidthAscii(String(memo || ""))
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
+// 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・店名) が
+// 一致するものを重複とみなしてスキップする。同じCSVを誤って2回読み込んだ
 // 場合などに二重登録されるのを防ぐ。件数ベースで比較するため、同じ内容の取引が
 // 本当に複数回あった場合(同日同額の別々の買い物など)は正しく残す。
 // 区切り文字は使わず JSON 化する。スペース区切りだと
@@ -2750,7 +2838,7 @@ function parseCardUsageFormat(rows) {
 // {カテゴリ:"食費 500", 金額:1000, メモ:"コンビニ"} が同じキーになり、
 // 別物が重複としてスキップされてしまう。
 function dedupeKey(e) {
-  return JSON.stringify([e.date, e.type, e.category, e.amount, e.memo || ""]);
+  return JSON.stringify([e.date, e.type, e.category, e.amount, normalizeMemo(e.memo)]);
 }
 
 function dedupeAgainstExisting(imported) {
@@ -2775,6 +2863,152 @@ function dedupeAgainstExisting(imported) {
   return { deduped, skippedCount };
 }
 
+// 2つの日付が何日離れているか。日付は YYYY-MM-DD なので UTC の同じ時刻として
+// 解釈され、時差の影響を受けずに差が出る。
+function daysApart(a, b) {
+  return Math.abs(new Date(a) - new Date(b)) / 86400000;
+}
+
+// 確定明細の1行と、既にあるカードの記録が同じ取引かどうかを判定するルール。
+// 上から順に、確実なものから試す。1周目で全行を判定してから2周目に進むので、
+// 弱いルールが横取りして正しい組み合わせを壊すことがない。
+//
+// pendingOnly のルールは、未確定(メール由来)の記録にしか使わない。
+// 「日付や金額がずれていても同じ取引とみなす」という緩い判定なので、
+// 確定済みの記録に当てると、同じ店の別の買い物を同一視してしまう。
+const CARD_MATCH_RULES = [
+  {
+    label: "店名・日付・金額が一致",
+    test: (row, e) =>
+      e.date === row.date &&
+      e.amount === row.amount &&
+      normalizeMemo(e.memo) === normalizeMemo(row.memo),
+  },
+  {
+    // メールとCSVで店名の書き方が大きく違う場合 (支店名の有無など)
+    label: "日付と金額が一致",
+    test: (row, e) => e.date === row.date && e.amount === row.amount,
+  },
+  {
+    // 確定時に計上日がずれる場合
+    label: "店名と金額が一致し、日付が3日以内",
+    pendingOnly: true,
+    test: (row, e) =>
+      e.amount === row.amount &&
+      normalizeMemo(e.memo) === normalizeMemo(row.memo) &&
+      daysApart(e.date, row.date) <= 3,
+  },
+  {
+    // 海外利用の為替確定・ガソリンスタンドなど、確定で金額が変わる場合
+    label: "店名と日付が一致し、金額だけ違う",
+    pendingOnly: true,
+    test: (row, e) =>
+      e.date === row.date && normalizeMemo(e.memo) === normalizeMemo(row.memo),
+  },
+];
+
+/**
+ * 確定したカード利用履歴CSVと、メールから取り込んだ未確定(仮)の記録を突き合わせる。
+ *
+ * メールの「ご利用のお知らせ」は速報なので、確定時に金額や計上日がずれることが
+ * ある。確定CSVはその期間のカード利用の正解リストなので、対応する仮の記録を
+ * 確定版の日付・金額で上書きし、CSVにしか無いものだけを新しく足す。
+ *
+ * カテゴリとメモは上書きしない。ユーザーが手で直しているかもしれないうえ、
+ * 店名はメール側の方が読みやすい(CSVは半角カナのことが多い)ため。
+ * 手動入力(現金・その他)は source が違うので、そもそも突き合わせの対象にしない。
+ */
+function reconcileCardStatement(imported) {
+  const dates = imported.map((e) => e.date).sort();
+  const from = dates[0];
+  const to = dates[dates.length - 1];
+
+  // 突き合わせの相手は「CSVが対象にしている期間の、カード由来の記録」だけ。
+  // 期間外まで手を出すと次回請求分の仮の記録を巻き込むし、手入力(現金・その他)
+  // は source が違うのでそもそも入ってこない。
+  // 確定済み(card)も相手に含めるのは、同じCSVをもう一度読み込んだときのため。
+  // 一度確定させた記録はメール側の店名を残すので、店名だけで比べる重複チェックは
+  // すり抜けてしまう。ここで拾って「登録済み」として弾く。
+  const candidates = entries.filter(
+    (e) =>
+      (isPendingEntry(e) || e.source === SOURCE_CARD) &&
+      e.date >= from &&
+      e.date <= to
+  );
+
+  const used = new Set();
+  const updates = [];
+  const alreadyImported = [];
+  let unmatchedRows = [...imported];
+
+  for (const rule of CARD_MATCH_RULES) {
+    const stillUnmatched = [];
+    for (const row of unmatchedRows) {
+      const found = candidates.find(
+        (e) =>
+          !used.has(e.id) &&
+          e.type === row.type &&
+          (!rule.pendingOnly || isPendingEntry(e)) &&
+          rule.test(row, e)
+      );
+      if (!found) {
+        stillUnmatched.push(row);
+        continue;
+      }
+      used.add(found.id);
+      // 仮の記録なら確定版に更新する。既に確定済みなら、同じCSVの読み直し
+      // なので何もしない。
+      if (isPendingEntry(found)) updates.push({ entry: found, row });
+      else alreadyImported.push(row);
+    }
+    unmatchedRows = stillUnmatched;
+    if (unmatchedRows.length === 0) break;
+  }
+
+  // 期間内なのに確定明細に出てこなかった仮の記録。キャンセルされたか、
+  // 次回の請求に回った可能性がある。勝手に消すと戻せない(メールは取り込み済み
+  // として記録されるので、二度と拾い直せない)ので、残して知らせるだけにする。
+  const unmatchedPending = candidates.filter((e) => isPendingEntry(e) && !used.has(e.id));
+
+  return { updates, alreadyImported, additions: unmatchedRows, unmatchedPending, from, to };
+}
+
+/**
+ * メールから取り込む明細のうち、既に確定済みとして登録されているものを落とす。
+ *
+ * メールの検索範囲は60日あるため、先にカード利用履歴CSV(確定明細)を取り込んで
+ * から「メールから読み込み」を実行すると、確定済みの取引の速報が後追いで
+ * 入ってきてしまう。日付・種別・金額が一致する確定済みの記録があれば、
+ * 同じ取引とみなして取り込まない。
+ *
+ * 判定は「日付と金額が一致」までに留める。ここで緩い判定をすると、本物の
+ * 取引を黙って捨てることになるため (取り込みすぎは後で消せるが、捨てた分は
+ * メールが取り込み済みになるので戻せない)。
+ */
+function dropAlreadyConfirmed(imported) {
+  const confirmed = entries.filter((e) => e.source === SOURCE_CARD);
+  const used = new Set();
+  const kept = [];
+  let confirmedCount = 0;
+
+  for (const row of imported) {
+    const found = confirmed.find(
+      (e) =>
+        !used.has(e.id) &&
+        e.type === row.type &&
+        e.date === row.date &&
+        e.amount === row.amount
+    );
+    if (found) {
+      used.add(found.id);
+      confirmedCount++;
+    } else {
+      kept.push(row);
+    }
+  }
+  return { kept, confirmedCount };
+}
+
 // UTF-8として不正な文字が含まれる場合は Shift_JIS (カード利用履歴CSVでよく使われる)
 // として読み直す。BOM付きUTF-8やUTF-8のみのCSV(自分でエクスポートしたものなど)は
 // そのまま使われる。
@@ -2797,8 +3031,15 @@ function importCsv(file) {
       return;
     }
 
-    const { imported, errors, expectedTotal, parsedTotal, hasInstallment, convertedCategories } =
-      parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
+    const {
+      imported,
+      errors,
+      expectedTotal,
+      parsedTotal,
+      hasInstallment,
+      convertedCategories,
+      isCardStatement,
+    } = parseWideFormat(rows) || parseCardUsageFormat(rows) || parseSimpleFormat(rows);
 
     if (imported.length === 0) {
       alert("インポートできる行がありませんでした。\n\n" + errors.slice(0, 10).join("\n"));
@@ -2827,9 +3068,22 @@ function importCsv(file) {
       }
     }
 
-    const { deduped, skippedCount } = dedupeAgainstExisting(imported);
+    // 確定明細なら、先にメールから取り込んだ仮の記録と突き合わせる。
+    // 残った行(仮の記録に対応が無かったもの)だけを新規追加の候補にする。
+    const reconciliation = isCardStatement ? reconcileCardStatement(imported) : null;
+    const toAdd = reconciliation ? reconciliation.additions : imported;
 
-    if (deduped.length === 0) {
+    // 突き合わせのあとにもう一度、既存の記録との重複を見る。
+    // 同じCSVを2回読み込んだ場合と、source を持たない古いメール由来の記録
+    // (この仕組みを入れる前に取り込んだもの) はここで弾かれる。
+    const dedupeResult = dedupeAgainstExisting(toAdd);
+    const deduped = dedupeResult.deduped;
+    // 確定済みの記録と一致した行も「既に登録済み」として数える
+    const skippedCount =
+      dedupeResult.skippedCount + (reconciliation ? reconciliation.alreadyImported.length : 0);
+    const updateCount = reconciliation ? reconciliation.updates.length : 0;
+
+    if (deduped.length === 0 && updateCount === 0) {
       alert(
         `すべて(${skippedCount}件)既に登録済みのため、新しく追加する記録はありませんでした。` +
           verificationNote
@@ -2837,9 +3091,32 @@ function importCsv(file) {
       return;
     }
 
-    let message = `${deduped.length}件の記録をインポートします。よろしいですか?`;
+    let message =
+      updateCount > 0
+        ? `カード利用履歴(確定明細)を取り込みます。よろしいですか?`
+        : `${deduped.length}件の記録をインポートします。よろしいですか?`;
+    if (updateCount > 0) {
+      message +=
+        `\n\n・メールから取り込んだ仮の記録 ${updateCount}件を確定版に更新します` +
+        `\n・${deduped.length}件を新しく追加します`;
+    }
     if (skippedCount > 0) {
       message += `\n\n(${skippedCount}件は既に登録済みのためスキップされます)`;
+    }
+    // 確定明細に出てこなかった仮の記録。キャンセル済みか次回請求分の可能性が
+    // あるが、こちらでは判断できないので消さずに知らせる。
+    if (reconciliation && reconciliation.unmatchedPending.length > 0) {
+      const list = reconciliation.unmatchedPending
+        .slice(0, 5)
+        .map((e) => `${e.date} ${e.memo || e.category} ${formatYen(e.amount)}`);
+      message +=
+        `\n\n⚠️ ${reconciliation.unmatchedPending.length}件の仮の記録が確定明細に見つかりませんでした。` +
+        "キャンセル済みか、次回の請求に回った可能性があります。" +
+        "そのまま残すので、内容を確認して必要なら削除してください。\n" +
+        list.join("\n") +
+        (reconciliation.unmatchedPending.length > 5
+          ? `\n...ほか${reconciliation.unmatchedPending.length - 5}件`
+          : "");
     }
     if (errors.length > 0) {
       message += `\n\n(${errors.length}件の行はスキップされます)\n` + errors.slice(0, 5).join("\n");
@@ -2856,12 +3133,26 @@ function importCsv(file) {
     if (!confirm(message)) return;
 
     try {
-      await importEntriesToDb(deduped);
+      if (updateCount > 0) {
+        // 確定で動くのは日付と金額だけ。カテゴリとメモは手で直している
+        // 可能性があるので触らない。
+        await updateEntriesInDb(
+          reconciliation.updates.map(({ entry, row }) => ({
+            id: entry.id,
+            data: { date: row.date, amount: row.amount, source: SOURCE_CARD },
+          }))
+        );
+      }
+      if (deduped.length > 0) await importEntriesToDb(deduped);
     } catch (err) {
       alert("インポートに失敗しました: " + err.message);
       return;
     }
-    alert(`${deduped.length}件をインポートしました。`);
+    alert(
+      updateCount > 0
+        ? `${updateCount}件を確定版に更新し、${deduped.length}件を追加しました。`
+        : `${deduped.length}件をインポートしました。`
+    );
   };
   reader.onerror = () => alert("ファイルの読み込みに失敗しました。");
   reader.readAsArrayBuffer(file);
@@ -3017,6 +3308,8 @@ function parseVpassEmails(text) {
       category: guessCategoryFromMerchant(merchant),
       amount,
       memo: merchant,
+      // 利用通知メールは速報。確定明細(カード利用履歴CSV)を取り込むまでは仮
+      source: SOURCE_GMAIL,
     });
   }
   return results;
@@ -3204,13 +3497,17 @@ async function importFromGmail() {
       return;
     }
 
+    // 確定明細を先に取り込んでいた場合、その取引の速報が後追いで入ってくる。
+    const { kept, confirmedCount } = dropAlreadyConfirmed(imported);
+
     // メールIDによる重複防止が破れたとき(履歴の記録に失敗した直後など)の安全網。
     // CSV側と同じ判定を通し、同じ内容の記録が二重に入らないようにする。
-    const { deduped, skippedCount } = dedupeAgainstExisting(imported);
+    const { deduped, skippedCount } = dedupeAgainstExisting(kept);
+    const totalSkipped = skippedCount + confirmedCount;
 
     if (deduped.length === 0) {
       await markGmailIdsImported(newIds);
-      alert(`すべて(${skippedCount}件)既に登録済みのため、新しく追加する記録はありませんでした。`);
+      alert(`すべて(${totalSkipped}件)既に登録済みのため、新しく追加する記録はありませんでした。`);
       return;
     }
 
@@ -3223,10 +3520,16 @@ async function importFromGmail() {
       `${deduped.length}件の利用明細が見つかりました (合計 ${formatYen(total)})。取り込みますか?\n\n` +
       preview +
       (deduped.length > 5 ? `\n...ほか${deduped.length - 5}件` : "");
-    if (skippedCount > 0) {
-      message += `\n\n(${skippedCount}件は既に登録済みのためスキップされます)`;
+    if (totalSkipped > 0) {
+      message += `\n\n(${totalSkipped}件は既に登録済みのためスキップされます`;
+      message +=
+        confirmedCount > 0
+          ? `。うち${confirmedCount}件はカード利用履歴CSVで確定済みです)`
+          : ")";
     }
-    message += "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。";
+    message +=
+      "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。" +
+      "\n取り込んだ記録は「仮」として入ります。カード利用履歴CSVを取り込むと確定します。";
     if (!confirm(message)) return;
 
     await importEntriesToDb(deduped);

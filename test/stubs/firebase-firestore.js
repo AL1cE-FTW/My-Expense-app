@@ -116,12 +116,20 @@ export function writeBatch() {
   const ops = [];
   return {
     set(docRef, data) {
-      ops.push({ docRef, data });
+      ops.push({ docRef, data, merge: false });
+    },
+    // 本物の batch.update と同じく、渡したキーだけを書き換える
+    update(docRef, data) {
+      ops.push({ docRef, data, merge: true });
     },
     async commit() {
       const touched = new Set();
       for (const op of ops) {
-        store.set(op.docRef.path, { ...op.data });
+        if (op.merge && !store.has(op.docRef.path)) {
+          throw new Error("No document to update: " + op.docRef.path);
+        }
+        const base = op.merge ? store.get(op.docRef.path) || {} : {};
+        store.set(op.docRef.path, applyFieldValues(base, op.data));
         touched.add(op.docRef.collectionPath);
       }
       for (const path of touched) notify(path);
