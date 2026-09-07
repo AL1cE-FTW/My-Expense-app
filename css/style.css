@@ -41,6 +41,13 @@ html {
   display: flex;
   align-items: stretch;
   min-height: 100vh;
+  /* 中身が1pxでも画面幅からはみ出すと、iOS Safari はページ全体を縮小して
+     表示するため「左に寄って右に余白ができる」見た目になる。はみ出しは
+     各所で防いでいるが、取りこぼしても画面が壊れないようここで断ち切る。
+     clip は hidden と違いスクロール領域を作らないので、中の
+     position: sticky (サイドバー・ヘッダー) はそのまま効く。
+     モーダルは .app-shell の外にあるので影響しない。 */
+  overflow-x: clip;
 }
 
 .app-sidebar {
@@ -322,6 +329,7 @@ html {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0; /* grid の既定 (auto) だと中身の最小幅より縮まずはみ出す */
 }
 
 .form-group-wide {
@@ -349,7 +357,10 @@ html {
 }
 
 /* 目では見えないが読み上げには届く。display:none と違い、
-   アクセシビリティツリーから外れない */
+   アクセシビリティツリーから外れない。
+   position: absolute なので、置き場所の祖先には position: relative を
+   付けること (付けないとページの幅を広げてしまうことがある。
+   .table-wrapper のコメント参照)。 */
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -372,6 +383,11 @@ html {
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text);
+  /* input の既定幅は size=20 (約20文字ぶん) で、狭い画面では枠より広い。
+     日付入力は iOS だとさらに大きくなる。列幅に収まるよう明示的に縮める */
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-group input:focus,
@@ -1028,6 +1044,11 @@ body.modal-open {
   align-items: center;
   gap: 24px;
   flex-wrap: wrap;
+  /* 画面が狭いとグラフと凡例が2段に折り返す。そのときグラフだけが
+     左端に張り付いて右に大きな余白ができるので中央に置く。
+     PCでは凡例が flex:1 で余白を使い切るため、この指定は効かない
+     (=横並びのレイアウトは変わらない) */
+  justify-content: center;
 }
 
 .nws-chart {
@@ -1109,6 +1130,7 @@ body.modal-open {
 
 .csv-actions {
   display: flex;
+  flex-wrap: wrap; /* 狭い画面でボタンが4つ並びきらないので折り返す */
   gap: 8px;
   align-items: center;
 }
@@ -1121,6 +1143,9 @@ body.modal-open {
 }
 
 .filter-select {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 7px 10px;
@@ -1132,6 +1157,13 @@ body.modal-open {
 
 .table-wrapper {
   overflow-x: auto;
+  max-width: 100%;
+  /* 表の中の .visually-hidden (操作列の見出し) は position: absolute なので、
+     位置の基準になる祖先がないとページ全体を基準に置かれ、表の右端
+     (画面幅より外) までページを広げてしまう。そうなると iOS Safari は
+     ページ全体を縮小して表示するので、中身が左に寄って右に余白が出る。
+     ここを基準にして、表の横スクロール内に収める。 */
+  position: relative;
 }
 
 .entry-table {

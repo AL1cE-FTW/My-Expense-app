@@ -176,6 +176,86 @@ if (await page.locator(".app-sidebar").isVisible()) {
   throw new Error("the sidebar should be hidden on narrow screens");
 }
 
+// --- スマホ幅で中身が左に寄らない ---
+// 収入を入れて Need/Want/Save を描画させる
+await page.click('.type-option:has(input[value="income"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
+await page.selectOption("#entry-category", "給与");
+await page.fill("#entry-amount", "280000");
+await page.fill("#entry-memo", "給与");
+await page.click("#submit-btn");
+await page.waitForTimeout(500);
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+
+// ドーナツは、折り返して1段になったとき左端に張り付かず中央に来る
+const donut = await page.evaluate(() => {
+  const wrap = document.querySelector(".nws-wrapper").getBoundingClientRect();
+  const chart = document.querySelector("#nws-chart").getBoundingClientRect();
+  return { leftGap: Math.round(chart.left - wrap.left), rightGap: Math.round(wrap.right - chart.right) };
+});
+console.log("donut gaps (mobile):", JSON.stringify(donut));
+if (Math.abs(donut.leftGap - donut.rightGap) > 2) {
+  throw new Error(
+    `the donut should be centred on narrow screens (left ${donut.leftGap}, right ${donut.rightGap})`
+  );
+}
+
+// ページが横にはみ出していない。はみ出すと iOS Safari はページ全体を縮小
+// して表示するので、中身が左に寄って右に背景色の帯が出る (Chrome だと
+// 横スクロールできないので気づきにくいが、documentElement.scrollWidth と
+// フルページのスクリーンショットにはちゃんと出る)。
+const overflow = await page.evaluate(() => {
+  window.scrollTo(400, window.scrollY);
+  const scrolledX = window.scrollX;
+  window.scrollTo(0, window.scrollY);
+  const vw = document.documentElement.clientWidth;
+  const stickingOut = [];
+  for (const e of document.querySelectorAll("body *")) {
+    const r = e.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    if (r.right <= vw + 0.5) continue;
+    // 自前で横スクロールする領域 (表など) の中身は、はみ出していて当然
+    let inScroller = false;
+    for (let p = e.parentElement; p; p = p.parentElement) {
+      const ov = getComputedStyle(p).overflowX;
+      if (ov !== "visible") { inScroller = true; break; }
+    }
+    if (inScroller) continue;
+    stickingOut.push(e.tagName + (e.id ? "#" + e.id : "") + "." + e.className);
+  }
+  return {
+    scrolledX,
+    docScrollW: document.documentElement.scrollWidth,
+    bodyScrollW: document.body.scrollWidth,
+    vw,
+    stickingOut: stickingOut.slice(0, 5),
+  };
+});
+if (
+  overflow.scrolledX > 0 ||
+  overflow.docScrollW > overflow.vw + 1 ||
+  overflow.bodyScrollW > overflow.vw + 1 ||
+  overflow.stickingOut.length
+) {
+  throw new Error(`the page must not overflow horizontally on mobile: ${JSON.stringify(overflow)}`);
+}
+
+// PCに戻すと横並びのまま (ドーナツは左、凡例が残りを埋める)
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.waitForTimeout(400);
+const desktopDonut = await page.evaluate(() => {
+  const wrap = document.querySelector(".nws-wrapper").getBoundingClientRect();
+  const chart = document.querySelector("#nws-chart").getBoundingClientRect();
+  const legend = document.querySelector("#nws-legend").getBoundingClientRect();
+  return { leftGap: Math.round(chart.left - wrap.left), sameRow: Math.abs(chart.top - legend.top) < 200 };
+});
+if (desktopDonut.leftGap > 2 || !desktopDonut.sameRow) {
+  throw new Error("the desktop side-by-side layout should be unchanged: " + JSON.stringify(desktopDonut));
+}
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+
 await page.screenshot({ path: path.join(scratch, "screens.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL SCREEN/NAVIGATION CHECKS PASSED");
