@@ -184,6 +184,13 @@
               <label for="entry-amount">金額 (円)</label>
               <input type="number" id="entry-amount" min="1" step="1" placeholder="1000" required>
             </div>
+            <div class="form-group">
+              <label for="entry-settlement">支払い・入金の口座</label>
+              <select id="entry-settlement">
+                <option value="cash">現金</option>
+                <option value="bank">銀行口座</option>
+              </select>
+            </div>
             <div class="form-group form-group-wide">
               <label for="entry-memo">メモ</label>
               <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
@@ -400,15 +407,64 @@
       <section class="card" id="bookkeeping-section">
         <div class="list-header">
           <h2 id="bookkeeping-section-title">今月の帳簿</h2>
-          <div class="book-tabs" role="tablist" aria-label="帳簿の表示">
-            <button type="button" class="book-tab active" data-book="pl"
-                    role="tab" aria-selected="true">損益計算書</button>
-            <button type="button" class="book-tab" data-book="trial"
-                    role="tab" aria-selected="false">合計試算表</button>
-            <button type="button" class="book-tab" data-book="journal"
-                    role="tab" aria-selected="false">仕訳帳</button>
+          <div class="book-actions">
+            <div class="book-tabs" role="tablist" aria-label="帳簿の表示">
+              <button type="button" class="book-tab active" data-book="bs"
+                      role="tab" aria-selected="true">貸借対照表</button>
+              <button type="button" class="book-tab" data-book="pl"
+                      role="tab" aria-selected="false">損益計算書</button>
+              <button type="button" class="book-tab" data-book="trial"
+                      role="tab" aria-selected="false">合計試算表</button>
+              <button type="button" class="book-tab" data-book="journal"
+                      role="tab" aria-selected="false">仕訳帳</button>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" id="edit-accounts-btn">口座を設定</button>
           </div>
         </div>
+
+        <form id="accounts-form" class="budget-form hidden">
+          <p class="book-form-note">
+            貸借対照表は「期首の残高 + そのあとの増減」で計算します。期首日と、その日の
+            残高を1回だけ入れてください。以降は記録から自動で計算されます。
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="accounts-opening-date">期首日 (この日の残高から始める)</label>
+              <input type="date" id="accounts-opening-date">
+            </div>
+          </div>
+          <p class="payslip-group-label">期首残高</p>
+          <div id="accounts-inputs" class="budget-inputs"></div>
+
+          <p class="payslip-group-label">クレジットカードの締め日・支払日</p>
+          <p class="book-form-note">
+            カード利用は現金がすぐ出ていかないので「未払金」として負債に立ち、
+            支払日が来ると銀行口座から引き落とされたものとして扱います。
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="card-closing-day">締め日</label>
+              <select id="card-closing-day"></select>
+            </div>
+            <div class="form-group">
+              <label for="card-payment-months">支払いは</label>
+              <select id="card-payment-months">
+                <option value="1">翌月</option>
+                <option value="2">翌々月</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="card-payment-day">支払日</label>
+              <select id="card-payment-day"></select>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn btn-secondary" id="cancel-accounts-btn">キャンセル</button>
+          </div>
+        </form>
+
         <div id="bookkeeping-body"></div>
         <p class="book-note" id="bookkeeping-note"></p>
       </section>

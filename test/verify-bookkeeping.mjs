@@ -167,26 +167,28 @@ await page.waitForTimeout(250);
 const entryText = async (memo) =>
   (await page.locator(".journal-entry", { hasText: memo }).textContent()).replace(/\s+/g, " ").trim();
 
-// 現金の支出: (借)食費 / (貸)現金預金
+// 現金の支出: (借)食費 / (貸)現金
 const cash = await entryText("現金でスーパー");
-if (!cash.includes("食費") || !cash.includes("現金預金")) throw new Error("現金の仕訳: " + cash);
+if (!cash.includes("食費") || !cash.includes("現金")) throw new Error("現金の仕訳: " + cash);
 if (cash.includes("未払金")) throw new Error("現金払いを未払金にしてはいけない: " + cash);
 
 // カード払い: 貸方が未払金になる (現金はまだ出ていかない)
 const card = await entryText("ＢＯＯＴＨ");
 console.log("カードの仕訳:", card);
 if (!card.includes("未払金")) throw new Error("カード払いは未払金: " + card);
-if (card.includes("現金預金")) throw new Error("カード払いで現金を減らしてはいけない: " + card);
+if (card.includes("現金") || card.includes("銀行口座")) {
+  throw new Error("カード払いで現金・口座を減らしてはいけない: " + card);
+}
 if (!card.includes("カード")) throw new Error("カード払いだと分かる印を付けるはず: " + card);
 
 // 貯蓄: (借)投資信託(資産) / (貸)現金預金。費用科目は出てこない
 const save = await entryText("積立");
-if (!save.includes("投資信託") || !save.includes("現金預金")) throw new Error("貯蓄の仕訳: " + save);
+if (!save.includes("投資信託") || !save.includes("銀行口座")) throw new Error("貯蓄の仕訳: " + save);
 
 // 給与: 複合仕訳。借方に受取額と控除、貸方に総支給
 const salary = await entryText("今月の給与");
 console.log("給与の仕訳:", salary);
-for (const expected of ["現金預金", "¥294,309", "法定福利費", "¥48,000", "租税公課", "¥20,000", "給与", "¥362,309"]) {
+for (const expected of ["銀行口座", "¥294,309", "法定福利費", "¥48,000", "租税公課", "¥20,000", "給与", "¥362,309"]) {
   if (!salary.includes(expected)) throw new Error(`給与の複合仕訳に ${expected} が無い: ` + salary);
 }
 if (!salary.includes("寮社宅費")) throw new Error("寮社宅費の扱いを説明するはず: " + salary);
@@ -213,6 +215,68 @@ const trial2 = await bookText("trial");
 if (!trial2.includes("✓ 借方合計と貸方合計が一致しています")) {
   throw new Error("立替を足したら貸借が崩れた: " + trial2);
 }
+
+// ---------------------------------------------------------------------------
+// 4. 貸借対照表
+// ---------------------------------------------------------------------------
+// 設定前は案内を出す (白紙のB/Sを見せない)
+const beforeSetup = await bookText("bs");
+if (!beforeSetup.includes("口座を設定")) {
+  throw new Error("期首残高が無いときは設定を促すはず: " + beforeSetup);
+}
+
+// 期首 (1/1): 現金 50,000 / 銀行 800,000 / 投資信託 300,000 / カード未払い 30,000
+await page.click("#edit-accounts-btn");
+await page.waitForTimeout(300);
+await page.fill("#accounts-opening-date", `${CUR_Y}-01-01`);
+await page.fill("#account-input-現金", "50000");
+await page.fill("#account-input-銀行口座", "800000");
+await page.fill("#account-input-投資信託", "300000");
+await page.fill("#account-input-未払金", "30000");
+await page.selectOption("#card-closing-day", "31"); // 末日締め
+await page.selectOption("#card-payment-months", "1"); // 翌月
+await page.selectOption("#card-payment-day", "26");
+await page.click("#accounts-form button[type=submit]");
+await page.waitForTimeout(600);
+
+const bs = await bookText("bs");
+console.log("B/S:", bs);
+
+// 現金 = 50,000 − 食費3,000 − 交際費(立替)5,000 = 42,000
+if (!bs.includes("現金¥42,000")) throw new Error("現金の残高が違う: " + bs);
+// 銀行 = 800,000 − 積立20,000 + 給与294,309 − 住居30,000 − 期首カード30,000 = 1,014,309
+if (!bs.includes("銀行口座¥1,014,309")) throw new Error("銀行口座の残高が違う: " + bs);
+// 投資信託 = 300,000 + 20,000
+if (!bs.includes("投資信託¥320,000")) throw new Error("投資資産の残高が違う: " + bs);
+// 未払金 = 期首30,000 − 引き落とし30,000 + 今月のカード利用900 = 900
+// (末日締め翌月26日払いなので、今月の利用はまだ引き落とされていない)
+if (!bs.includes("未払金¥900")) throw new Error("カード未払金が違う: " + bs);
+if (!bs.includes("純資産 (資産 − 負債)¥1,375,409")) throw new Error("純資産が違う: " + bs);
+
+// 期首純資産 + 当期純利益 = 期末純資産 になっている (貸借対照表と損益計算書の連携)
+// 期首純資産 = 50,000+800,000+300,000−30,000 = 1,120,000
+// 記録は全部今月なので、当期純利益 255,409 を足すと 1,375,409
+const plAfter = await bookText("pl");
+if (!plAfter.includes("当期純利益¥255,409")) throw new Error("当期純利益が違う: " + plAfter);
+
+// 給与天引きの家賃は現金を通らない (持っていない現金が減らないこと)
+await page.click('.book-tab[data-book="journal"]');
+await page.waitForTimeout(250);
+const housing = await entryText("給与天引き: 寮社宅費");
+if (!housing.includes("銀行口座")) throw new Error("天引きの家賃は口座から: " + housing);
+
+// カードの引き落としは記録が無くても仕訳として立つ。
+// 期首の未払金30,000は、期首日(1/1)の締めの支払日 = 2/26 に引き落とされる
+await page.click("#prev-month");
+for (let i = 0; i < 6; i++) await page.click("#prev-month");
+await page.waitForTimeout(500);
+const febJournal = (await page.textContent("#bookkeeping-body")).replace(/\s+/g, " ").trim();
+console.log("2月の仕訳:", febJournal);
+if (!febJournal.includes("カードの引き落とし") || !febJournal.includes("¥30,000")) {
+  throw new Error("期首のカード未払金の引き落としが立つはず: " + febJournal);
+}
+await page.click("#today-btn");
+await page.waitForTimeout(400);
 
 await page.screenshot({ path: path.join(scratch, "bookkeeping.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));

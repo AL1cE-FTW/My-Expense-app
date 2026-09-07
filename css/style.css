@@ -592,7 +592,25 @@ html {
   line-height: 1.6;
 }
 
-/* 帳簿 (損益計算書・合計試算表・仕訳帳) */
+/* 帳簿 (貸借対照表・損益計算書・合計試算表・仕訳帳) */
+.book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-form-note {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.book-row.muted {
+  color: var(--color-text-muted);
+}
+
 .book-tabs {
   display: flex;
   flex-wrap: wrap;

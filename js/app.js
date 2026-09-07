@@ -157,6 +157,9 @@ let auth = null;
 let currentUid = null;
 let unsubscribeEntries = null;
 let unsubscribeBudget = null;
+let unsubscribeAccounts = null;
+// 口座の期首残高とカードの締め日・支払日 (settings/accounts)
+let accountSettings = {};
 let unsubscribeIncomeBudget = null;
 let authMode = "login";
 
@@ -282,6 +285,15 @@ const el = {
   bookkeepingBody: document.getElementById("bookkeeping-body"),
   bookkeepingNote: document.getElementById("bookkeeping-note"),
   bookTabs: document.querySelectorAll(".book-tab"),
+  editAccountsBtn: document.getElementById("edit-accounts-btn"),
+  accountsForm: document.getElementById("accounts-form"),
+  accountsInputs: document.getElementById("accounts-inputs"),
+  accountsOpeningDate: document.getElementById("accounts-opening-date"),
+  cardClosingDay: document.getElementById("card-closing-day"),
+  cardPaymentDay: document.getElementById("card-payment-day"),
+  cardPaymentMonths: document.getElementById("card-payment-months"),
+  cancelAccountsBtn: document.getElementById("cancel-accounts-btn"),
+  entrySettlement: document.getElementById("entry-settlement"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
   totalIncome: document.getElementById("total-income"),
@@ -408,9 +420,14 @@ function showAuthScreen() {
     unsubscribeIncomeBudget();
     unsubscribeIncomeBudget = null;
   }
+  if (unsubscribeAccounts) {
+    unsubscribeAccounts();
+    unsubscribeAccounts = null;
+  }
   entries = [];
   budgets = {};
   incomeBudgets = {};
+  accountSettings = {};
   currentUid = null;
   el.authForm.reset();
   el.authError.classList.add("hidden");
@@ -424,9 +441,11 @@ function showApp(user) {
   subscribeEntries(user.uid);
   subscribeBudget(user.uid);
   subscribeIncomeBudget(user.uid);
+  subscribeAccounts(user.uid);
   resetForm();
   closeBudgetForm();
   closeIncomeBudgetForm();
+  closeAccountsForm();
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +559,29 @@ function subscribeIncomeBudget(uid) {
 
 async function saveIncomeBudgetsToDb(newBudgets) {
   await firestoreApi.setDoc(incomeBudgetDocRef(currentUid), newBudgets);
+}
+
+function accountsDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/accounts`);
+}
+
+function subscribeAccounts(uid) {
+  if (unsubscribeAccounts) unsubscribeAccounts();
+  unsubscribeAccounts = firestoreApi.onSnapshot(
+    accountsDocRef(uid),
+    (snap) => {
+      accountSettings = snap.exists() ? snap.data() : {};
+      render();
+    },
+    (error) => {
+      console.error(error);
+      alert("口座の設定の取得に失敗しました: " + error.message);
+    }
+  );
+}
+
+async function saveAccountSettingsToDb(settings) {
+  await firestoreApi.setDoc(accountsDocRef(currentUid), settings);
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +840,9 @@ async function syncPayslipHousingEntry(salaryId, data) {
     payslip: null,
     advance: false,
     payslipHousingFor: salaryId,
+    // 給与から天引きされる家賃なので、現金ではなく振込先の口座から出ていく形。
+    // 現金扱いにすると、実際には持っていない現金が減ってしまう。
+    settlement: "bank",
   };
 
   if (existing) {
@@ -1728,7 +1773,8 @@ function renderPendingNote(monthEntries) {
 // (法定福利費・租税公課) に振り分ける。
 // ---------------------------------------------------------------------------
 
-const CASH_ACCOUNT = "現金預金";
+const CASH_ACCOUNT = "現金";
+const BANK_ACCOUNT = "銀行口座";
 const PAYABLE_ACCOUNT = "未払金";
 const SOCIAL_INSURANCE_ACCOUNT = "法定福利費";
 const TAX_ACCOUNT = "租税公課";
@@ -1741,13 +1787,23 @@ function isCardEntry(entry) {
   return entry.source === SOURCE_GMAIL || entry.source === SOURCE_CARD;
 }
 
-// その記録でお金が動く側の科目。カードなら未払金 (負債の増加)、
-// それ以外は現金預金。
-function paymentAccount(entry) {
-  return isCardEntry(entry) ? PAYABLE_ACCOUNT : CASH_ACCOUNT;
+// 現金と銀行口座のどちらが動いたか。
+// この区別を入れる前の記録には settlement が無いので、種別から推定する
+// (支出は現金、収入と貯蓄は口座) — フォームの初期値と同じ考え方。
+function settlementAccount(entry) {
+  if (entry.settlement === "bank") return BANK_ACCOUNT;
+  if (entry.settlement === "cash") return CASH_ACCOUNT;
+  // 給与天引きの家賃は現金を通らない (この区別を入れる前に作られた記録の救済)
+  if (entry.payslipHousingFor) return BANK_ACCOUNT;
+  return entry.type === "expense" ? CASH_ACCOUNT : BANK_ACCOUNT;
 }
 
-const ASSET_ACCOUNTS = [CASH_ACCOUNT];
+// その記録でお金が動く側の科目。カードなら未払金 (負債の増加)。
+function paymentAccount(entry) {
+  return isCardEntry(entry) ? PAYABLE_ACCOUNT : settlementAccount(entry);
+}
+
+const ASSET_ACCOUNTS = [CASH_ACCOUNT, BANK_ACCOUNT];
 const LIABILITY_ACCOUNTS = [PAYABLE_ACCOUNT];
 
 // 勘定科目の5要素分類。貸借対照表(資産・負債・純資産)と
@@ -1926,9 +1982,175 @@ function buildProfitAndLoss(journal) {
   return { revenues, expenses, revenueTotal, expenseTotal, netIncome: revenueTotal - expenseTotal };
 }
 
+// --- 口座と期首残高 ---------------------------------------------------------
+//
+// 貸借対照表には残高が要るが、このアプリが持っているのは増減 (フロー) だけ。
+// そこで期首残高を1回だけ入力してもらい、
+//   残高 = 期首残高 + 期首日から表示中の期間末までの増減
+// で出す。以降の入力は今までどおりで増えない。
+
+// 期首残高を入れる口座。貯蓄・投資のカテゴリはそのまま資産の科目になる。
+function balanceAccounts() {
+  return [CASH_ACCOUNT, BANK_ACCOUNT, ...CATEGORIES.save, PAYABLE_ACCOUNT];
+}
+
+const DEFAULT_CARD_TERMS = { closingDay: 31, paymentDay: 26, paymentMonths: 1 };
+
+function cardTerms() {
+  return {
+    closingDay: accountSettings.closingDay || DEFAULT_CARD_TERMS.closingDay,
+    paymentDay: accountSettings.paymentDay || DEFAULT_CARD_TERMS.paymentDay,
+    paymentMonths: accountSettings.paymentMonths || DEFAULT_CARD_TERMS.paymentMonths,
+  };
+}
+
+function accountsConfigured() {
+  return Boolean(accountSettings.openingDate);
+}
+
+// その月の日数に収める (31日締めを2月に当てると28日になる、など)
+function clampDayToMonth(year, monthIndex, day) {
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.min(day, lastDay);
+}
+
+/**
+ * カード利用日から引き落とし日を出す。
+ * 締め日までの利用はその月の締め、締め日を過ぎた利用は翌月の締めになり、
+ * 締め月の paymentMonths か月後の支払日に引き落とされる。
+ */
+function cardPaymentDateFor(usageDate) {
+  const { closingDay, paymentDay, paymentMonths } = cardTerms();
+  const [y, m, d] = usageDate.split("-").map(Number);
+  // 締め日はその月の末日を超えない (31日締め = 末日締め)
+  const closing = clampDayToMonth(y, m - 1, closingDay);
+  // 締め日を過ぎていたら次の締めに回る
+  const closingMonthIndex = d <= closing ? m - 1 : m;
+  const payMonth = new Date(y, closingMonthIndex + paymentMonths, 1);
+  const day = clampDayToMonth(payMonth.getFullYear(), payMonth.getMonth(), paymentDay);
+  return toDateInputValue(new Date(payMonth.getFullYear(), payMonth.getMonth(), day));
+}
+
+/**
+ * カードの引き落としを仕訳として組み立てる。実際の記録は無く、締め日と支払日から
+ * 導出する。これがないと銀行口座の残高がいつまでも減らない。
+ *
+ *   (借) 未払金 / (貸) 銀行口座
+ *
+ * 返金(カード返金)は未払金を減らすので、同じ支払日の利用から差し引く。
+ */
+function cardPaymentJournal(from, to) {
+  const byDate = new Map();
+
+  for (const e of entries) {
+    if (!isCardEntry(e)) continue;
+    const payDate = cardPaymentDateFor(e.date);
+    if (payDate < from || payDate > to) continue;
+    // 支出は請求が増え、返金は減る
+    const delta = e.type === "expense" ? e.amount : -e.amount;
+    byDate.set(payDate, (byDate.get(payDate) || 0) + delta);
+  }
+
+  // 期首時点で残っていたカードの請求。記録が無いので、期首日以降で最初に来る
+  // 支払日にまとめて引き落とされたものとして扱う。
+  const opening = openingBalanceOf(PAYABLE_ACCOUNT);
+  if (opening > 0 && accountSettings.openingDate) {
+    const payDate = cardPaymentDateFor(accountSettings.openingDate);
+    if (payDate >= from && payDate <= to) {
+      byDate.set(payDate, (byDate.get(payDate) || 0) + opening);
+    }
+  }
+
+  const journal = [];
+  for (const [date, amount] of [...byDate.entries()].sort()) {
+    if (amount === 0) continue;
+    const positive = amount > 0;
+    journal.push({
+      id: `card-payment-${date}`,
+      date,
+      memo: "カードの引き落とし",
+      derived: true,
+      entry: { category: PAYABLE_ACCOUNT, type: "expense" },
+      lines: [
+        journalLine(positive ? "debit" : "credit", PAYABLE_ACCOUNT, Math.abs(amount)),
+        journalLine(positive ? "credit" : "debit", BANK_ACCOUNT, Math.abs(amount)),
+      ],
+      notes: [
+        "締め日・支払日の設定から自動で立てている仕訳です (記録一覧には出ません)。" +
+          (positive ? "" : "返金が利用額を上回ったため、口座に戻る形になっています。"),
+      ],
+    });
+  }
+  return journal;
+}
+
+function openingBalanceOf(account) {
+  return (accountSettings.balances || {})[account] || 0;
+}
+
+/**
+ * 表示中の期間の末日時点の貸借対照表。
+ * 期首日から期間末までの全仕訳を集計し、期首残高に足す。
+ */
+function buildBalanceSheet(periodEnd) {
+  const from = accountSettings.openingDate;
+  const periodEntries = entries.filter((e) => e.date >= from && e.date <= periodEnd);
+  const journal = [
+    ...buildJournal(periodEntries),
+    ...cardPaymentJournal(from, periodEnd),
+  ];
+
+  const change = new Map();
+  for (const je of journal) {
+    for (const line of je.lines) {
+      const sign = line.side === "debit" ? 1 : -1;
+      change.set(line.account, (change.get(line.account) || 0) + sign * line.amount);
+    }
+  }
+
+  const rowFor = (account) => {
+    const type = accountType(account);
+    // 資産は借方残高、負債は貸方残高が「増えている」向き
+    const delta = (change.get(account) || 0) * (type === "liability" ? -1 : 1);
+    return { account, type, opening: openingBalanceOf(account), amount: openingBalanceOf(account) + delta };
+  };
+
+  const assets = [CASH_ACCOUNT, BANK_ACCOUNT, ...CATEGORIES.save]
+    .map(rowFor)
+    .filter((r) => r.amount !== 0 || r.opening !== 0);
+  const liabilities = [PAYABLE_ACCOUNT].map(rowFor).filter((r) => r.amount !== 0 || r.opening !== 0);
+
+  const assetTotal = assets.reduce((s, r) => s + r.amount, 0);
+  const liabilityTotal = liabilities.reduce((s, r) => s + r.amount, 0);
+
+  return {
+    assets,
+    liabilities,
+    assetTotal,
+    liabilityTotal,
+    netAssets: assetTotal - liabilityTotal,
+    periodEnd,
+  };
+}
+
 // --- 帳簿の描画 -------------------------------------------------------------
 
-let bookView = "pl";
+let bookView = "bs";
+
+// 表示中の期間の初日
+function periodStartDate() {
+  const y = currentMonth.getFullYear();
+  if (viewMode === "year") return `${y}-01-01`;
+  return toDateInputValue(new Date(y, currentMonth.getMonth(), 1));
+}
+
+// 表示中の期間の末日 (貸借対照表はこの時点の残高を出す)
+function periodEndDate() {
+  const y = currentMonth.getFullYear();
+  if (viewMode === "year") return `${y}-12-31`;
+  const last = new Date(y, currentMonth.getMonth() + 1, 0);
+  return toDateInputValue(last);
+}
 
 function bookRow(label, amount, { total = false, muted = false } = {}) {
   const row = document.createElement("div");
@@ -2097,7 +2319,56 @@ function emptyMessage(text) {
   return p;
 }
 
+function renderBalanceSheet(container, periodEnd) {
+  if (!accountsConfigured()) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent =
+      "貸借対照表を出すには、期首日とその日の残高が必要です。" +
+      "右上の「口座を設定」から1回だけ入力してください。";
+    container.appendChild(p);
+    return;
+  }
+
+  const bs = buildBalanceSheet(periodEnd);
+
+  container.appendChild(bookGroupLabel("資産の部"));
+  for (const row of bs.assets) container.appendChild(bookRow(row.account, row.amount));
+  container.appendChild(bookRow("資産合計", bs.assetTotal, { total: true }));
+
+  container.appendChild(bookGroupLabel("負債の部"));
+  if (bs.liabilities.length === 0) {
+    container.appendChild(bookRow("(負債なし)", 0, { muted: true }));
+  } else {
+    for (const row of bs.liabilities) container.appendChild(bookRow(row.account, row.amount));
+  }
+  container.appendChild(bookRow("負債合計", bs.liabilityTotal, { total: true }));
+
+  container.appendChild(bookGroupLabel("純資産の部"));
+  const net = bookRow("純資産 (資産 − 負債)", bs.netAssets, { total: true });
+  net.classList.add("book-net", bs.netAssets >= 0 ? "positive" : "negative");
+  container.appendChild(net);
+
+  const asOf = document.createElement("p");
+  asOf.className = "book-check";
+  asOf.textContent =
+    `${formatDateLabel(accountSettings.openingDate)}の残高に、` +
+    `${formatDateLabel(bs.periodEnd)}までの増減を足したものです。`;
+  container.appendChild(asOf);
+
+  // 銀行アプリの残高と合わないときは記録漏れがある、と気づけるようにする
+  const hint = document.createElement("p");
+  hint.className = "book-check";
+  hint.textContent =
+    "実際の残高と合わない場合は、記録していない支出・収入があります。";
+  container.appendChild(hint);
+}
+
 const BOOK_NOTES = {
+  bs:
+    "資産 − 負債 = 純資産。期首残高に、そのあとの記録による増減を足して出しています。" +
+    "カード利用は支払日が来るまで「未払金」(負債) として残り、支払日に銀行口座から" +
+    "引き落とされたものとして扱います。",
   pl:
     "収益 − 費用 = 当期純利益。貯蓄・投資は費用ではなく資産への振替なので入りません。" +
     "給与は総支給を収益に立て、社会保険料 (法定福利費) と税金 (租税公課) を費用にしています。" +
@@ -2111,15 +2382,112 @@ const BOOK_NOTES = {
 };
 
 function renderBookkeeping(periodEntries) {
-  const journal = buildJournal(periodEntries);
+  // カードの引き落としは記録ではなく設定から導出するので、ここで足す。
+  // これを入れないと銀行口座の残高が減らず、試算表にも出てこない。
+  const journal = [...buildJournal(periodEntries)];
+  if (accountsConfigured()) {
+    journal.push(...cardPaymentJournal(periodStartDate(), periodEndDate()));
+    journal.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
   const body = el.bookkeepingBody;
   body.innerHTML = "";
 
-  if (bookView === "pl") renderProfitAndLoss(body, journal);
+  if (bookView === "bs") renderBalanceSheet(body, periodEndDate());
+  else if (bookView === "pl") renderProfitAndLoss(body, journal);
   else if (bookView === "trial") renderTrialBalance(body, journal);
   else renderJournal(body, journal);
 
   el.bookkeepingNote.textContent = BOOK_NOTES[bookView];
+}
+
+// --- 口座設定フォーム -------------------------------------------------------
+
+// 締め日・支払日の選択肢。31日は「末日」として扱う (その月の末日に丸める)
+function fillDayOptions(select, { lastDayLabel } = {}) {
+  select.innerHTML = "";
+  for (let day = 1; day <= 31; day++) {
+    const option = document.createElement("option");
+    option.value = String(day);
+    option.textContent = day === 31 && lastDayLabel ? "末日" : `${day}日`;
+    select.appendChild(option);
+  }
+}
+
+function renderAccountsForm() {
+  el.accountsInputs.innerHTML = "";
+  const balances = accountSettings.balances || {};
+
+  for (const account of balanceAccounts()) {
+    const group = document.createElement("div");
+    group.className = "form-group";
+
+    const label = document.createElement("label");
+    label.htmlFor = `account-input-${account}`;
+    label.textContent = account === PAYABLE_ACCOUNT ? `${account} (カードの未払い分)` : account;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.id = `account-input-${account}`;
+    input.dataset.account = account;
+    input.min = "0";
+    input.step = "1";
+    input.placeholder = "0";
+    if (balances[account] > 0) input.value = balances[account];
+
+    group.append(label, input);
+    el.accountsInputs.appendChild(group);
+  }
+
+  el.accountsOpeningDate.value =
+    accountSettings.openingDate || toDateInputValue(new Date(new Date().getFullYear(), 0, 1));
+
+  const terms = cardTerms();
+  fillDayOptions(el.cardClosingDay, { lastDayLabel: true });
+  fillDayOptions(el.cardPaymentDay);
+  el.cardClosingDay.value = String(terms.closingDay);
+  el.cardPaymentDay.value = String(terms.paymentDay);
+  el.cardPaymentMonths.value = String(terms.paymentMonths);
+}
+
+function openAccountsForm() {
+  renderAccountsForm();
+  el.accountsForm.classList.remove("hidden");
+  el.editAccountsBtn.classList.add("hidden");
+}
+
+function closeAccountsForm() {
+  el.accountsForm.classList.add("hidden");
+  el.editAccountsBtn.classList.remove("hidden");
+}
+
+async function submitAccountsForm(event) {
+  event.preventDefault();
+
+  const openingDate = el.accountsOpeningDate.value;
+  if (!openingDate) {
+    alert("期首日を入れてください。");
+    return;
+  }
+
+  const balances = {};
+  for (const input of el.accountsInputs.querySelectorAll("input[data-account]")) {
+    const value = Math.floor(Number(input.value)) || 0;
+    if (value > 0) balances[input.dataset.account] = value;
+  }
+
+  try {
+    await saveAccountSettingsToDb({
+      openingDate,
+      balances,
+      closingDay: Number(el.cardClosingDay.value),
+      paymentDay: Number(el.cardPaymentDay.value),
+      paymentMonths: Number(el.cardPaymentMonths.value),
+    });
+  } catch (err) {
+    alert("口座の設定の保存に失敗しました: " + err.message);
+    return;
+  }
+  closeAccountsForm();
 }
 
 function setupBookTabs() {
@@ -2570,12 +2938,19 @@ async function handleIncomeBudgetSubmit(event) {
 // フォーム操作
 // ---------------------------------------------------------------------------
 
+// 支出はふだん現金、収入と貯蓄は口座を通ることが多いので、種別に合わせて
+// 初期値を変える。カード払いは取り込みで自動判別されるのでここには出さない。
+function defaultSettlementFor(type) {
+  return type === "expense" ? "cash" : "bank";
+}
+
 function resetForm() {
   // 編集ポップアップを開いたままだと、追加用のフォームが行方不明になる
   closeEntryEditModal();
   el.entryId.value = "";
   el.form.reset();
   el.entryDate.value = toDateInputValue(new Date());
+  el.entrySettlement.value = defaultSettlementFor("expense");
   renderCategoryOptions("expense");
   updatePayslipVisibility();
   updateAdvanceVisibility();
@@ -2600,6 +2975,7 @@ function startEdit(id) {
   renderCategoryOptions(entry.type, entry.category);
   el.entryAmount.value = entry.amount;
   el.entryMemo.value = entry.memo || "";
+  el.entrySettlement.value = entry.settlement || defaultSettlementFor(entry.type);
 
   updatePayslipVisibility();
   updateAdvanceVisibility();
@@ -2682,6 +3058,10 @@ async function handleSubmit(event) {
     // 立替払いは支出のときだけ。編集でチェックを外した場合に確実に消えるよう
     // false も明示的に書き込む (updateDoc は指定したキーしか更新しないため)
     advance: type === "expense" && el.entryAdvance.checked,
+    // 現金と銀行口座のどちらが動いたか (貸借対照表の残高に効く)。
+    // カード払いはメール・カードCSVからの取り込みで自動判別するので、
+    // 手入力のこの欄はカード以外を選ぶためのもの。
+    settlement: el.entrySettlement.value,
   };
 
   const editingId = el.entryId.value;
@@ -2822,6 +3202,13 @@ function exportForAnalysis() {
         "incomeBudgets.bonusMonths の月に、給与の bonusMultiplier か月分を上乗せする。" +
         "年間で見るときは到来済みのボーナス月の分だけ加算する",
       登録日: "createdAt は取引日ではなく、記入・インポートした日時",
+      決済手段:
+        "settlement は現金(cash)か銀行口座(bank)か。source が gmail/card の記録は" +
+        "カード払いなので settlement によらず未払金(負債)として扱う。" +
+        "settlement が無いのは、この区別を入れる前に登録した古い記録",
+      残高:
+        "accounts.balances は期首(accounts.openingDate)時点の残高。" +
+        "そこに記録による増減を足したものが貸借対照表の残高になる",
       取り込み元:
         "source は記録の出どころ。gmail はカードの利用通知メールから取り込んだ" +
         "未確定(仮)で、確定時に金額や日付が変わることがある。card はカード" +
@@ -2842,6 +3229,7 @@ function exportForAnalysis() {
 
     budgets,
     incomeBudgets,
+    accounts: accountSettings,
 
     entries: [...entries]
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
@@ -2857,6 +3245,7 @@ function exportForAnalysis() {
         ...(e.payslip ? { payslip: e.payslip } : {}),
         ...(e.createdAt ? { createdAt: e.createdAt } : {}),
         ...(e.source ? { source: e.source } : {}),
+        ...(e.settlement ? { settlement: e.settlement } : {}),
         id: e.id,
       })),
   };
@@ -4050,6 +4439,9 @@ function setupAuthForm() {
 
 function setupAppEventListeners() {
   setupBookTabs();
+  el.editAccountsBtn.addEventListener("click", openAccountsForm);
+  el.cancelAccountsBtn.addEventListener("click", closeAccountsForm);
+  el.accountsForm.addEventListener("submit", submitAccountsForm);
 
   // 日付での絞り込みは特定の1日を見るためのものなので、表示する期間を動かしたら解除する。
   // 残したままだと「2026年7月」の見出しに「2026年8月5日の記録・0件」が出て、
@@ -4100,9 +4492,12 @@ function setupAppEventListeners() {
 
   for (const radio of document.querySelectorAll('input[name="entry-type"]')) {
     radio.addEventListener("change", () => {
-      renderCategoryOptions(selectedType());
+      const type = selectedType();
+      renderCategoryOptions(type);
       updatePayslipVisibility();
       updateAdvanceVisibility();
+      // 編集中は入力済みの値を尊重する。新規追加のときだけ初期値を切り替える
+      if (!el.entryId.value) el.entrySettlement.value = defaultSettlementFor(type);
     });
   }
 
