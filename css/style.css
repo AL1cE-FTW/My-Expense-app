@@ -32,6 +32,26 @@ body {
   display: none !important;
 }
 
+/* Lucide のアイコン。大きさは文字に追従し、色は currentColor なので、
+   置いた場所の文字と同じ大きさ・同じ色で並ぶ。
+   線の太さは 24px 前提の 2 なので、小さく使うと相対的に太くなる。
+   文字と並べたときに浮かないよう少し細くしている。 */
+.icon {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+  stroke-width: 1.75;
+  vertical-align: -0.18em;
+}
+
+/* 文字と横に並ぶアイコンには、文字との間隔をつける */
+h1 .icon,
+.sidebar-brand .icon,
+.nws-legend-label .icon,
+.book-check .icon {
+  margin-right: 0.4em;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -742,7 +762,8 @@ html {
   font-size: 0.7rem;
 }
 
-/* 借方 / 貸方を左右に並べる。科目と金額で1組なので4列 */
+/* 借方 / 貸方を左右に並べる。科目と金額で1組なので4列。
+   境目は縦線ではなく、列の見出し (借方 / 貸方) と余白で示す */
 .journal-lines {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto;
@@ -750,9 +771,19 @@ html {
   font-size: 0.88rem;
 }
 
+.journal-column-label {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+
+.journal-column-label.credit {
+  padding-left: 18px;
+}
+
 .journal-account.credit {
-  padding-left: 10px;
-  border-left: 1px solid var(--color-border);
+  padding-left: 18px;
 }
 
 .journal-amount {
@@ -1422,24 +1453,27 @@ body.modal-open {
   color: var(--color-text);
 }
 
+/* 並び替えの向き。Lucide の chevron-up / chevron-down を背景画像として置く。
+   ::after には要素を作れないので、SVGを data URI にしている。
+   色は data URI に焼き込むしかないので、--color-primary と同じ値を直接書く。 */
 .entry-table th.sortable::after {
   content: "";
   display: inline-block;
-  width: 0.6em;
+  width: 0.9em;
+  height: 0.9em;
   margin-left: 3px;
-  opacity: 0.4;
+  vertical-align: -0.15em;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
 }
 
 .entry-table th.sortable.sort-asc::after {
-  content: "▲";
-  opacity: 1;
-  color: var(--color-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
 }
 
 .entry-table th.sortable.sort-desc::after {
-  content: "▼";
-  opacity: 1;
-  color: var(--color-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 .amount-col,

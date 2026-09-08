@@ -1,3 +1,5 @@
+import { createIcon, hydrateIcons } from "./icons.js";
+
 "use strict";
 
 const FIREBASE_SDK_VERSION = "10.14.1";
@@ -1374,7 +1376,8 @@ const NWS_STROKE_WIDTH = 90;
 const NWS_CIRCUMFERENCE = 2 * Math.PI * NWS_RADIUS;
 const NWS_COLORS = { ...NWS_BUCKET_COLORS, save: "#4caf50" };
 const NWS_BG_COLORS = { need: "#bcd7fa", want: "#faedb0", save: "#c3e6c4" };
-const NWS_LABELS = { need: "🏠 Need", want: "🛍️ Want", save: "🐷 Save" };
+const NWS_LABELS = { need: "Need", want: "Want", save: "Save" };
+const NWS_ICONS = { need: "house", want: "shopping-bag", save: "piggy-bank" };
 const NWS_CATEGORY_DESCRIPTIONS = {
   need: NEED_CATEGORIES.join("・"),
   want: WANT_CATEGORIES.join("・") + " など",
@@ -1483,7 +1486,10 @@ function renderNeedWantSave(monthEntries, targetMultiplier) {
 
     const label = document.createElement("span");
     label.className = "nws-legend-label";
-    label.textContent = `${NWS_LABELS[bucket.key]} ${Math.round(NWS_TARGET_RATIO[bucket.key] * 100)}%`;
+    label.append(
+      createIcon(NWS_ICONS[bucket.key]),
+      `${NWS_LABELS[bucket.key]} ${Math.round(NWS_TARGET_RATIO[bucket.key] * 100)}%`
+    );
 
     const detail = document.createElement("span");
     detail.className = "nws-legend-detail";
@@ -2276,9 +2282,12 @@ function renderTrialBalance(container, journal) {
   const check = document.createElement("p");
   const balanced = tb.debitTotal === tb.creditTotal;
   check.className = balanced ? "book-check ok" : "book-check ng";
-  check.textContent = balanced
-    ? `✓ 借方合計と貸方合計が一致しています (${formatYen(tb.debitTotal)})`
-    : `⚠️ 借方合計 ${formatYen(tb.debitTotal)} と貸方合計 ${formatYen(tb.creditTotal)} が一致しません`;
+  check.append(
+    createIcon(balanced ? "check" : "triangle-alert"),
+    balanced
+      ? `借方合計と貸方合計が一致しています (${formatYen(tb.debitTotal)})`
+      : `借方合計 ${formatYen(tb.debitTotal)} と貸方合計 ${formatYen(tb.creditTotal)} が一致しません`
+  );
   container.appendChild(check);
 }
 
@@ -2316,6 +2325,15 @@ function renderJournal(container, journal) {
     const rows = Math.max(debits.length, credits.length);
     const grid = document.createElement("div");
     grid.className = "journal-lines";
+
+    // 借方と貸方の境目は縦線ではなく見出しで示す
+    for (const [side, text] of [["debit", "借方"], ["credit", "貸方"]]) {
+      const label = document.createElement("span");
+      label.className = `journal-column-label ${side}`;
+      label.textContent = text;
+      grid.append(label, document.createElement("span"));
+    }
+
     for (let i = 0; i < rows; i++) {
       for (const [side, list] of [["debit", debits], ["credit", credits]]) {
         const line = list[i];
@@ -3909,15 +3927,15 @@ function importCsv(file) {
       if (hasInstallment) {
         // 分割払いがあると、CSVの合計行(今回支払金額の合計)と
         // 取り込む金額(利用金額)は原理的に一致しない。
-        // ここで✓や⚠を出すと、どちらも実態と食い違う案内になる。
+        // ここで一致・不一致の判定を出すと、どちらも実態と食い違う案内になる。
         verificationNote =
           `\n\n※ 分割払いが含まれるため、CSV記載の合計金額(${formatYen(expectedTotal)}=今回の支払額)と` +
           `取り込む金額の合計(${formatYen(total)}=買い物の総額)は一致しません。`;
       } else {
         verificationNote =
           total === expectedTotal
-            ? `\n\n✓ CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
-            : `\n\n⚠️ CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
+            ? `\n\n[OK] CSV記載の合計金額(${formatYen(expectedTotal)})と一致しました。`
+            : `\n\n[注意] CSV記載の合計金額(${formatYen(expectedTotal)})と読み取れた金額の合計(${formatYen(
                 total
               )})が一致しません。一部の行が正しく取り込めていない可能性があります。`;
       }
@@ -3965,7 +3983,7 @@ function importCsv(file) {
         .slice(0, 5)
         .map((e) => `${e.date} ${e.memo || e.category} ${formatYen(e.amount)}`);
       message +=
-        `\n\n⚠️ ${reconciliation.unmatchedPending.length}件の仮の記録が確定明細に見つかりませんでした。` +
+        `\n\n[注意] ${reconciliation.unmatchedPending.length}件の仮の記録が確定明細に見つかりませんでした。` +
         "キャンセル済みか、次回の請求に回った可能性があります。" +
         "そのまま残すので、内容を確認して必要なら削除してください。\n" +
         list.join("\n") +
@@ -4718,6 +4736,10 @@ function setupSidebarScrollSpy() {
 }
 
 async function main() {
+  // アイコンの差し替えは一番先にやる。SDKや設定の読み込みに失敗したときの
+  // 案内画面にもアイコンがあるので、後回しにすると空欄のまま出てしまう。
+  hydrateIcons();
+
   let appModule, authModule, firestoreModule;
   try {
     [appModule, authModule, firestoreModule] = await Promise.all([

@@ -466,6 +466,7 @@ cp js/google-config.example.js js/google-config.js
 index.html                       … 画面 (UI)
 css/style.css                    … スタイル
 js/app.js                        … ロジック (認証・Firestore同期・集計・CSV入出力)
+js/icons.js                      … Lucide アイコン (使う分のパスだけを直接持つ)
 js/firebase-config.example.js    … Firebase設定のテンプレート
 js/firebase-config.js            … Firebase設定 (公開前提の値、コミット済み)
 js/google-config.example.js      … Google OAuth設定のテンプレート (メール読み込み用)
@@ -475,3 +476,9 @@ test/                            … ブラウザを動かす自動テスト (�
 ```
 
 フレームワークやビルドツールは使用していません (Vanilla JS)。
+
+アイコンは [Lucide](https://lucide.dev) (ISCライセンス) を使っています。ビルドが無い
+構成なので、ライブラリをCDNから読むのではなく、**使うアイコンのパスだけを
+`js/icons.js` に直接書き出しています**。追加のネットワーク依存が増えず、オフラインでも
+描画され、CDNが落ちてもアイコンだけ消えるということが起きません。
+アイコンを足すときは `lucide-static` の `icons/<名前>.svg` の中身をそのまま貼ります。

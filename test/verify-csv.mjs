@@ -187,7 +187,7 @@ await page.waitForTimeout(700);
 const cardMsg = lastConfirm();
 console.log("card:", cardMsg);
 if (!cardMsg.includes("4件の記録をインポートします")) throw new Error("card format wrong: " + cardMsg);
-if (!cardMsg.includes("✓ CSV記載の合計金額(¥15,440)と一致しました")) {
+if (!cardMsg.includes("[OK] CSV記載の合計金額(¥15,440)と一致しました")) {
   throw new Error("total verification should pass: " + cardMsg);
 }
 await page.click("#today-btn");

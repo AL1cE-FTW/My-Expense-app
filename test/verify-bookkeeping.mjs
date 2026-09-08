@@ -147,7 +147,7 @@ if (balanceCard !== "¥260,409") {
 // ---------------------------------------------------------------------------
 const trial = await bookText("trial");
 console.log("試算表:", trial);
-if (!trial.includes("✓ 借方合計と貸方合計が一致しています")) {
+if (!trial.includes("借方合計と貸方合計が一致しています")) {
   throw new Error("貸借が一致しないと簿記として壊れている: " + trial);
 }
 if (!trial.includes("未払金")) throw new Error("カード払いは未払金に立つはず: " + trial);
@@ -212,7 +212,7 @@ if (!advance.includes("立替金")) {
 
 // 貸借は立替を足しても一致したまま
 const trial2 = await bookText("trial");
-if (!trial2.includes("✓ 借方合計と貸方合計が一致しています")) {
+if (!trial2.includes("借方合計と貸方合計が一致しています")) {
   throw new Error("立替を足したら貸借が崩れた: " + trial2);
 }
 
@@ -293,7 +293,7 @@ for (const expected of ["銀行口座", "¥160,000", "法定福利費", "¥30,00
   if (!legacy.includes(expected)) throw new Error(`旧形式の仕訳に ${expected} が無い: ` + legacy);
 }
 const trialLegacy = await bookText("trial");
-if (!trialLegacy.includes("✓ 借方合計と貸方合計が一致しています")) {
+if (!trialLegacy.includes("借方合計と貸方合計が一致しています")) {
   throw new Error("旧形式を足したら貸借が崩れた: " + trialLegacy);
 }
 if (trialLegacy.includes("差額")) throw new Error("偽の差額が出ている: " + trialLegacy);

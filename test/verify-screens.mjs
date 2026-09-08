@@ -50,6 +50,17 @@ const stubRoute = async (page) => {
   if (await page.locator("#loading-screen").isVisible()) {
     throw new Error("must not stay stuck on 読み込み中");
   }
+  // アイコンはSDKより先に差し替える。後回しにすると、この画面の見出しだけ
+  // アイコンが空欄のまま出てしまう
+  const icons = await page.evaluate(() => ({
+    drawn: document.querySelectorAll("#sdk-error-screen svg.icon").length,
+    placeholders: document.querySelectorAll("[data-icon]").length,
+    empty: [...document.querySelectorAll("svg.icon")].filter((s) => !s.innerHTML.trim()).length,
+  }));
+  if (icons.drawn === 0 || icons.placeholders > 0 || icons.empty > 0) {
+    throw new Error("SDKが読めなくてもアイコンは出るはず: " + JSON.stringify(icons));
+  }
+
   // 原因を通信・拡張機能だけに断定せず、設定の誤りにも触れる
   const body = await page.textContent("#sdk-error-screen");
   for (const expected in { "インターネット": 1, "広告ブロッカー": 1, "firebase-config.js": 1 }) {
