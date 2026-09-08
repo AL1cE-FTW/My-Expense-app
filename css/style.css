@@ -1453,27 +1453,20 @@ body.modal-open {
   color: var(--color-text);
 }
 
-/* 並び替えの向き。Lucide の chevron-up / chevron-down を背景画像として置く。
-   ::after には要素を作れないので、SVGを data URI にしている。
-   色は data URI に焼き込むしかないので、--color-primary と同じ値を直接書く。 */
-.entry-table th.sortable::after {
-  content: "";
-  display: inline-block;
-  width: 0.9em;
-  height: 0.9em;
+/* 並び替えの向き。矢印は updateSortIndicators() が icons.js から作って
+   見出しに入れる。CSSの背景画像にするとパスと色をここにも書くことになり、
+   icons.js と二重管理になるため。 */
+.entry-table th.sortable .sort-icon {
+  width: 0.85em;
+  height: 0.85em;
   margin-left: 3px;
-  vertical-align: -0.15em;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
+  stroke-width: 2.5;
+  color: var(--color-primary);
 }
 
-.entry-table th.sortable.sort-asc::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
-}
-
-.entry-table th.sortable.sort-desc::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+/* 並び替えに使っていない列の矢印。場所だけ取って見えなくする */
+.entry-table th.sortable .sort-icon.inactive {
+  visibility: hidden;
 }
 
 .amount-col,

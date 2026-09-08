@@ -1,5 +1,9 @@
 import { createIcon, hydrateIcons } from "./icons.js";
 
+// このファイルが評価まで到達したことの合図。index.html の見張りが見ている。
+// (import しているファイルが1つでも読めないと、ここより下は一切動かない)
+window.__appScriptLoaded = true;
+
 "use strict";
 
 const FIREBASE_SDK_VERSION = "10.14.1";
@@ -1578,14 +1582,24 @@ function sortEntries(list) {
 
 function updateSortIndicators() {
   document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
-    th.classList.remove("sort-asc", "sort-desc");
-    if (th.dataset.sort === sortColumn) {
-      th.classList.add(sortDirection === "asc" ? "sort-asc" : "sort-desc");
-      // 矢印は目で見ないと分からないので、読み上げにも現在の並び順を伝える
-      th.setAttribute("aria-sort", sortDirection === "asc" ? "ascending" : "descending");
-    } else {
-      th.setAttribute("aria-sort", "none");
-    }
+    const active = th.dataset.sort === sortColumn;
+    const ascending = active && sortDirection === "asc";
+
+    th.classList.toggle("sort-active", active);
+    // 矢印は目で見ないと分からないので、読み上げにも現在の並び順を伝える
+    th.setAttribute(
+      "aria-sort",
+      active ? (ascending ? "ascending" : "descending") : "none"
+    );
+
+    // 並び替えできる列には常に矢印を置き、効いていない列は見えなくするだけに
+    // する。出し入れすると見出しの幅が変わって、列がガタつくため。
+    th.querySelector(".sort-icon")?.remove();
+    th.querySelector(".sort-btn")?.appendChild(
+      createIcon(ascending ? "arrow-up" : "arrow-down", {
+        className: active ? "sort-icon" : "sort-icon inactive",
+      })
+    );
   });
 }
 

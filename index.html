@@ -23,7 +23,7 @@
       <p>
         アプリの起動に失敗しました。次のいずれかが原因の可能性があります。
       </p>
-      <ul class="error-causes">
+      <ul class="error-causes" id="sdk-error-causes">
         <li>インターネットに接続できていない</li>
         <li>広告ブロッカーなどの拡張機能が Firebase の読み込みを止めている</li>
         <li><code>js/firebase-config.js</code> の設定値が正しくない</li>
@@ -568,5 +568,25 @@
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script type="module" src="js/app.js"></script>
+  <script>
+    // js/app.js (と、そこから import しているファイル) が読めないと、
+    // モジュールの評価ごと止まる。main() も、その .catch() も動かないので、
+    // 「読み込み中...」のまま何も起きない画面になってしまう。
+    // 起動したかどうかだけを見て、動いていなければ案内を出す。
+    // 通信の遅さでは誤検知しない (app.js の評価は Firebase の取得より前)。
+    setTimeout(function () {
+      if (window.__appScriptLoaded) return;
+      var causes = document.getElementById("sdk-error-causes");
+      if (causes) {
+        var li = document.createElement("li");
+        li.textContent =
+          "アプリ本体 (js/app.js・js/icons.js) を読み込めていない " +
+          "(ファイルの配置漏れ、またはキャッシュの不整合)";
+        causes.appendChild(li);
+      }
+      document.getElementById("loading-screen").classList.add("hidden");
+      document.getElementById("sdk-error-screen").classList.remove("hidden");
+    }, 8000);
+  </script>
 </body>
 </html>

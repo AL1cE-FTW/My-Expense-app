@@ -142,6 +142,40 @@ if ((await amountHeader.getAttribute("aria-sort")) !== "ascending") {
   throw new Error("Space should toggle the direction");
 }
 
+// 並び替えの矢印。見出しに置く小ささでも絵が潰れないこと、色がCSS変数から
+// 来ていること (data URI に色を焼き込むと変数と食い違うため)、
+// 使っていない列でも場所を取ること (列がガタつかないように) を見る。
+const sortIcon = await page.evaluate(() => {
+  const active = document.querySelector(".entry-table th.sort-active .sort-icon");
+  const inactive = document.querySelector(".entry-table th.sortable:not(.sort-active) .sort-icon");
+  if (!active || !inactive) return null;
+  const box = active.getBoundingClientRect();
+  const root = getComputedStyle(document.documentElement);
+  return {
+    width: box.width,
+    // 矢印は枠いっぱいに描かれるものを使う (chevron は絵の高さが枠の1/4しかない)
+    viewBoxSpan: active.innerHTML.includes("M12 19V5") || active.innerHTML.includes("M12 5v14"),
+    color: getComputedStyle(active).color,
+    primary: root.getPropertyValue("--color-primary").trim(),
+    inactiveVisibility: getComputedStyle(inactive).visibility,
+    inactiveWidth: inactive.getBoundingClientRect().width,
+  };
+});
+if (!sortIcon) throw new Error("並び替えの矢印が見つからない");
+console.log("sort icon:", JSON.stringify(sortIcon));
+if (sortIcon.width < 8) throw new Error("矢印が小さすぎる: " + JSON.stringify(sortIcon));
+if (!sortIcon.viewBoxSpan) throw new Error("枠いっぱいに描かれる矢印を使うこと: " + JSON.stringify(sortIcon));
+const toRgb = (hex) => {
+  const m = hex.replace("#", "").match(/../g).map((h) => parseInt(h, 16));
+  return `rgb(${m.join(", ")})`;
+};
+if (sortIcon.color !== toRgb(sortIcon.primary)) {
+  throw new Error("矢印の色は --color-primary から来るはず: " + JSON.stringify(sortIcon));
+}
+if (sortIcon.inactiveVisibility !== "hidden" || sortIcon.inactiveWidth === 0) {
+  throw new Error("使っていない列の矢印は見えないが場所は取るはず: " + JSON.stringify(sortIcon));
+}
+
 // ---------------------------------------------------------------------------
 // 5. タブの選択状態と月移動の読み上げ
 // ---------------------------------------------------------------------------

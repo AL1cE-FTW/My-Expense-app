@@ -17,6 +17,12 @@ const ICON_PATHS = {
     '<path d="m18 15-6-6-6 6" />',
   "chevron-down":
     '<path d="m6 9 6 6 6-6" />',
+  // 並び替えの向き。chevron は絵の高さが枠の 1/4 しかなく、見出しに置く
+  // 小ささだと線一本に見えてしまうため、枠いっぱいに描かれる arrow を使う
+  "arrow-up":
+    '<path d="m5 12 7-7 7 7" /> <path d="M12 19V5" />',
+  "arrow-down":
+    '<path d="M12 5v14" /> <path d="m19 12-7 7-7-7" />',
   "check":
     '<path d="M20 6 9 17l-5-5" />',
   "triangle-alert":
@@ -34,6 +40,15 @@ const ICON_PATHS = {
   "notebook-pen":
     '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /> <path d="M2 6h4" /> <path d="M2 10h4" /> <path d="M2 14h4" /> <path d="M2 18h4" /> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" />',
 };
+
+function iconPath(name) {
+  // プロトタイプ由来の値 ("constructor" など) を拾うと、関数の中身が
+  // そのまま innerHTML に入ってしまう。自分で持っている名前だけを見る。
+  if (Object.hasOwn(ICON_PATHS, name)) return ICON_PATHS[name];
+  // 名前を間違えても黙って空になるだけだと気づけないので知らせる
+  console.warn(`不明なアイコン名です: ${name}`);
+  return "";
+}
 
 /**
  * アイコンのSVG要素を作る。
@@ -59,7 +74,7 @@ export function createIcon(name, { className = "", label = "" } = {}) {
   }
 
   // 中身は自前の定数なので、外部入力が混ざることはない
-  svg.innerHTML = ICON_PATHS[name] || "";
+  svg.innerHTML = iconPath(name);
   return svg;
 }
 

@@ -70,6 +70,29 @@ const stubRoute = async (page) => {
 }
 
 // ---------------------------------------------------------------------------
+// 1.5 アプリ本体が読めないときも「読み込み中」で固まらない
+// ---------------------------------------------------------------------------
+// static import しているファイルが1つでも読めないと、モジュールの評価ごと
+// 止まって main() も その .catch() も動かない。見張りが案内を出すこと。
+{
+  const page = await browser.newPage();
+  await stubRoute(page);
+  // icons.js だけ読めない状態にする (app.js は配信される)
+  await page.route("**/js/icons.js", (r) => r.abort());
+  await page.goto("http://localhost:8995/", { waitUntil: "domcontentloaded" });
+  // 見張りは8秒後に動く
+  await page.waitForSelector("#sdk-error-screen:not(.hidden)", { timeout: 15000 });
+  if (await page.locator("#loading-screen").isVisible()) {
+    throw new Error("「読み込み中」のまま固まってはいけない");
+  }
+  const causes = await page.textContent("#sdk-error-causes");
+  if (!causes.includes("js/app.js")) {
+    throw new Error("アプリ本体を読めていない可能性にも触れるはず: " + causes);
+  }
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
 // 2. 設定ファイルが無いときはセットアップ案内を出す
 // ---------------------------------------------------------------------------
 {
