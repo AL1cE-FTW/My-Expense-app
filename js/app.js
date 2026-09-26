@@ -642,12 +642,15 @@ function render() {
 
   const targetMultiplier = viewMode === "year" ? elapsedMonthsInYear() : 1;
   const entriesInPeriod = periodEntries();
-  renderSummary(entriesInPeriod);
+  // 集計には立替とその返金を含めない (isOwnMoney のコメント参照)。
+  // 記録一覧と帳簿は元の記録をそのまま使う (帳簿は立替を資産として別に扱う)
+  const ownEntries = entriesInPeriod.filter(isOwnMoney);
+  renderSummary(ownEntries);
   renderMonthlyBarChart();
-  const budgetTotals = renderBudget(entriesInPeriod, targetMultiplier);
-  renderPlanActual(entriesInPeriod, targetMultiplier, budgetTotals);
+  const budgetTotals = renderBudget(ownEntries, targetMultiplier);
+  renderPlanActual(ownEntries, targetMultiplier, budgetTotals);
   renderAdvances();
-  renderNeedWantSave(entriesInPeriod, targetMultiplier);
+  renderNeedWantSave(ownEntries, targetMultiplier);
   renderBookkeeping(entriesInPeriod);
   updatePayslipCopyButton();
   renderList(entriesInPeriod);
@@ -893,6 +896,47 @@ async function syncPayslipHousingEntry(salaryId, data) {
   }
 }
 
+// --- 立替を自分のお金の出入りに数えない -------------------------------------
+//
+// 立て替えたお金は「あとで返ってくる権利」(簿記でいう立替金＝資産) で、
+// 使ったお金ではない。返金も稼いだお金ではなく、その権利が現金に戻っただけ。
+// 両方を支出・収入に数えると、立て替えた月は赤字、返ってきた月は黒字に見える
+// (2か月通せば相殺されるが、月ごとの数字が歪む)。
+//
+// そこで次の記録は、収入・支出・収支・予算・Need/Want/Save・累計貯金額の
+// どれにも数えない:
+//   - まだ返ってきていない立替 (返ってくる前提で、資産として持っている)
+//   - 立替と、それを同じ金額で精算した返金の組
+// 精算額が立替額と違う組 (一部しか返ってこなかった等) は、差額が自分の負担・
+// 得になるので、両方とも普通の支出・収入として数える (合計では差額だけ残る)。
+// 立替の印を付けずに記録した支出を、手で入れた「立替金返金」で相殺している
+// 場合もあるので、立替と結びついていない返金は今までどおり収入に数える。
+
+let advanceFlowCache = { source: null, ids: new Set() };
+
+function advanceFlowIds() {
+  if (advanceFlowCache.source === entries) return advanceFlowCache.ids;
+  const refunds = refundsByAdvanceId();
+  const ids = new Set();
+  for (const e of entries) {
+    if (e.type !== "expense" || e.advance !== true) continue;
+    const refund = refunds.get(e.id);
+    if (!refund) {
+      ids.add(e.id);
+    } else if (refund.amount === e.amount) {
+      ids.add(e.id);
+      ids.add(refund.id);
+    }
+  }
+  advanceFlowCache = { source: entries, ids };
+  return ids;
+}
+
+// 自分のお金の出入りとして集計に数えるか
+function isOwnMoney(entry) {
+  return !advanceFlowIds().has(entry.id);
+}
+
 function refundsByAdvanceId() {
   const map = new Map();
   for (const e of entries) {
@@ -1041,7 +1085,7 @@ function renderMonthlyBarChart() {
 
   const year = currentMonth.getFullYear();
   const monthlyTotals = Array.from({ length: 12 }, () => ({ income: 0, expense: 0 }));
-  for (const e of entriesForYear(currentMonth)) {
+  for (const e of entriesForYear(currentMonth).filter(isOwnMoney)) {
     if (e.type !== "income" && e.type !== "expense") continue;
     const month = Number(e.date.slice(5, 7)) - 1;
     monthlyTotals[month][e.type] += e.amount;
@@ -1093,7 +1137,7 @@ function renderMonthlyBarChart() {
 
 function renderCumulativeSavings() {
   let total = 0;
-  for (const e of entries) {
+  for (const e of entries.filter(isOwnMoney)) {
     if (e.type === "income") total += e.amount;
     else if (e.type === "expense") total -= e.amount;
     // "save" (貯蓄・投資) は現金が資産に形を変えただけなので加減算しない
@@ -1104,7 +1148,7 @@ function renderCumulativeSavings() {
 
   // 今月(実際のカレンダー上の今月)の貯蓄額と、累計貯金額に対する増減率
   let thisMonthNet = 0;
-  for (const e of entriesForMonth(startOfMonth(new Date()))) {
+  for (const e of entriesForMonth(startOfMonth(new Date())).filter(isOwnMoney)) {
     if (e.type === "income") thisMonthNet += e.amount;
     else if (e.type === "expense") thisMonthNet -= e.amount;
   }
@@ -1831,6 +1875,8 @@ function renderPendingNote(monthEntries) {
 const CASH_ACCOUNT = "現金";
 const BANK_ACCOUNT = "銀行口座";
 const PAYABLE_ACCOUNT = "未払金";
+// 立て替えて、まだ返ってきていないお金 (返ってくる権利)
+const ADVANCE_ACCOUNT = "立替金";
 const SOCIAL_INSURANCE_ACCOUNT = "法定福利費";
 const TAX_ACCOUNT = "租税公課";
 // 給与明細の内訳が支給合計と噛み合わないとき、貸借を合わせるための受け皿。
@@ -1858,7 +1904,7 @@ function paymentAccount(entry) {
   return isCardEntry(entry) ? PAYABLE_ACCOUNT : settlementAccount(entry);
 }
 
-const ASSET_ACCOUNTS = [CASH_ACCOUNT, BANK_ACCOUNT];
+const ASSET_ACCOUNTS = [CASH_ACCOUNT, BANK_ACCOUNT, ADVANCE_ACCOUNT];
 const LIABILITY_ACCOUNTS = [PAYABLE_ACCOUNT];
 
 // 勘定科目の5要素分類。貸借対照表(資産・負債・純資産)と
@@ -1885,10 +1931,14 @@ const ACCOUNT_TYPE_LABELS = {
 // 仕訳帳の行に添えて、違いに気づけるようにする。
 const JOURNAL_NOTES = {
   advance:
-    "簿記では (借)立替金 / (貸)現金預金 として資産に計上します。" +
-    "このアプリは支出として集計しているため、ここでも費用のまま表示しています。",
+    "立て替えたお金は、返ってくるまで「立替金」(資産) として持ちます。" +
+    "自分が使ったお金ではないので、支出には数えません。",
+  advanceRefund: "立替金が現金に戻っただけなので、収入には数えません。",
+  advanceMismatch:
+    "精算額が立替額と違うため、差額が自分の負担 (または得) として残るよう、" +
+    "支出・収入として扱っています。",
   [ADVANCE_REFUND_CATEGORY]:
-    "簿記では立替金 (資産) の回収なので、収益にはなりません。",
+    "立替として記録した支出と結びついていないため、収入として扱っています。",
   [CARD_REFUND_CATEGORY]:
     "簿記では費用の取り消し (戻し入れ) として、元の費用科目を減らします。",
 };
@@ -1916,10 +1966,19 @@ function journalFor(entry) {
   const lines = [];
   const notes = [];
 
+  // 立替とその返金は、自分のお金の出入りではなく立替金 (資産) の増減
+  const advanceFlow = !isOwnMoney(entry);
+
   if (entry.type === "expense") {
-    lines.push(journalLine("debit", entry.category, entry.amount));
+    lines.push(journalLine("debit", advanceFlow ? ADVANCE_ACCOUNT : entry.category, entry.amount));
     lines.push(journalLine("credit", paymentAccount(entry), entry.amount));
-    if (entry.advance === true) notes.push(JOURNAL_NOTES.advance);
+    if (entry.advance === true) {
+      notes.push(advanceFlow ? JOURNAL_NOTES.advance : JOURNAL_NOTES.advanceMismatch);
+    }
+  } else if (entry.type === "income" && advanceFlow) {
+    lines.push(journalLine("debit", paymentAccount(entry), entry.amount));
+    lines.push(journalLine("credit", ADVANCE_ACCOUNT, entry.amount));
+    notes.push(JOURNAL_NOTES.advanceRefund);
   } else if (entry.type === "save") {
     // 貯蓄・投資は費用ではない。現金が投資資産に振り替わるだけ
     lines.push(journalLine("debit", entry.category, entry.amount));
@@ -1964,7 +2023,7 @@ function journalFor(entry) {
     }
   }
 
-  if (JOURNAL_NOTES[entry.category]) notes.push(JOURNAL_NOTES[entry.category]);
+  if (JOURNAL_NOTES[entry.category] && !advanceFlow) notes.push(JOURNAL_NOTES[entry.category]);
 
   // 貸借がずれるのは給与明細の内訳が支給合計と噛み合っていないときだけ。
   // 黙って捨てず、差額の科目を立てて表に出す (入力の間違いに気づける)。
@@ -2169,7 +2228,25 @@ function cardPaymentJournal(from, to) {
 }
 
 function openingBalanceOf(account) {
+  if (account === ADVANCE_ACCOUNT) return openingAdvanceBalance();
   return (accountSettings.balances || {})[account] || 0;
+}
+
+// 期首時点の立替金は記録から分かるので入力してもらわない。
+// 期首より前に立て替えて、期首の時点でまだ返ってきていなかった分。
+// (期首残高の現金・口座は、立て替えて出ていったあとの実際の額が入っている)
+function openingAdvanceBalance() {
+  const openingDate = accountSettings.openingDate;
+  if (!openingDate) return 0;
+  const refunds = refundsByAdvanceId();
+  const flow = advanceFlowIds();
+  let total = 0;
+  for (const e of entries) {
+    if (e.type !== "expense" || !flow.has(e.id) || e.date >= openingDate) continue;
+    const refund = refunds.get(e.id);
+    if (!refund || refund.date >= openingDate) total += e.amount;
+  }
+  return total;
 }
 
 /**
@@ -2199,7 +2276,7 @@ function buildBalanceSheet(periodEnd) {
     return { account, type, opening: openingBalanceOf(account), amount: openingBalanceOf(account) + delta };
   };
 
-  const assets = [CASH_ACCOUNT, BANK_ACCOUNT, ...CATEGORIES.save]
+  const assets = [CASH_ACCOUNT, BANK_ACCOUNT, ADVANCE_ACCOUNT, ...CATEGORIES.save]
     .map(rowFor)
     .filter((r) => r.amount !== 0 || r.opening !== 0);
   const liabilities = [PAYABLE_ACCOUNT].map(rowFor).filter((r) => r.amount !== 0 || r.opening !== 0);
@@ -3438,15 +3515,20 @@ function exportForAnalysis() {
       返金の扱い:
         "カテゴリ「立替金返金」「カード返金」は、払ったお金が戻ってきただけで" +
         "稼いだお金ではない。収入目標の達成率と Need/Want/Save の収入には数えない。" +
-        "ただし収支の相殺のため、月の収入合計には含める",
+        "カード返金と、立替と結びついていない立替金返金は、対になる支出を相殺する" +
+        "ため月の収入合計には含める",
       立替金:
         "advance:true の支出は「自分が先に払って後で返金されるお金」。" +
-        "通常の支出として計上し、返金時に advanceRefundFor で紐づく収入で相殺する。" +
-        "対応する返金が無いものが未回収",
+        "返金時に advanceRefundFor で紐づく収入が作られる。対応する返金が無いものが未回収",
       給与の金額:
         "payslip がある収入の amount は手取り。ただし payslip.housing (寮社宅費) が" +
         "ある場合は「手取り + 寮社宅費」で、同額が payslipHousingFor で紐づく" +
         "「住居」の支出として別に記録されている (家賃を両側に立てている)",
+      立替:
+        "advance:true の支出と、advanceRefundFor で結ばれた同じ金額の返金は、" +
+        "自分のお金の出入りではないので収入・支出・収支・予算・Need/Want/Save・" +
+        "累計に数えない。まだ返金が無い立替も数えない (返ってくる権利として持つ)。" +
+        "精算額が立替額と違う組だけは、差額が残るよう両方とも数える",
       予算の按分:
         "budgets は月額。年間で見るときは、今年なら経過した月数を掛ける。" +
         "過去の年・未来の年は12を掛ける",

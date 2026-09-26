@@ -251,13 +251,15 @@ if (!bs.includes("投資信託¥320,000")) throw new Error("投資資産の残�
 // 未払金 = 期首30,000 − 引き落とし30,000 + 今月のカード利用900 = 900
 // (末日締め翌月26日払いなので、今月の利用はまだ引き落とされていない)
 if (!bs.includes("未払金¥900")) throw new Error("カード未払金が違う: " + bs);
-if (!bs.includes("純資産 (資産 − 負債)¥1,375,100")) throw new Error("純資産が違う: " + bs);
+if (!bs.includes("純資産 (資産 − 負債)¥1,380,100")) throw new Error("純資産が違う: " + bs);
+// 立て替えた5,000円は現金からは出ていったが、返ってくる権利 (立替金) として資産に残る
+if (!bs.includes("立替金¥5,000")) throw new Error("立替金を資産に立てるはず: " + bs);
 
 // 期首純資産 + 当期純利益 = 期末純資産 になっている (貸借対照表と損益計算書の連携)
 // 期首純資産 = 50,000+800,000+300,000−30,000 = 1,120,000
-// 記録は全部今月なので、当期純利益 255,100 を足すと 1,375,100
+// 記録は全部今月なので、当期純利益 260,100 を足すと 1,380,100 (立替は費用に入らない)
 const plAfter = await bookText("pl");
-if (!plAfter.includes("当期純利益¥255,100")) throw new Error("当期純利益が違う: " + plAfter);
+if (!plAfter.includes("当期純利益¥260,100")) throw new Error("当期純利益が違う: " + plAfter);
 
 // 給与天引きの家賃は現金を通らない (持っていない現金が減らないこと)
 await page.click('.book-tab[data-book="journal"]');
@@ -326,7 +328,7 @@ if (!bsAfterOld.includes("銀行口座¥1,174,000")) {
 if (!bsAfterOld.includes("未払金¥900")) {
   throw new Error("期首前の利用で未払金が動いてはいけない: " + bsAfterOld);
 }
-if (!bsAfterOld.includes("純資産 (資産 − 負債)¥1,535,100")) {
+if (!bsAfterOld.includes("純資産 (資産 − 負債)¥1,540,100")) {
   throw new Error("期首前の利用で純資産が動いてはいけない: " + bsAfterOld);
 }
 
@@ -362,6 +364,40 @@ if (!beforeOpening.includes("より前の残高は分かりません")) {
 
 await page.click("#today-btn");
 await page.waitForTimeout(400);
+
+// ---------------------------------------------------------------------------
+// 7. 期首より前に立て替えて、期首のあとに返ってきた分
+// ---------------------------------------------------------------------------
+// 期首時点ではまだ返ってきていないので、その時点の立替金 (資産) に含まれる。
+// 記録から自動で分かるので入力は要らない。これが無いと、返金で立替金が
+// マイナスになってしまう。
+const plBeforeAdvance = await bookText("pl");
+await page.click('.type-option:has(input[value="expense"]) span');
+await page.fill("#entry-date", `${CUR_Y - 1}-12-15`);
+await page.selectOption("#entry-category", "交際費");
+await page.fill("#entry-amount", "4000");
+await page.fill("#entry-memo", "期首前の立替");
+await page.check("#entry-advance");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+await page.locator(".advance-row", { hasText: "期首前の立替" }).locator("button", { hasText: "精算" }).click();
+await page.waitForTimeout(300);
+await page.fill("#advance-settle-date", `${CUR_Y}-${MM}-20`);
+await page.click("#advance-settle-confirm");
+await page.waitForTimeout(500);
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+const bsAdvance = await bookText("bs");
+console.log("期首前の立替が返ってきたあと:", bsAdvance);
+// 立替金は今月の懇親会の 5,000 だけが残る (期首前の分は返ってきて消えた)
+if (!bsAdvance.includes("立替金¥5,000")) throw new Error("立替金がずれている: " + bsAdvance);
+// 返金は口座に入る
+if (!bsAdvance.includes("銀行口座¥1,178,000")) throw new Error("返金が口座に入るはず: " + bsAdvance);
+// 返金は収益ではないので、今月の損益計算書は返金の前後で変わらない
+const plAdvance = await bookText("pl");
+if (plAdvance !== plBeforeAdvance || plAdvance.includes("立替金返金")) {
+  throw new Error(`返金を収益に入れてはいけない:\n前 ${plBeforeAdvance}\n後 ${plAdvance}`);
+}
 
 await page.screenshot({ path: path.join(scratch, "bookkeeping.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
