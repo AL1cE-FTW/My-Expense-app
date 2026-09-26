@@ -41,6 +41,14 @@ const TOTAL_ALIASES = {
   ],
 };
 
+// 年末調整で所得税を精算する行。所得税に足し引きする (還付はマイナス)。
+// 12月 (か1月) の明細に出て、数万円になることもあるので落とせない。
+const TAX_ADJUSTMENT_ALIASES = [
+  "年調過不足税額", "年調過不足額", "年末調整過不足額", "年末調整過不足", "年末調整過不足税額",
+  "年調還付金", "年調還付", "年末調整還付", "年末調整還付額", "年末調整還付金",
+  "年調徴収", "年末調整徴収", "年調精算額", "年末調整精算額", "年末調整",
+];
+
 const SALARY_EARNINGS = ["baseSalary", "locationAllowance", "commute", "overtimePay", "salaryAdjustment"];
 const SALARY_DEDUCTIONS = [
   "housing", "healthInsurance", "nursingInsurance", "childSupportLevy", "pensionInsurance",
@@ -50,6 +58,7 @@ const SALARY_DEDUCTIONS = [
 // 明細の区切りの見出し。この下にある項目が支給か控除かを見分けるのに使う
 const EARNING_SECTIONS = ["支給", "支給項目"];
 const DEDUCTION_SECTIONS = ["控除", "控除項目"];
+const KNOWN_SECTIONS = [...EARNING_SECTIONS, ...DEDUCTION_SECTIONS, "勤怠", "勤怠項目", "記事", "その他"];
 const BONUS_EARNINGS = ["bonusAmount"];
 const BONUS_DEDUCTIONS = [
   "healthInsurance", "nursingInsurance", "childSupportLevy", "pensionInsurance",
@@ -85,15 +94,37 @@ export function parseDate(text) {
   return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
 
-// 別名の一覧から、最初に見つかった組の金額を返す (0以上の数だけ)
-function findAmount(pairs, aliases) {
+// 合計・小計の行 (支給合計・社会保険計 など)。項目として足すと二重に数えてしまう
+const TOTAL_LABELS = new Set(Object.values(TOTAL_ALIASES).flat().map(normalizeLabel));
+function isSubtotalLabel(label) {
+  const n = normalizeLabel(label);
+  return TOTAL_LABELS.has(n) || /(合計|小計|計)$/.test(n);
+}
+
+/**
+ * 別名に当たる行の金額を合計する。
+ * - 名前の違う行は足す (「課税通勤手当」と「非課税通勤手当」はどちらも通勤手当)
+ * - 同じ名前の行は最初の1つだけ (同じ項目を2か所に表示している明細で二重に数えない)
+ * - ▲ (マイナス) も受け取る (給与調整のマイナス、年末調整の還付など)
+ * - 区切り (支給/控除) が読めている明細では、別の区切りの行は見ない
+ *   (「記事」欄に参考として出ている同じ名前の行を拾わない)
+ * 1行も無ければ null。
+ */
+function collectAmount(pairs, aliases, sections) {
   const wanted = new Set(aliases.map(normalizeLabel));
-  for (const [label, value] of pairs) {
-    if (!wanted.has(normalizeLabel(label))) continue;
+  const seen = new Set();
+  let total = null;
+  for (const [label, value, section] of pairs) {
+    const key = normalizeLabel(label);
+    if (!wanted.has(key) || seen.has(key)) continue;
+    if (sections && section && KNOWN_SECTIONS.includes(normalizeLabel(section)) &&
+        !sections.includes(normalizeLabel(section))) continue;
     const amount = parseAmount(value);
-    if (amount !== null && amount >= 0) return amount;
+    if (amount === null) continue;
+    seen.add(key);
+    total = (total || 0) + amount;
   }
-  return null;
+  return total;
 }
 
 /**
@@ -117,15 +148,31 @@ export function interpretPayslipImport(payload) {
     ])
     .slice(0, 400);
 
+  const hasSections = pairs.some(([, , section]) =>
+    [...EARNING_SECTIONS, ...DEDUCTION_SECTIONS].includes(normalizeLabel(section))
+  );
+  const earningKeys = new Set([...SALARY_EARNINGS, ...BONUS_EARNINGS]);
   const found = {};
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
-    const amount = findAmount(pairs, aliases);
+    const amount = collectAmount(
+      pairs,
+      aliases,
+      hasSections ? (earningKeys.has(field) ? EARNING_SECTIONS : DEDUCTION_SECTIONS) : null
+    );
     if (amount !== null) found[field] = amount;
   }
+  // 合計は「振込金額」と「差引支給額」のように同じ額を別の名前で2回出す明細が
+  // あるので、足さずに最初の1つを使う
   const totals = {};
   for (const [key, aliases] of Object.entries(TOTAL_ALIASES)) {
-    const amount = findAmount(pairs, aliases);
-    if (amount !== null) totals[key] = amount;
+    const wanted = new Set(aliases.map(normalizeLabel));
+    for (const [label, value] of pairs) {
+      const amount = wanted.has(normalizeLabel(label)) ? parseAmount(value) : null;
+      if (amount !== null) {
+        totals[key] = amount;
+        break;
+      }
+    }
   }
 
   // 本給があれば給与、本給が無く賞与額があれば賞与
@@ -144,25 +191,57 @@ export function interpretPayslipImport(payload) {
   // 支給が1つも読めていないなら、明細として扱えない
   if (!earningFields.some((f) => fields[f] > 0)) return null;
 
-  const sum = (list) => list.reduce((s, f) => s + (fields[f] || 0), 0);
-  const gross = sum(earningFields);
   const checks = [];
   const yen = (n) => `${n.toLocaleString("ja-JP")}円`;
+
+  // 年末調整: 所得税に足し引きする。控除欄の ▲ は還付、支給欄に出ていれば還付
+  const taxAdjustLabels = new Set(TAX_ADJUSTMENT_ALIASES.map(normalizeLabel));
+  let taxAdjustment = 0;
+  let refundInEarnings = 0;
+  const seenAdjust = new Set();
+  for (const [label, value, section] of pairs) {
+    const key = normalizeLabel(label);
+    if (!taxAdjustLabels.has(key) || seenAdjust.has(key)) continue;
+    const amount = parseAmount(value);
+    if (amount === null || amount === 0) continue;
+    seenAdjust.add(key);
+    if (EARNING_SECTIONS.includes(normalizeLabel(section))) {
+      taxAdjustment -= amount;
+      refundInEarnings += amount;
+    } else {
+      taxAdjustment += amount;
+    }
+  }
+  if (taxAdjustment !== 0) {
+    fields.incomeTax = (fields.incomeTax || 0) + taxAdjustment;
+    checks.push({
+      ok: true,
+      text:
+        `年末調整の${taxAdjustment < 0 ? "還付" : "追加徴収"} ${yen(Math.abs(taxAdjustment))}を` +
+        "所得税に含めました",
+    });
+  }
+
+  const sum = (list) => list.reduce((s, f) => s + (fields[f] || 0), 0);
+  const gross = sum(earningFields);
 
   // 慶弔掛金・福祉会費のような個別の控除は、項目名が会社ごとにばらばら。
   // 明細の区切り (支給/控除) が分かれば、控除の下にある「知らない名前」の
   // 項目を名前つきで拾える。分からなければ合計から逆算する。
+  // 合計・小計の行や年末調整の行は項目ではないので拾わない。
   const knownLabels = new Set(Object.values(FIELD_ALIASES).flat().map(normalizeLabel));
-  const unknownUnder = (sections) =>
-    pairs.filter(
-      ([label, value, section]) =>
-        sections.includes(normalizeLabel(section)) &&
-        !knownLabels.has(normalizeLabel(label)) &&
-        parseAmount(value) > 0
-    );
-  const hasSections = pairs.some(([, , section]) =>
-    [...EARNING_SECTIONS, ...DEDUCTION_SECTIONS].includes(normalizeLabel(section))
-  );
+  const unknownUnder = (sections) => {
+    const seen = new Set();
+    return pairs.filter(([label, value, section]) => {
+      const key = normalizeLabel(label);
+      if (!sections.includes(normalizeLabel(section))) return false;
+      if (knownLabels.has(key) || taxAdjustLabels.has(key) || isSubtotalLabel(label)) return false;
+      const amount = parseAmount(value);
+      if (amount === null || amount === 0 || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
 
   // 支給の下にある知らない項目は入れる欄が無い。黙って捨てると手取りが
   // 合わなくなるので、名前を出して知らせる
@@ -224,13 +303,13 @@ export function interpretPayslipImport(payload) {
 
   if (totals.gross !== undefined) {
     checks.push(
-      totals.gross === gross
+      totals.gross === gross + refundInEarnings
         ? { ok: true, text: "支給合計が明細と一致しました" }
         : {
             ok: false,
             text:
               `支給合計が明細 (${totals.gross.toLocaleString("ja-JP")}円) と ` +
-              `${Math.abs(totals.gross - gross).toLocaleString("ja-JP")}円 合いません。` +
+              `${Math.abs(totals.gross - gross - refundInEarnings).toLocaleString("ja-JP")}円 合いません。` +
               "読み取れなかった支給項目があります",
           }
     );

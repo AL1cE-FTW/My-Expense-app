@@ -311,11 +311,22 @@ const heights = new Set(Object.values(controls).map((c) => c.height));
 if (heights.size !== 1) {
   throw new Error("入力欄の高さは揃っているはず: " + JSON.stringify(controls));
 }
-if (controls.日付.top !== controls.種別.top || controls.日付.bottom !== controls.種別.bottom) {
+// スマホでは種別 (支出・収入・貯蓄・振替の4つ) が1段まるごと使って先頭に来る。
+// 半分の幅だと1つ38pxしかなく押しにくいため
+if (!(controls.種別.bottom <= controls.日付.top)) {
+  throw new Error("種別は先頭の段に来るはず: " + JSON.stringify(controls));
+}
+const typeWidths = await page.evaluate(() =>
+  [...document.querySelectorAll(".type-option span")].map((e) => Math.round(e.getBoundingClientRect().width))
+);
+if (typeWidths.length !== 4 || typeWidths.some((w) => w < 44)) {
+  throw new Error("種別の選択肢は4つで、それぞれ44px以上のはず: " + typeWidths.join(","));
+}
+if (controls.日付.top !== controls.カテゴリ.top || controls.日付.bottom !== controls.カテゴリ.bottom) {
   throw new Error("横に並ぶ欄は上端も下端も揃うはず: " + JSON.stringify(controls));
 }
-if (controls.カテゴリ.top !== controls.金額.top || controls.カテゴリ.bottom !== controls.金額.bottom) {
-  throw new Error("カテゴリと金額が揃っていない: " + JSON.stringify(controls));
+if (controls.金額.top !== controls.口座.top || controls.金額.bottom !== controls.口座.bottom) {
+  throw new Error("金額と口座が揃っていない: " + JSON.stringify(controls));
 }
 
 // --- スマホ幅で指で押せる大きさがある ---

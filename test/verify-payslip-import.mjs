@@ -70,6 +70,59 @@ const assert = (cond, message) => { if (!cond) throw new Error(message); };
   assert(bonus.fields.bonusAmount === 400000 && bonus.fields.childSupportLevy === 500, "賞与の欄");
   assert(bonus.memo === "7月度賞与", "メモ: " + bonus.memo);
   assert(bonus.checks.some((c) => c.ok && c.text.includes("一致")), "賞与も差引支給額で検算");
+
+  // 手取り (支給 − 控除) を振り分けた欄から計算する
+  const netOf = (r) => {
+    const f = r.fields;
+    const plus = ["baseSalary", "locationAllowance", "commute", "overtimePay", "salaryAdjustment"];
+    const minus = ["housing", "healthInsurance", "nursingInsurance", "childSupportLevy", "pensionInsurance",
+      "employmentInsurance", "incomeTax", "residentTax", "otherDeductions"];
+    return plus.reduce((s, k) => s + (f[k] || 0), 0) - minus.reduce((s, k) => s + (f[k] || 0), 0);
+  };
+
+  // 区切りの中に合計・小計の行があっても、項目として足さない
+  // (足すと控除合計がそのまま「その他控除」に入り、手取りがほぼ0になる)
+  const withSubtotals = interpretPayslipImport({
+    pairs: [
+      ["本給", "250,000", "支給"], ["通勤手当", "10,000", "支給"], ["支給合計", "260,000", "支給"],
+      ["健康保険", "12,000", "控除"], ["厚生年金", "22,000", "控除"], ["社会保険計", "34,000", "控除"],
+      ["所得税", "6,000", "控除"], ["控除合計", "40,000", "控除"], ["差引支給額", "220,000", "控除"],
+    ],
+  });
+  assert(netOf(withSubtotals) === 220000, "合計・小計を控除に足してはいけない: " + JSON.stringify(withSubtotals));
+  assert(withSubtotals.fields.otherDeductions === undefined, "その他控除は無いはず");
+
+  // ▲ (マイナス) の給与調整を読み捨てない
+  const negative = interpretPayslipImport({
+    pairs: [["本給", "250,000", "支給"], ["給与調整", "▲5,000", "支給"], ["健康保険", "12,000", "控除"], ["差引支給額", "233,000", "記事"]],
+  });
+  assert(negative.fields.salaryAdjustment === -5000, "▲は マイナスとして読む: " + JSON.stringify(negative.fields));
+  assert(negative.checks.some((c) => c.ok && c.text.includes("一致")), "手取りが一致するはず");
+
+  // 年末調整の還付: 控除欄の ▲ でも、支給欄のプラスでも、所得税から差し引く
+  for (const [where, pair, extra] of [
+    ["控除の▲", ["年調過不足税額", "▲15,000", "控除"], []],
+    ["支給の行", ["年末調整還付", "15,000", "支給"], [["支給合計", "265,000", "支給"]]],
+  ]) {
+    const r = interpretPayslipImport({
+      pairs: [["本給", "250,000", "支給"], pair, ...extra, ["健康保険", "12,000", "控除"], ["所得税", "6,000", "控除"], ["差引支給額", "247,000", "記事"]],
+    });
+    assert(r.fields.incomeTax === -9000, `年調還付 (${where}) は所得税から引く: ` + JSON.stringify(r.fields));
+    assert(netOf(r) === 247000, `年調還付 (${where}) を含めた手取り: ${netOf(r)}`);
+    assert(r.checks.every((c) => c.ok), `年調還付 (${where}) の検算: ` + JSON.stringify(r.checks));
+  }
+
+  // 同じ欄に当たる別の行 (課税・非課税の通勤手当) は足す
+  const twoCommutes = interpretPayslipImport({
+    pairs: [["本給", "200,000", "支給"], ["非課税通勤手当", "15,000", "支給"], ["課税通勤手当", "3,000", "支給"], ["差引支給額", "218,000", "記事"]],
+  });
+  assert(twoCommutes.fields.commute === 18000, "通勤手当2行を足すはず: " + JSON.stringify(twoCommutes.fields));
+
+  // 合計は同じ額を別の名前で2回出す明細がある (振込金額・差引支給額)。足さない
+  const twoNets = interpretPayslipImport({
+    pairs: [["本給", "200,000", "支給"], ["所得税", "5,000", "控除"], ["振込金額１", "195,000", "記事"], ["差引支給額", "195,000", "記事"]],
+  });
+  assert(twoNets.checks.some((c) => c.ok && c.text.includes("一致")), "合計を二重に数えてはいけない: " + JSON.stringify(twoNets.checks));
 }
 console.log("振り分けの判断: OK");
 

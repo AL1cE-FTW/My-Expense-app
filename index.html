@@ -175,6 +175,10 @@
                   <input type="radio" name="entry-type" value="save">
                   <span>貯蓄</span>
                 </label>
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="transfer">
+                  <span>振替</span>
+                </label>
               </div>
             </fieldset>
             <div class="form-group">
@@ -185,7 +189,7 @@
               <label for="entry-amount">金額 (円)</label>
               <input type="number" id="entry-amount" min="1" step="1" placeholder="1000" required>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="entry-settlement-group">
               <label for="entry-settlement">支払い・入金の口座</label>
               <select id="entry-settlement">
                 <option value="cash">現金</option>
@@ -241,7 +245,7 @@
                   <div class="form-group">
                     <!-- 遡及差額などで マイナスになることがあるので min を付けない -->
                     <label for="payslip-salary-adjustment">給与調整</label>
-                    <input type="number" id="payslip-salary-adjustment" step="1" placeholder="80">
+                    <input type="number" id="payslip-salary-adjustment" step="1" placeholder="0">
                   </div>
                 </div>
 
@@ -253,35 +257,35 @@
                   </div>
                   <div class="form-group">
                     <label for="payslip-health-insurance">健康保険</label>
-                    <input type="number" id="payslip-health-insurance" min="0" step="1" placeholder="12000">
+                    <input type="number" id="payslip-health-insurance" step="1" placeholder="12000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-nursing-insurance">介護保険</label>
-                    <input type="number" id="payslip-nursing-insurance" min="0" step="1" placeholder="0">
+                    <input type="number" id="payslip-nursing-insurance" step="1" placeholder="0">
                   </div>
                   <div class="form-group">
                     <label for="payslip-child-support">子ども支援金</label>
-                    <input type="number" id="payslip-child-support" min="0" step="1" placeholder="300">
+                    <input type="number" id="payslip-child-support" step="1" placeholder="300">
                   </div>
                   <div class="form-group">
                     <label for="payslip-pension-insurance">厚生年金</label>
-                    <input type="number" id="payslip-pension-insurance" min="0" step="1" placeholder="25000">
+                    <input type="number" id="payslip-pension-insurance" step="1" placeholder="25000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-employment-insurance">雇用保険料</label>
-                    <input type="number" id="payslip-employment-insurance" min="0" step="1" placeholder="1500">
+                    <input type="number" id="payslip-employment-insurance" step="1" placeholder="1500">
                   </div>
                   <div class="form-group">
-                    <label for="payslip-income-tax">所得税</label>
-                    <input type="number" id="payslip-income-tax" min="0" step="1" placeholder="6000">
+                    <label for="payslip-income-tax">所得税 (年末調整の還付はマイナス)</label>
+                    <input type="number" id="payslip-income-tax" step="1" placeholder="6000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-resident-tax">住民税</label>
-                    <input type="number" id="payslip-resident-tax" min="0" step="1" placeholder="10000">
+                    <input type="number" id="payslip-resident-tax" step="1" placeholder="10000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-other-deductions">その他控除(慶弔掛金・福祉会費・寮社宅関係など)</label>
-                    <input type="number" id="payslip-other-deductions" min="0" step="1" placeholder="3000">
+                    <input type="number" id="payslip-other-deductions" step="1" placeholder="3000">
                   </div>
                 </div>
               </div>
@@ -299,27 +303,27 @@
                 <div class="form-row">
                   <div class="form-group">
                     <label for="payslip-bonus-health-insurance">健康保険</label>
-                    <input type="number" id="payslip-bonus-health-insurance" min="0" step="1" placeholder="15000">
+                    <input type="number" id="payslip-bonus-health-insurance" step="1" placeholder="15000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-bonus-nursing-insurance">介護保険</label>
-                    <input type="number" id="payslip-bonus-nursing-insurance" min="0" step="1" placeholder="0">
+                    <input type="number" id="payslip-bonus-nursing-insurance" step="1" placeholder="0">
                   </div>
                   <div class="form-group">
                     <label for="payslip-bonus-child-support">子ども支援金</label>
-                    <input type="number" id="payslip-bonus-child-support" min="0" step="1" placeholder="300">
+                    <input type="number" id="payslip-bonus-child-support" step="1" placeholder="300">
                   </div>
                   <div class="form-group">
                     <label for="payslip-bonus-pension-insurance">厚生年金</label>
-                    <input type="number" id="payslip-bonus-pension-insurance" min="0" step="1" placeholder="27000">
+                    <input type="number" id="payslip-bonus-pension-insurance" step="1" placeholder="27000">
                   </div>
                   <div class="form-group">
                     <label for="payslip-bonus-employment-insurance">雇用保険料</label>
-                    <input type="number" id="payslip-bonus-employment-insurance" min="0" step="1" placeholder="1800">
+                    <input type="number" id="payslip-bonus-employment-insurance" step="1" placeholder="1800">
                   </div>
                   <div class="form-group">
                     <label for="payslip-bonus-income-tax">所得税</label>
-                    <input type="number" id="payslip-bonus-income-tax" min="0" step="1" placeholder="12000">
+                    <input type="number" id="payslip-bonus-income-tax" step="1" placeholder="12000">
                   </div>
                 </div>
               </div>
@@ -362,6 +366,7 @@
             <option value="expense">支出</option>
             <option value="income">収入</option>
             <option value="save">貯蓄</option>
+            <option value="transfer">振替</option>
           </select>
           <select id="filter-category" class="filter-select" aria-label="カテゴリで絞り込み">
             <option value="all">すべてのカテゴリ</option>
@@ -497,6 +502,12 @@
               <input type="date" id="accounts-opening-date">
             </div>
           </div>
+          <p class="book-form-note">
+            期首日はカードの締め日の翌日 (末日締めなら1日) にしておくと、期首の未払金が
+            次の引き落とし1回でちょうど精算されるので、口座の残高がずれません。
+            締め日の途中にすると、その時点までの利用分は1か月後の引き落としになるため、
+            最初の月だけ口座と未払金が実際とずれます。
+          </p>
           <p class="payslip-group-label">期首残高</p>
           <div id="accounts-inputs" class="budget-inputs"></div>
 

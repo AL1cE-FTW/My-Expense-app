@@ -122,9 +122,23 @@ export function writeBatch() {
     update(docRef, data) {
       ops.push({ docRef, data, merge: true });
     },
+    delete(docRef) {
+      ops.push({ docRef, remove: true });
+    },
     async commit() {
+      // 本物と同じく、1つでも失敗するなら何も反映しない (先に全部確かめる)
+      for (const op of ops) {
+        if (op.merge && !store.has(op.docRef.path)) {
+          throw new Error("No document to update: " + op.docRef.path);
+        }
+      }
       const touched = new Set();
       for (const op of ops) {
+        if (op.remove) {
+          store.delete(op.docRef.path);
+          touched.add(op.docRef.collectionPath);
+          continue;
+        }
         if (op.merge && !store.has(op.docRef.path)) {
           throw new Error("No document to update: " + op.docRef.path);
         }

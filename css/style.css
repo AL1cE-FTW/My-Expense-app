@@ -483,6 +483,13 @@ html {
   font-weight: 700;
 }
 
+/* 振替は収入でも支出でもないので、色を付けず落ち着いた灰色にする */
+.type-option input[value="transfer"]:checked + span {
+  background: #eef1f6;
+  color: #5b6480;
+  font-weight: 700;
+}
+
 .payslip-section {
   margin-bottom: 16px;
 }
@@ -1578,6 +1585,11 @@ body.modal-open {
   color: #2f7dea;
 }
 
+.type-badge.transfer {
+  background: #eef1f6;
+  color: #5b6480;
+}
+
 .row-actions {
   display: flex;
   gap: 6px;
@@ -1832,6 +1844,13 @@ body.modal-open {
 }
 
 @media (max-width: 600px) {
+  /* 種別は4つ (支出・収入・貯蓄・振替) あり、半分の幅だと1つ38pxで押しにくい。
+     1段まるごと使って先頭に置く (種別でカテゴリの選択肢が変わるので、先に選ぶ順が自然) */
+  .type-fieldset {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+
   /* 収入・支出・収支・貯蓄を縦1列にすると4枚で360px使ってしまう。
      数字4つのために画面半分は使いすぎなので2×2にする */
   .summary-cards {

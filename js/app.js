@@ -57,9 +57,19 @@ const CATEGORIES = {
   ],
   income: ["給与", "賞与", "副収入", "立替金返金", "カード返金", "その他収入"],
   save: ["株式", "投資信託", "定期預金", "その他貯蓄"],
+  // 振替: 自分のお金の置き場所が変わるだけ (収入でも支出でもない)。
+  // これが無いと、ATMで下ろした現金で払うたびに帳簿の現金がマイナスへずれていき、
+  // 口座はその分多いままになる。
+  transfer: ["ATMで引き出し", "現金を預け入れ"],
 };
 
-const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄" };
+// 振替のカテゴリごとの、お金が出ていく口座と入ってくる口座
+const TRANSFER_DIRECTIONS = {
+  ATMで引き出し: { from: "銀行口座", to: "現金" },
+  現金を預け入れ: { from: "現金", to: "銀行口座" },
+};
+
+const TYPE_LABELS = { expense: "支出", income: "収入", save: "貯蓄", transfer: "振替" };
 
 // 収入目標の「賞与」は月額ではなく、ボーナス月・給与の何か月分かで計算する
 const BONUS_CATEGORY = "賞与";
@@ -324,6 +334,7 @@ const el = {
   cardPaymentMonths: document.getElementById("card-payment-months"),
   cancelAccountsBtn: document.getElementById("cancel-accounts-btn"),
   entrySettlement: document.getElementById("entry-settlement"),
+  entrySettlementGroup: document.getElementById("entry-settlement-group"),
   payslipCopyPrevBtn: document.getElementById("payslip-copy-prev-btn"),
   payslipLinkBtn: document.getElementById("payslip-link-btn"),
   payslipLinkModal: document.getElementById("payslip-link-modal"),
@@ -644,7 +655,7 @@ function render() {
   const entriesInPeriod = periodEntries();
   // 集計には立替とその返金を含めない (isOwnMoney のコメント参照)。
   // 記録一覧と帳簿は元の記録をそのまま使う (帳簿は立替を資産として別に扱う)
-  const ownEntries = entriesInPeriod.filter(isOwnMoney);
+  const ownEntries = ownFlows(entriesInPeriod);
   renderSummary(ownEntries);
   renderMonthlyBarChart();
   const budgetTotals = renderBudget(ownEntries, targetMultiplier);
@@ -865,17 +876,12 @@ function housingEntryFor(salaryId) {
   return entries.find((e) => e.payslipHousingFor === salaryId);
 }
 
-// 給与の記録に合わせて、対になる住居の支出を作る・直す・消す
-async function syncPayslipHousingEntry(salaryId, data) {
-  const housing = payslipHousingAmount(data);
-  const existing = housingEntryFor(salaryId);
+function entryDocRef(id) {
+  return firestoreApi.doc(db, `users/${currentUid}/entries/${id}`);
+}
 
-  if (housing <= 0) {
-    if (existing) await deleteEntryFromDb(existing.id);
-    return;
-  }
-
-  const housingData = {
+function housingEntryData(salaryId, data, housing) {
+  return {
     date: data.date,
     type: "expense",
     category: PAYSLIP_HOUSING_CATEGORY,
@@ -888,12 +894,40 @@ async function syncPayslipHousingEntry(salaryId, data) {
     // 現金扱いにすると、実際には持っていない現金が減ってしまう。
     settlement: "bank",
   };
+}
 
-  if (existing) {
-    await updateEntryInDb(existing.id, housingData);
+/**
+ * 記録と、それに連動する記録 (天引きの家賃の支出、立替を外したときの返金の削除)
+ * を1回のまとめ書き込みで保存する。
+ *
+ * 別々に保存すると、給与だけ保存されて家賃の支出が作られないまま終わることがある
+ * (オフラインで保存して、同期する前にアプリを閉じた場合など)。給与の金額は
+ * 「振込額 + 寮社宅費」なので、家賃の支出が無いと収入がその分多いままになる。
+ * まとめ書き込みなら、全部が反映されるか、何も反映されないかのどちらかになる。
+ */
+async function saveEntryWithLinked({ editingId, data, refundToDelete }) {
+  const batch = firestoreApi.writeBatch(db);
+  const ref = editingId ? entryDocRef(editingId) : firestoreApi.doc(entriesCollection(currentUid));
+  if (editingId) {
+    // 登録日 (createdAt) と取り込み元 (source) は最初のものを保つため、更新時は触らない
+    batch.update(ref, data);
   } else {
-    await addEntryToDb({ ...housingData, createdAt: nowTimestamp() });
+    batch.set(ref, { ...data, source: SOURCE_MANUAL, createdAt: nowTimestamp() });
   }
+  if (refundToDelete) batch.delete(entryDocRef(refundToDelete.id));
+
+  const housing = payslipHousingAmount(data);
+  const existing = editingId ? housingEntryFor(editingId) : null;
+  if (housing > 0) {
+    const housingData = housingEntryData(ref.id, data, housing);
+    if (existing) batch.update(entryDocRef(existing.id), housingData);
+    else batch.set(firestoreApi.doc(entriesCollection(currentUid)), { ...housingData, createdAt: nowTimestamp() });
+  } else if (existing) {
+    batch.delete(entryDocRef(existing.id));
+  }
+
+  await batch.commit();
+  return ref.id;
 }
 
 // --- 立替を自分のお金の出入りに数えない -------------------------------------
@@ -934,7 +968,77 @@ function advanceFlowIds() {
 
 // 自分のお金の出入りとして集計に数えるか
 function isOwnMoney(entry) {
-  return !advanceFlowIds().has(entry.id);
+  return entry.type !== "transfer" && !advanceFlowIds().has(entry.id);
+}
+
+// --- 返金は「支出の取り消し」として数える ----------------------------------
+//
+// カードの返金 (返品・キャンセル) は稼いだお金ではなく、払ったお金が戻っただけ。
+// 収入に数えると、収入と支出が両方膨らみ、返品した支出は予算や Need/Want に
+// 残ったままになる (予算オーバーに見える)。簿記でも費用の取り消し (戻し入れ)
+// として、元の費用科目を減らす。そこで、元の支出のカテゴリのマイナスの支出に直す。
+// 精算額が立替額と違う立替の返金も同じ (差額だけが自分の負担として残る)。
+
+let refundCategoryCache = { source: null, map: new Map() };
+
+// 返金が取り消す支出のカテゴリ。返金でなければ null。
+function refundExpenseCategory(entry) {
+  if (entry.type !== "income") return null;
+  if (refundCategoryCache.source !== entries) {
+    refundCategoryCache = { source: entries, map: buildRefundCategories() };
+  }
+  return refundCategoryCache.map.get(entry.id) || null;
+}
+
+function buildRefundCategories() {
+  const map = new Map();
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  // 店名ごとの支出 (新しい順)。カードの返金は同じ店の直近の支出を取り消すとみなす
+  const expensesByMerchant = new Map();
+  for (const e of entries) {
+    if (e.type !== "expense" || !e.memo) continue;
+    const key = normalizeMemo(e.memo);
+    if (!expensesByMerchant.has(key)) expensesByMerchant.set(key, []);
+    expensesByMerchant.get(key).push(e);
+  }
+  for (const list of expensesByMerchant.values()) {
+    list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }
+
+  for (const e of entries) {
+    if (e.type !== "income") continue;
+    if (e.advanceRefundFor && byId.get(e.advanceRefundFor)?.advance === true) {
+      // 立替の返金 (同額の組は isOwnMoney で最初から除かれるので、ここに来るのは金額違い)
+      map.set(e.id, byId.get(e.advanceRefundFor).category);
+    } else if (e.category === CARD_REFUND_CATEGORY) {
+      const merchant = String(e.memo || "").replace(/^返金[:：]\s*/, "");
+      const original = (expensesByMerchant.get(normalizeMemo(merchant)) || []).find(
+        (x) => x.date <= e.date
+      );
+      map.set(
+        e.id,
+        original ? original.category : merchant ? guessCategoryFromMerchant(merchant) : "その他支出"
+      );
+    }
+  }
+  return map;
+}
+
+/**
+ * 集計に使う「自分のお金の出入り」に直した記録。
+ *   - 立替・同額で精算した返金の組、振替 (現金⇔口座) は除く
+ *   - 返金は収入ではなく、元の支出のカテゴリのマイナスの支出にする
+ * 収入・支出・収支・予算・予定と実績・Need/Want/Save・累計・年間推移は、
+ * すべてこれを通して数える (帳簿の損益計算書と数字が揃う)。
+ */
+function ownFlows(list) {
+  const out = [];
+  for (const e of list) {
+    if (!isOwnMoney(e)) continue;
+    const category = refundExpenseCategory(e);
+    out.push(category ? { ...e, type: "expense", category, amount: -e.amount } : e);
+  }
+  return out;
 }
 
 function refundsByAdvanceId() {
@@ -1085,7 +1189,7 @@ function renderMonthlyBarChart() {
 
   const year = currentMonth.getFullYear();
   const monthlyTotals = Array.from({ length: 12 }, () => ({ income: 0, expense: 0 }));
-  for (const e of entriesForYear(currentMonth).filter(isOwnMoney)) {
+  for (const e of ownFlows(entriesForYear(currentMonth))) {
     if (e.type !== "income" && e.type !== "expense") continue;
     const month = Number(e.date.slice(5, 7)) - 1;
     monthlyTotals[month][e.type] += e.amount;
@@ -1116,12 +1220,12 @@ function renderMonthlyBarChart() {
 
     const incomeBar = document.createElement("div");
     incomeBar.className = "month-bar income";
-    incomeBar.style.height = `${(totals.income / chartMax) * 100}%`;
+    incomeBar.style.height = `${(Math.max(totals.income, 0) / chartMax) * 100}%`;
     incomeBar.title = `${index + 1}月 収入 ${formatYen(totals.income)}`;
 
     const expenseBar = document.createElement("div");
     expenseBar.className = "month-bar expense";
-    expenseBar.style.height = `${(totals.expense / chartMax) * 100}%`;
+    expenseBar.style.height = `${(Math.max(totals.expense, 0) / chartMax) * 100}%`;
     expenseBar.title = `${index + 1}月 支出 ${formatYen(totals.expense)}`;
 
     bars.append(incomeBar, expenseBar);
@@ -1137,7 +1241,7 @@ function renderMonthlyBarChart() {
 
 function renderCumulativeSavings() {
   let total = 0;
-  for (const e of entries.filter(isOwnMoney)) {
+  for (const e of ownFlows(entries)) {
     if (e.type === "income") total += e.amount;
     else if (e.type === "expense") total -= e.amount;
     // "save" (貯蓄・投資) は現金が資産に形を変えただけなので加減算しない
@@ -1146,16 +1250,18 @@ function renderCumulativeSavings() {
   el.cumulativeSavings.classList.toggle("positive", total > 0);
   el.cumulativeSavings.classList.toggle("negative", total < 0);
 
-  // 今月(実際のカレンダー上の今月)の貯蓄額と、累計貯金額に対する増減率
+  // 今月(実際のカレンダー上の今月)の収支と、累計貯金額に対する増減率。
+  // 「貯蓄額」と書くと、隣の「貯蓄・投資」カード (投資へ移した額) と別の数字なのに
+  // 同じものに見えてしまうので「収支」と書く
   let thisMonthNet = 0;
-  for (const e of entriesForMonth(startOfMonth(new Date())).filter(isOwnMoney)) {
+  for (const e of ownFlows(entriesForMonth(startOfMonth(new Date())))) {
     if (e.type === "income") thisMonthNet += e.amount;
     else if (e.type === "expense") thisMonthNet -= e.amount;
   }
   const previousTotal = total - thisMonthNet;
 
   const sign = thisMonthNet > 0 ? "+" : thisMonthNet < 0 ? "-" : "";
-  let changeText = `今月の貯蓄額: ${sign}${formatYen(Math.abs(thisMonthNet))}`;
+  let changeText = `今月の収支: ${sign}${formatYen(Math.abs(thisMonthNet))}`;
   if (previousTotal !== 0) {
     const rate = (thisMonthNet / Math.abs(previousTotal)) * 100;
     changeText += ` (${rate > 0 ? "+" : ""}${rate.toFixed(1)}%)`;
@@ -1172,7 +1278,7 @@ function renderSummary(monthEntries) {
   for (const e of monthEntries) {
     if (e.type === "income") income += e.amount;
     else if (e.type === "save") saved += e.amount;
-    else expense += e.amount;
+    else if (e.type === "expense") expense += e.amount;
   }
   const balance = income - expense;
 
@@ -1243,7 +1349,7 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
     track.className = "budget-bar-track";
     const bar = document.createElement("div");
     bar.className = budgetBarClass(ratio);
-    bar.style.width = `${Math.min(ratio, 1) * 100}%`;
+    bar.style.width = `${Math.min(Math.max(ratio, 0), 1) * 100}%`;
     track.appendChild(bar);
 
     el.budgetOverall.append(text, track);
@@ -1442,7 +1548,7 @@ function buildPlanActualRow(label, amount, max, barClass) {
   track.className = "budget-bar-track";
   const bar = document.createElement("div");
   bar.className = `budget-bar ${barClass}`;
-  bar.style.width = `${Math.min(amount / max, 1) * 100}%`;
+  bar.style.width = `${Math.min(Math.max(amount / max, 0), 1) * 100}%`;
   track.appendChild(bar);
 
   const valueEl = document.createElement("span");
@@ -1490,12 +1596,15 @@ function renderNeedWantSave(monthEntries, targetMultiplier) {
   for (const e of monthEntries) {
     if (e.type === "income") {
       // 返金は稼いだお金ではないので、50:30:20 の基準となる収入には数えない。
-      // (5万円の立替精算で Need の目標が2.5万円水増しされるのを防ぐ。
-      //  対になる支出も同じ期間にあれば Save 実績で自然に相殺される)
+      // (カード返金・立替の返金は ownFlows で支出の取り消しに直してあるので、
+      //  ここに来るのは立替と結びついていない手入力の立替金返金だけ)
       if (!isRefundIncome(e)) actualIncome += e.amount;
     } else if (e.type === "save") {
       // 貯蓄・投資は使ったお金ではないので Need/Want に数えない。
       // Save実績 (income - need - want) には自然に残る形で反映される。
+    } else if (e.type !== "expense") {
+      // 振替 (現金⇔口座) なども使ったお金ではない。ここで止めないと下の
+      // 「その他は Want」に落ちる
     } else if (NEED_CATEGORIES.includes(e.category)) {
       needSpent += e.amount;
     } else {
@@ -1708,7 +1817,7 @@ function hasActiveFilters() {
 function renderFilterCategoryOptions() {
   const categoryLists =
     filterType === "all"
-      ? [...CATEGORIES.expense, ...CATEGORIES.income, ...CATEGORIES.save]
+      ? [...CATEGORIES.expense, ...CATEGORIES.income, ...CATEGORIES.save, ...CATEGORIES.transfer]
       : CATEGORIES[filterType];
   const uniqueCategories = [...new Set(categoryLists)];
 
@@ -1794,7 +1903,9 @@ function renderList(monthEntries) {
     const amountTd = document.createElement("td");
     amountTd.className = `amount-cell ${entry.type}`;
     amountTd.textContent =
-      (entry.type === "income" ? "+" : "-") + formatYen(entry.amount);
+      // 振替はお金の置き場所が変わるだけで増えも減りもしないので符号を付けない
+      (entry.type === "income" ? "+" : entry.type === "transfer" ? "" : "-") +
+      formatYen(entry.amount);
 
     const memoTd = document.createElement("td");
     memoTd.className = "memo-cell";
@@ -1940,7 +2051,8 @@ const JOURNAL_NOTES = {
   [ADVANCE_REFUND_CATEGORY]:
     "立替として記録した支出と結びついていないため、収入として扱っています。",
   [CARD_REFUND_CATEGORY]:
-    "簿記では費用の取り消し (戻し入れ) として、元の費用科目を減らします。",
+    "返品・キャンセルは収入ではなく費用の取り消し (戻し入れ) なので、" +
+    "同じ店の直近の支出のカテゴリを減らしています。",
 };
 
 function journalLine(side, account, amount) {
@@ -1967,9 +2079,14 @@ function journalFor(entry) {
   const notes = [];
 
   // 立替とその返金は、自分のお金の出入りではなく立替金 (資産) の増減
-  const advanceFlow = !isOwnMoney(entry);
+  const advanceFlow = advanceFlowIds().has(entry.id);
 
-  if (entry.type === "expense") {
+  if (entry.type === "transfer") {
+    // 現金⇔口座の移動。収益でも費用でもなく、資産の中で置き場所が変わるだけ
+    const direction = TRANSFER_DIRECTIONS[entry.category] || TRANSFER_DIRECTIONS["ATMで引き出し"];
+    lines.push(journalLine("debit", direction.to, entry.amount));
+    lines.push(journalLine("credit", direction.from, entry.amount));
+  } else if (entry.type === "expense") {
     lines.push(journalLine("debit", advanceFlow ? ADVANCE_ACCOUNT : entry.category, entry.amount));
     lines.push(journalLine("credit", paymentAccount(entry), entry.amount));
     if (entry.advance === true) {
@@ -1979,6 +2096,13 @@ function journalFor(entry) {
     lines.push(journalLine("debit", paymentAccount(entry), entry.amount));
     lines.push(journalLine("credit", ADVANCE_ACCOUNT, entry.amount));
     notes.push(JOURNAL_NOTES.advanceRefund);
+  } else if (refundExpenseCategory(entry)) {
+    // 返金は収益ではなく、元の費用の取り消し (戻し入れ)。集計 (ownFlows) と揃える
+    lines.push(journalLine("debit", paymentAccount(entry), entry.amount));
+    lines.push(journalLine("credit", refundExpenseCategory(entry), entry.amount));
+    notes.push(
+      entry.advanceRefundFor ? JOURNAL_NOTES.advanceMismatch : JOURNAL_NOTES[CARD_REFUND_CATEGORY]
+    );
   } else if (entry.type === "save") {
     // 貯蓄・投資は費用ではない。現金が投資資産に振り替わるだけ
     lines.push(journalLine("debit", entry.category, entry.amount));
@@ -2009,9 +2133,15 @@ function journalFor(entry) {
       const other = legacy ? 0 : p.otherDeductions || 0;
 
       lines.push(journalLine("debit", received, entry.amount));
-      if (insurance > 0) lines.push(journalLine("debit", SOCIAL_INSURANCE_ACCOUNT, insurance));
-      if (tax > 0) lines.push(journalLine("debit", TAX_ACCOUNT, tax));
-      if (other > 0) lines.push(journalLine("debit", "その他支出", other));
+      // 控除はふつう費用 (借方) だが、年末調整の還付などでマイナスになることがある。
+      // そのときは費用の取り消しとして貸方に立てる (借方にマイナスは書かない)
+      const pushDeduction = (account, amount) => {
+        if (amount > 0) lines.push(journalLine("debit", account, amount));
+        else if (amount < 0) lines.push(journalLine("credit", account, -amount));
+      };
+      pushDeduction(SOCIAL_INSURANCE_ACCOUNT, insurance);
+      pushDeduction(TAX_ACCOUNT, tax);
+      pushDeduction("その他支出", other);
       lines.push(journalLine("credit", entry.category, gross));
 
       if ((p.housing || 0) > 0) {
@@ -2023,7 +2153,9 @@ function journalFor(entry) {
     }
   }
 
-  if (JOURNAL_NOTES[entry.category] && !advanceFlow) notes.push(JOURNAL_NOTES[entry.category]);
+  if (JOURNAL_NOTES[entry.category] && !advanceFlow && !refundExpenseCategory(entry)) {
+    notes.push(JOURNAL_NOTES[entry.category]);
+  }
 
   // 貸借がずれるのは給与明細の内訳が支給合計と噛み合っていないときだけ。
   // 黙って捨てず、差額の科目を立てて表に出す (入力の間違いに気づける)。
@@ -2170,6 +2302,32 @@ function firstPaymentDateOnOrAfter(date) {
 }
 
 /**
+ * カード利用1件の引き落とし予定。ふつうは1回で全額。
+ * 分割払い (installments) は、最初の支払日から毎月同じ支払日に分けて落ちる。
+ * 割り切れない端数は初回に乗せる (カード会社の多くと同じ)。
+ * 分割手数料は明細に別の行で出るので、ここでは足さない。
+ */
+function cardPaymentSchedule(entry) {
+  const first = cardPaymentDateFor(entry.date);
+  const count = Number.isInteger(entry.installments) && entry.installments > 1 ? entry.installments : 1;
+  if (count === 1) return [{ date: first, amount: entry.amount }];
+
+  const { paymentDay } = cardTerms();
+  const base = Math.floor(entry.amount / count);
+  const [y, m] = first.split("-").map(Number);
+  const schedule = [];
+  for (let k = 0; k < count; k++) {
+    const month = new Date(y, m - 1 + k, 1);
+    const day = clampDayToMonth(month.getFullYear(), month.getMonth(), paymentDay);
+    schedule.push({
+      date: toDateInputValue(new Date(month.getFullYear(), month.getMonth(), day)),
+      amount: k === 0 ? entry.amount - base * (count - 1) : base,
+    });
+  }
+  return schedule;
+}
+
+/**
  * カードの引き落としを仕訳として組み立てる。実際の記録は無く、締め日と支払日から
  * 導出する。これがないと銀行口座の残高がいつまでも減らない。
  *
@@ -2187,11 +2345,12 @@ function cardPaymentJournal(from, to) {
     // 「請求が立った仕訳は期間外なのに引き落としだけ立つ」形になり、
     // 同じ借金を二重に払ってしまう。
     if (openingDate && e.date < openingDate) continue;
-    const payDate = cardPaymentDateFor(e.date);
-    if (payDate < from || payDate > to) continue;
     // journalFor と揃える: 支出・貯蓄は未払金を増やし (貸方)、収入(返金)は減らす
-    const delta = e.type === "income" ? -e.amount : e.amount;
-    byDate.set(payDate, (byDate.get(payDate) || 0) + delta);
+    const sign = e.type === "income" ? -1 : 1;
+    for (const { date: payDate, amount } of cardPaymentSchedule(e)) {
+      if (payDate < from || payDate > to) continue;
+      byDate.set(payDate, (byDate.get(payDate) || 0) + sign * amount);
+    }
   }
 
   // 期首時点で残っていたカードの請求。記録が無いので、期首日以降で最初に来る
@@ -3076,8 +3235,11 @@ function copyPreviousPayslip() {
   el.payslipCopyNote.classList.remove("hidden");
 }
 
-// 立替払いのチェックボックスは「支出」のときだけ出す
+// 立替払いのチェックボックスは「支出」のときだけ出す。
+// 振替のときは口座の向きをカテゴリ (ATMで引き出し など) で選ぶので、
+// 「支払い・入金の口座」も隠す。
 function updateAdvanceVisibility() {
+  el.entrySettlementGroup.classList.toggle("hidden", selectedType() === "transfer");
   const isExpense = selectedType() === "expense";
   el.advanceToggle.classList.toggle("hidden", !isExpense);
   if (!isExpense) el.entryAdvance.checked = false;
@@ -3294,6 +3456,17 @@ function startEdit(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
 
+  // 天引きの家賃の支出は給与の記録と連動しているので、給与の側で直す
+  const salary = linkedSalaryOf(entry);
+  if (salary) {
+    alert(
+      "この支出は、給与明細の寮社宅費から自動で作られています。\n" +
+        "金額を変えるときは、給与の記録の寮社宅費を直してください。給与の記録を開きます。"
+    );
+    startEdit(salary.id);
+    return;
+  }
+
   // 中身を書き換えると高さが変わるので、まず今の高さを確保し、
   // 閉じたときに戻る位置の目印としてこの行を覚えておく
   reserveEntryFormHeight();
@@ -3329,10 +3502,28 @@ function startEdit(id) {
   openEntryEditModal();
 }
 
+// 給与明細から自動で作った家賃の支出か。元の給与が残っている場合だけ true
+function linkedSalaryOf(entry) {
+  if (!entry?.payslipHousingFor) return null;
+  return entries.find((e) => e.id === entry.payslipHousingFor) || null;
+}
+
 async function deleteEntry(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
   const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
+
+  // 天引きの家賃の支出だけを消すと、給与の記録は「振込額 + 寮社宅費」のまま
+  // なので、収支と累計貯金額が家賃の分だけ多いままになる。給与の側で直してもらう。
+  const salary = linkedSalaryOf(entry);
+  if (salary) {
+    alert(
+      "この支出は、給与明細の寮社宅費から自動で作られています。\n\n" +
+        "消すときは、給与の記録を編集して寮社宅費を0にするか、給与の記録ごと削除してください。\n" +
+        `(${salary.date} ${salary.memo || salary.category})`
+    );
+    return;
+  }
 
   // 精算済みの立替を消すと、対になる返金の収入だけが残って累計貯金額が
   // 永久にずれるため、返金もまとめて消す。給与と、そこから天引きされた
@@ -3347,24 +3538,14 @@ async function deleteEntry(id) {
     : `この記録を削除しますか?\n${label}`;
   if (!confirm(message)) return;
 
-  // 2件消す場合、片方だけ成功して終わることがある。何が残っているかを
-  // 伝えないと、ユーザーは「何も起きなかった」と思って先に進んでしまう。
-  let linkedDeleted = 0;
+  // 対になる記録と一緒に、1回のまとめ書き込みで消す (片方だけ残ることがない)
   try {
-    for (const e of linked) {
-      await deleteEntryFromDb(e.id);
-      linkedDeleted++;
-    }
-    await deleteEntryFromDb(id);
+    const batch = firestoreApi.writeBatch(db);
+    for (const e of linked) batch.delete(entryDocRef(e.id));
+    batch.delete(entryDocRef(id));
+    await batch.commit();
   } catch (err) {
-    alert(
-      "削除に失敗しました: " +
-        err.message +
-        (linkedDeleted > 0
-          ? `\n\n対になる記録 ${linkedDeleted}件 は削除済みで、この記録が残っています。` +
-            "もう一度削除してください。"
-          : "")
-    );
+    alert("削除に失敗しました: " + err.message);
     return;
   }
   if (el.entryId.value === id) resetForm();
@@ -3393,7 +3574,7 @@ async function handleSubmit(event) {
     // 現金と銀行口座のどちらが動いたか (貸借対照表の残高に効く)。
     // カード払いはメール・カードCSVからの取り込みで自動判別するので、
     // 手入力のこの欄はカード以外を選ぶためのもの。
-    settlement: el.entrySettlement.value,
+    settlement: type === "transfer" ? null : el.entrySettlement.value,
   };
 
   const editingId = el.entryId.value;
@@ -3414,40 +3595,11 @@ async function handleSubmit(event) {
   }
 
   el.submitBtn.disabled = true;
-  // 更新が通ったあとに返金の削除だけ失敗すると、記録自体は保存済みなのに
-  // 「保存に失敗しました」と出て、ユーザーは更新されていないと誤解する。
-  // どこまで完了したかを分けて扱う。
-  let entrySaved = false;
   try {
-    if (editingId) {
-      // 登録日 (createdAt) は最初に記録したときのものを保つため、更新時は触らない
-      await updateEntryInDb(editingId, data);
-      entrySaved = true;
-      if (refundToDelete) await deleteEntryFromDb(refundToDelete.id);
-      await syncPayslipHousingEntry(editingId, data);
-    } else {
-      const newId = await addEntryToDb({
-        ...data,
-        source: SOURCE_MANUAL,
-        createdAt: nowTimestamp(),
-      });
-      entrySaved = true;
-      if (newId) await syncPayslipHousingEntry(newId, data);
-    }
+    await saveEntryWithLinked({ editingId, data, refundToDelete });
   } catch (err) {
-    if (entrySaved) {
-      // 記録自体は保存済み。残っている問題だけを伝えてフォームは通常どおり閉じる
-      alert(
-        "記録は保存できましたが、対になる記録の作成・削除に失敗しました: " +
-          err.message +
-          "\n\n記録一覧を確認し、必要なら手動で直してください。" +
-          "(返金の収入や、給与から天引きされた家賃の支出が対象です)"
-      );
-    } else {
-      alert("保存に失敗しました: " + err.message);
-      el.submitBtn.disabled = false;
-      return;
-    }
+    alert("保存に失敗しました: " + err.message);
+    return;
   } finally {
     el.submitBtn.disabled = false;
   }
@@ -3506,17 +3658,20 @@ function exportForAnalysis() {
     currency: "JPY",
 
     howToRead: {
-      種別: "expense=支出 / income=収入 / save=貯蓄・投資",
+      種別:
+        "expense=支出 / income=収入 / save=貯蓄・投資 / " +
+        "transfer=振替 (現金⇔口座の移動。収入にも支出にも数えない)",
       貯蓄の扱い:
         "save は現金が資産に形を変えただけなので支出に数えない。" +
         "収支も累計貯金額も動かさない (中立)",
       収支: "その月の income の合計 − expense の合計",
       累計貯金額: "全期間の収支の合計",
       返金の扱い:
-        "カテゴリ「立替金返金」「カード返金」は、払ったお金が戻ってきただけで" +
-        "稼いだお金ではない。収入目標の達成率と Need/Want/Save の収入には数えない。" +
-        "カード返金と、立替と結びついていない立替金返金は、対になる支出を相殺する" +
-        "ため月の収入合計には含める",
+        "カード返金は収入ではなく支出の取り消しとして、同じ店の直近の支出の" +
+        "カテゴリのマイナスの支出に数える (予算・Need/Want も減る)。" +
+        "精算額が立替額と違う立替の返金も、立替のカテゴリのマイナスの支出に数える。" +
+        "立替と結びついていない手入力の立替金返金だけは収入に数えるが、" +
+        "収入目標の達成率と Need/Want/Save の収入には数えない",
       立替金:
         "advance:true の支出は「自分が先に払って後で返金されるお金」。" +
         "返金時に advanceRefundFor で紐づく収入が作られる。対応する返金が無いものが未回収",
@@ -3704,6 +3859,7 @@ function parseType(value) {
   if (s === "収入" || s === "income") return "income";
   if (s === "支出" || s === "expense") return "expense";
   if (s === "貯蓄" || s === "save" || s === "投資" || s === "invest") return "save";
+  if (s === "振替" || s === "transfer") return "transfer";
   return null;
 }
 
@@ -3746,6 +3902,7 @@ const FALLBACK_CATEGORY = {
   expense: "その他支出",
   income: "その他収入",
   save: "その他貯蓄",
+  transfer: "ATMで引き出し",
 };
 
 function resolveCategory(rawCategory, type) {
@@ -3960,6 +4117,9 @@ function parseCardUsageFormat(rows) {
         amount,
         memo: merchant,
         source: SOURCE_CARD,
+        // 分割払いは、買った日に全額が費用になるが、口座からは毎月少しずつ
+        // 引き落とされる。貸借対照表の未払金と口座の残高に効くので残しておく
+        ...(Number.isFinite(installments) && installments > 1 ? { installments } : {}),
       });
     }
   }
@@ -4080,11 +4240,20 @@ function reconcileCardStatement(imported) {
   // 確定済み(card)も相手に含めるのは、同じCSVをもう一度読み込んだときのため。
   // 一度確定させた記録はメール側の店名を残すので、店名だけで比べる重複チェックは
   // すり抜けてしまう。ここで拾って「登録済み」として弾く。
+  // 仮の記録は計上日がずれることがある (ルール3で3日まで許す) ので、期間の前後
+  // 3日も候補に入れる。入れないと、メールでは8/31・明細では9/1 (明細の最初の日)
+  // のような取引が突き合わず、二重に計上される。
+  const margin = (date, days) => {
+    const d = new Date(date);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const pendingFrom = margin(from, -3);
+  const pendingTo = margin(to, 3);
   const candidates = entries.filter(
     (e) =>
-      (isPendingEntry(e) || e.source === SOURCE_CARD) &&
-      e.date >= from &&
-      e.date <= to
+      (isPendingEntry(e) && e.date >= pendingFrom && e.date <= pendingTo) ||
+      (e.source === SOURCE_CARD && e.date >= from && e.date <= to)
   );
 
   const used = new Set();
@@ -4119,7 +4288,10 @@ function reconcileCardStatement(imported) {
   // 期間内なのに確定明細に出てこなかった仮の記録。キャンセルされたか、
   // 次回の請求に回った可能性がある。勝手に消すと戻せない(メールは取り込み済み
   // として記録されるので、二度と拾い直せない)ので、残して知らせるだけにする。
-  const unmatchedPending = candidates.filter((e) => isPendingEntry(e) && !used.has(e.id));
+  // 前後の余白 (3日) にある仮の記録は、隣の明細の分かもしれないので知らせない
+  const unmatchedPending = candidates.filter(
+    (e) => isPendingEntry(e) && !used.has(e.id) && e.date >= from && e.date <= to
+  );
 
   return { updates, alreadyImported, additions: unmatchedRows, unmatchedPending, from, to };
 }
@@ -4290,7 +4462,13 @@ function importCsv(file) {
         await updateEntriesInDb(
           reconciliation.updates.map(({ entry, row }) => ({
             id: entry.id,
-            data: { date: row.date, amount: row.amount, source: SOURCE_CARD },
+            data: {
+              date: row.date,
+              amount: row.amount,
+              source: SOURCE_CARD,
+              // 分割払いかどうかは確定明細でしか分からないので、ここで引き継ぐ
+              ...(row.installments ? { installments: row.installments } : {}),
+            },
           }))
         );
       }
