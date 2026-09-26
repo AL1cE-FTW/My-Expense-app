@@ -189,8 +189,8 @@ await page.selectOption("#entry-category", "給与");
 await page.waitForTimeout(250);
 await page.click("#payslip-toggle-btn");
 await page.waitForTimeout(250);
-await page.fill("#payslip-base-salary", "281200");
-await page.fill("#payslip-housing", "16935");
+await page.fill("#payslip-base-salary", "250000");
+await page.fill("#payslip-housing", "15000");
 await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
 await page.fill("#entry-memo", "給与");
 await page.click("#submit-btn");
@@ -225,7 +225,7 @@ for (let i = 1; i < exported.length; i++) {
 }
 const salary = exported.find((e) => e.memo === "給与");
 if (!salary?.payslip) throw new Error("the payslip breakdown should be exported");
-if (salary.payslip.housing !== 16935) throw new Error("the rent should be in the payslip data");
+if (salary.payslip.housing !== 15000) throw new Error("the rent should be in the payslip data");
 const rent = exported.find((e) => e.payslipHousingFor);
 if (!rent || rent.payslipHousingFor !== salary.id) {
   throw new Error("the rent expense should stay linked to its salary entry");

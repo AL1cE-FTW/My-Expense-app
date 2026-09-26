@@ -81,22 +81,23 @@ if (await page.locator("#payslip-copy-prev-btn").isVisible()) {
 await page.click("#payslip-toggle-btn");
 await page.waitForTimeout(150);
 const PREV_VALUES = {
-  "#payslip-base-salary": "281200",
-  "#payslip-location-allowance": "20000",
-  "#payslip-commute": "12309",
+  "#payslip-base-salary": "250000",
+  "#payslip-location-allowance": "10000",
+  "#payslip-commute": "20000",
   "#payslip-overtime-pay": "30000",
-  "#payslip-housing": "30000",
-  "#payslip-health-insurance": "16000",
-  "#payslip-pension-insurance": "29280",
-  "#payslip-employment-insurance": "1661",
-  "#payslip-income-tax": "5790",
-  "#payslip-resident-tax": "12000",
-  "#payslip-other-deductions": "2805",
+  "#payslip-housing": "15000",
+  "#payslip-health-insurance": "12000",
+  "#payslip-child-support": "300",
+  "#payslip-pension-insurance": "25000",
+  "#payslip-employment-insurance": "1500",
+  "#payslip-income-tax": "6000",
+  "#payslip-resident-tax": "10000",
+  "#payslip-other-deductions": "3000",
 };
 for (const [sel, v] of Object.entries(PREV_VALUES)) await page.fill(sel, v);
 await page.fill("#entry-memo", "先月の給与");
-// 支給 343,509 − 控除 97,536 = 振込 245,973。記録の金額は 振込 + 寮社宅費
-if ((await page.inputValue("#entry-amount")) !== "275973") {
+// 支給 310,000 − 控除 72,800 = 振込 237,200。記録の金額は 振込 + 寮社宅費
+if ((await page.inputValue("#entry-amount")) !== "252200") {
   throw new Error("先月分の金額: " + (await page.inputValue("#entry-amount")));
 }
 await page.click("#submit-btn");
@@ -124,7 +125,7 @@ for (const [sel, v] of Object.entries(PREV_VALUES)) {
   if (got !== v) throw new Error(`${sel} に前回の値が入っていない: ${got} (期待 ${v})`);
 }
 // 金額も前回と同じ計算で自動で入る
-if ((await page.inputValue("#entry-amount")) !== "275973") {
+if ((await page.inputValue("#entry-amount")) !== "252200") {
   throw new Error("引き継いだら金額も計算されるはず: " + (await page.inputValue("#entry-amount")));
 }
 const note = await page.textContent("#payslip-copy-note");
@@ -133,7 +134,7 @@ if (!note.includes("変わった欄")) throw new Error("何を直せばいいか
 // 変わった欄だけ直す: 残業代 30,000 → 18,000
 await page.fill("#payslip-overtime-pay", "18000");
 await page.waitForTimeout(100);
-if ((await page.inputValue("#entry-amount")) !== "263973") {
+if ((await page.inputValue("#entry-amount")) !== "240200") {
   throw new Error("直した値で計算し直すはず: " + (await page.inputValue("#entry-amount")));
 }
 
@@ -159,7 +160,7 @@ await page.waitForTimeout(400);
 
 // 保存された: 金額と、寮社宅費の住居の支出も今月分として自動で立つ
 const list = (await page.textContent("#entry-list")).replace(/\s+/g, " ");
-if (!list.includes("今月の給与") || !list.includes("¥263,973")) {
+if (!list.includes("今月の給与") || !list.includes("¥240,200")) {
   throw new Error("今月分が保存されていない: " + list);
 }
 if (!list.includes("給与天引き")) throw new Error("引き継いだ寮社宅費の住居の支出も立つはず: " + list);

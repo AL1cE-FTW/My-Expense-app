@@ -81,7 +81,7 @@ await page.fill("#entry-memo", "積立");
 await page.click("#submit-btn");
 await page.waitForTimeout(200);
 
-// 給与 (明細つき)。支給 362,309 / 控除 98,000 → 振込 264,309
+// 給与 (明細つき)。支給 362,000 / 控除 98,000 → 振込 264,000
 await page.click('.type-option:has(input[value="income"]) span');
 await page.fill("#entry-date", `${CUR_Y}-${MM}-25`);
 await page.selectOption("#entry-category", "給与");
@@ -90,7 +90,7 @@ await page.waitForTimeout(250);
 for (const [sel, v] of [
   ["#payslip-base-salary", "320000"],
   ["#payslip-location-allowance", "20000"],
-  ["#payslip-commute", "12309"],
+  ["#payslip-commute", "12000"],
   ["#payslip-overtime-pay", "10000"],
   ["#payslip-housing", "30000"],
   ["#payslip-health-insurance", "16000"],
@@ -109,7 +109,7 @@ const cardPath = path.join(scratch, "book-card.csv");
 fs.writeFileSync(
   cardPath,
   [
-    "宇津木　武　様,4980-09**-****-****,Ｏｌｉｖｅ／クレジット",
+    "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
     `${CUR_Y}/${MM}/08,ＢＯＯＴＨ,900,１,１,900,`,
     ",,,,,900,",
   ].join("\n"),
@@ -126,7 +126,7 @@ await page.waitForTimeout(400);
 const pl = await bookText("pl");
 console.log("P/L:", pl);
 // 総支給が収益に立つ (手取りではない)
-if (!pl.includes("給与¥362,309")) throw new Error("総支給を収益に立てるはず: " + pl);
+if (!pl.includes("給与¥362,000")) throw new Error("総支給を収益に立てるはず: " + pl);
 // 控除は簿記の科目に振り分ける
 if (!pl.includes("法定福利費¥48,000")) throw new Error("社会保険料は法定福利費: " + pl);
 if (!pl.includes("租税公課¥20,000")) throw new Error("所得税+住民税は租税公課: " + pl);
@@ -134,11 +134,11 @@ if (!pl.includes("租税公課¥20,000")) throw new Error("所得税+住民税�
 if (pl.includes("投資信託")) throw new Error("貯蓄・投資を費用に入れてはいけない: " + pl);
 // 費用合計 = 法定福利費48,000 + 住居30,000 + 租税公課20,000 + 食費3,000 + 趣味900
 if (!pl.includes("費用合計¥101,900")) throw new Error("費用合計が違う: " + pl);
-if (!pl.includes("当期純利益¥260,409")) throw new Error("当期純利益が違う: " + pl);
+if (!pl.includes("当期純利益¥260,100")) throw new Error("当期純利益が違う: " + pl);
 
 // 当期純利益は上の収支カードと一致する (見方を変えただけで別の数字にならない)
 const balanceCard = (await page.textContent("#balance")).trim();
-if (balanceCard !== "¥260,409") {
+if (balanceCard !== "¥260,100") {
   throw new Error(`当期純利益と収支カードは一致するはず: ${balanceCard}`);
 }
 
@@ -188,7 +188,7 @@ if (!save.includes("投資信託") || !save.includes("銀行口座")) throw new 
 // 給与: 複合仕訳。借方に受取額と控除、貸方に総支給
 const salary = await entryText("今月の給与");
 console.log("給与の仕訳:", salary);
-for (const expected of ["銀行口座", "¥294,309", "法定福利費", "¥48,000", "租税公課", "¥20,000", "給与", "¥362,309"]) {
+for (const expected of ["銀行口座", "¥294,000", "法定福利費", "¥48,000", "租税公課", "¥20,000", "給与", "¥362,000"]) {
   if (!salary.includes(expected)) throw new Error(`給与の複合仕訳に ${expected} が無い: ` + salary);
 }
 if (!salary.includes("寮社宅費")) throw new Error("寮社宅費の扱いを説明するはず: " + salary);
@@ -244,20 +244,20 @@ console.log("B/S:", bs);
 
 // 現金 = 50,000 − 食費3,000 − 交際費(立替)5,000 = 42,000
 if (!bs.includes("現金¥42,000")) throw new Error("現金の残高が違う: " + bs);
-// 銀行 = 800,000 − 積立20,000 + 給与294,309 − 住居30,000 − 期首カード30,000 = 1,014,309
-if (!bs.includes("銀行口座¥1,014,309")) throw new Error("銀行口座の残高が違う: " + bs);
+// 銀行 = 800,000 − 積立20,000 + 給与294,000 − 住居30,000 − 期首カード30,000 = 1,014,000
+if (!bs.includes("銀行口座¥1,014,000")) throw new Error("銀行口座の残高が違う: " + bs);
 // 投資信託 = 300,000 + 20,000
 if (!bs.includes("投資信託¥320,000")) throw new Error("投資資産の残高が違う: " + bs);
 // 未払金 = 期首30,000 − 引き落とし30,000 + 今月のカード利用900 = 900
 // (末日締め翌月26日払いなので、今月の利用はまだ引き落とされていない)
 if (!bs.includes("未払金¥900")) throw new Error("カード未払金が違う: " + bs);
-if (!bs.includes("純資産 (資産 − 負債)¥1,375,409")) throw new Error("純資産が違う: " + bs);
+if (!bs.includes("純資産 (資産 − 負債)¥1,375,100")) throw new Error("純資産が違う: " + bs);
 
 // 期首純資産 + 当期純利益 = 期末純資産 になっている (貸借対照表と損益計算書の連携)
 // 期首純資産 = 50,000+800,000+300,000−30,000 = 1,120,000
-// 記録は全部今月なので、当期純利益 255,409 を足すと 1,375,409
+// 記録は全部今月なので、当期純利益 255,100 を足すと 1,375,100
 const plAfter = await bookText("pl");
-if (!plAfter.includes("当期純利益¥255,409")) throw new Error("当期純利益が違う: " + plAfter);
+if (!plAfter.includes("当期純利益¥255,100")) throw new Error("当期純利益が違う: " + plAfter);
 
 // 給与天引きの家賃は現金を通らない (持っていない現金が減らないこと)
 await page.click('.book-tab[data-book="journal"]');
@@ -307,7 +307,7 @@ const oldCardCsv = path.join(scratch, "book-card-before-opening.csv");
 fs.writeFileSync(
   oldCardCsv,
   [
-    "宇津木　武　様,4980-09**-****-****,Ｏｌｉｖｅ／クレジット",
+    "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
     `${CUR_Y - 1}/12/20,ヨドバシカメラ,25000,１,１,25000,`,
     ",,,,,25000,",
   ].join("\n"),
@@ -320,13 +320,13 @@ await page.waitForTimeout(500);
 
 const bsAfterOld = await bookText("bs");
 console.log("期首前のカード利用を足したあと:", bsAfterOld);
-if (!bsAfterOld.includes("銀行口座¥1,174,309")) {
+if (!bsAfterOld.includes("銀行口座¥1,174,000")) {
   throw new Error("期首前の利用で口座残高が動いてはいけない: " + bsAfterOld);
 }
 if (!bsAfterOld.includes("未払金¥900")) {
   throw new Error("期首前の利用で未払金が動いてはいけない: " + bsAfterOld);
 }
-if (!bsAfterOld.includes("純資産 (資産 − 負債)¥1,535,409")) {
+if (!bsAfterOld.includes("純資産 (資産 − 負債)¥1,535,100")) {
   throw new Error("期首前の利用で純資産が動いてはいけない: " + bsAfterOld);
 }
 

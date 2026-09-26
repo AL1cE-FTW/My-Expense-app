@@ -65,7 +65,7 @@ function normalizeLabel(text) {
     .replace(/）/g, ")");
 }
 
-// "281,200" "281,200円" "¥281,200" "▲1,000" (マイナス) "２８１２００" などを数にする
+// "250,000" "250,000円" "¥250,000" "▲1,000" (マイナス) "２５００００" などを数にする
 export function parseAmount(text) {
   const s = String(text || "")
     .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
@@ -338,7 +338,7 @@ function bookmarkletBody(appUrl) {
       if (!t || t.length > 30) continue;
       /* 「支給」「控除」などの見出し。この下にある項目がどちらかを家計簿に伝える */
       if (SECTION.test(t.replace(/[\s\u3000]/g, ""))) { section = t.replace(/[\s\u3000]/g, ""); continue; }
-      /* 1つの要素に「本給 281,200」のように並んでいる形 */
+      /* 1つの要素に「本給 250,000」のように並んでいる形 */
       var same = t.match(/^(\D{1,20}?)[\s:：]+([▲△－−-]?[¥￥]?[\d,，]{1,13}円?)$/);
       if (same) { pairs.push([same[1], same[2], section]); continue; }
       if (isValue(t)) continue;
