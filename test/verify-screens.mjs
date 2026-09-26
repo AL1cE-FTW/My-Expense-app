@@ -290,6 +290,56 @@ if (desktopDonut.leftGap > 2 || !desktopDonut.sameRow) {
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(300);
 
+// --- スマホ幅で入力欄の高さと縦位置が揃っている ---
+// 日付39.2px・選択39px・数値37px・種別トグル43px とバラバラだと、横に並べた
+// ときに下端が数pxずつずれて「なんとなく斜め」に見える。
+const controls = await page.evaluate(() => {
+  const pick = (sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return { top: +r.top.toFixed(1), bottom: +r.bottom.toFixed(1), height: +r.height.toFixed(1) };
+  };
+  return {
+    日付: pick("#entry-date"),
+    種別: pick(".type-toggle"),
+    カテゴリ: pick("#entry-category"),
+    金額: pick("#entry-amount"),
+    口座: pick("#entry-settlement"),
+  };
+});
+console.log("入力欄:", JSON.stringify(controls));
+const heights = new Set(Object.values(controls).map((c) => c.height));
+if (heights.size !== 1) {
+  throw new Error("入力欄の高さは揃っているはず: " + JSON.stringify(controls));
+}
+if (controls.日付.top !== controls.種別.top || controls.日付.bottom !== controls.種別.bottom) {
+  throw new Error("横に並ぶ欄は上端も下端も揃うはず: " + JSON.stringify(controls));
+}
+if (controls.カテゴリ.top !== controls.金額.top || controls.カテゴリ.bottom !== controls.金額.bottom) {
+  throw new Error("カテゴリと金額が揃っていない: " + JSON.stringify(controls));
+}
+
+// --- スマホ幅で指で押せる大きさがある ---
+const tiny = await page.evaluate(() => {
+  const out = [];
+  for (const sel of ["#prev-month", "#next-month", "#today-btn", "#submit-btn",
+                     '.view-tab', ".advance-checkbox"]) {
+    const e = document.querySelector(sel);
+    const r = e.getBoundingClientRect();
+    if (r.height < 44) out.push(`${sel}: ${Math.round(r.width)}x${Math.round(r.height)}`);
+  }
+  return out;
+});
+if (tiny.length) throw new Error("よく押すものは44px以上にするはず: " + tiny.join(", "));
+
+// --- よく使う2つが上のほうにある ---
+const order = await page.evaluate(() => {
+  const top = (sel) => Math.round(document.querySelector(sel).getBoundingClientRect().top + window.scrollY);
+  return { 入力: top("#entry-form-slot"), 一覧: top("#list-section"), 予算: top("#budget-section") };
+});
+console.log("位置:", JSON.stringify(order));
+if (order.一覧 > order.予算) throw new Error("記録一覧は予算より上にあるはず: " + JSON.stringify(order));
+if (order.入力 > 700) throw new Error("入力フォームが下すぎる: " + JSON.stringify(order));
+
 await page.screenshot({ path: path.join(scratch, "screens.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL SCREEN/NAVIGATION CHECKS PASSED");

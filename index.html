@@ -81,12 +81,12 @@
       <div class="sidebar-brand"><span data-icon="notebook-pen"></span>家計簿</div>
       <div class="sidebar-nav-label">セクション</div>
       <a class="sidebar-link" href="#summary-section">概要</a>
+      <a class="sidebar-link" href="#list-section">記録一覧</a>
       <a class="sidebar-link" href="#budget-section">予算</a>
       <a class="sidebar-link" href="#plan-actual-section">予定と実績</a>
       <a class="sidebar-link" href="#advance-section">立替金</a>
       <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
       <a class="sidebar-link" href="#bookkeeping-section">帳簿 (簿記)</a>
-      <a class="sidebar-link" href="#list-section">記録一覧</a>
     </nav>
     <div class="app-content">
     <header class="app-header">
@@ -327,6 +327,56 @@
         </form>
       </section>
 
+      <!-- 記録一覧 -->
+      <section class="card" id="list-section">
+        <div class="list-header">
+          <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
+          <div class="csv-actions">
+            <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
+            <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
+            <button class="btn btn-secondary btn-small" id="export-analysis-btn"
+                    title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用">分析用に書き出す</button>
+            <!-- ファイル入力自体は display:none でフォーカスできないため、
+                 ボタンから開く (label だけだとキーボードで到達できない) -->
+            <button class="btn btn-secondary btn-small" id="import-csv-btn">CSVインポート</button>
+            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden" tabindex="-1" aria-hidden="true">
+          </div>
+        </div>
+        <p id="list-pending-note" class="list-pending-note hidden"></p>
+        <div class="list-filters">
+          <select id="filter-type" class="filter-select" aria-label="種別で絞り込み">
+            <option value="all">すべての種別</option>
+            <option value="expense">支出</option>
+            <option value="income">収入</option>
+            <option value="save">貯蓄</option>
+          </select>
+          <select id="filter-category" class="filter-select" aria-label="カテゴリで絞り込み">
+            <option value="all">すべてのカテゴリ</option>
+          </select>
+          <input type="date" id="filter-date" class="filter-select" aria-label="この日だけ表示">
+          <button type="button" class="btn btn-secondary btn-small hidden" id="filter-date-clear">
+            日付の絞り込みを解除
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="entry-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="date" aria-sort="none"><button type="button" class="sort-btn">日付</button></th>
+                <th class="sortable" data-sort="type" aria-sort="none"><button type="button" class="sort-btn">種別</button></th>
+                <th class="sortable" data-sort="category" aria-sort="none"><button type="button" class="sort-btn">カテゴリ</button></th>
+                <th class="sortable amount-col" data-sort="amount" aria-sort="none"><button type="button" class="sort-btn">金額</button></th>
+                <th>メモ</th>
+                <th class="sortable" data-sort="createdAt" aria-sort="none"><button type="button" class="sort-btn">登録日</button></th>
+                <th><span class="visually-hidden">操作</span></th>
+              </tr>
+            </thead>
+            <tbody id="entry-list"></tbody>
+          </table>
+          <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
+        </div>
+      </section>
+
       <!-- 予算 -->
       <section class="card" id="budget-section">
         <div class="list-header">
@@ -470,55 +520,6 @@
         <p class="book-note" id="bookkeeping-note"></p>
       </section>
 
-      <!-- 記録一覧 -->
-      <section class="card" id="list-section">
-        <div class="list-header">
-          <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
-          <div class="csv-actions">
-            <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
-            <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
-            <button class="btn btn-secondary btn-small" id="export-analysis-btn"
-                    title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用">分析用に書き出す</button>
-            <!-- ファイル入力自体は display:none でフォーカスできないため、
-                 ボタンから開く (label だけだとキーボードで到達できない) -->
-            <button class="btn btn-secondary btn-small" id="import-csv-btn">CSVインポート</button>
-            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden" tabindex="-1" aria-hidden="true">
-          </div>
-        </div>
-        <p id="list-pending-note" class="list-pending-note hidden"></p>
-        <div class="list-filters">
-          <select id="filter-type" class="filter-select" aria-label="種別で絞り込み">
-            <option value="all">すべての種別</option>
-            <option value="expense">支出</option>
-            <option value="income">収入</option>
-            <option value="save">貯蓄</option>
-          </select>
-          <select id="filter-category" class="filter-select" aria-label="カテゴリで絞り込み">
-            <option value="all">すべてのカテゴリ</option>
-          </select>
-          <input type="date" id="filter-date" class="filter-select" aria-label="この日だけ表示">
-          <button type="button" class="btn btn-secondary btn-small hidden" id="filter-date-clear">
-            日付の絞り込みを解除
-          </button>
-        </div>
-        <div class="table-wrapper">
-          <table class="entry-table">
-            <thead>
-              <tr>
-                <th class="sortable" data-sort="date" aria-sort="none"><button type="button" class="sort-btn">日付</button></th>
-                <th class="sortable" data-sort="type" aria-sort="none"><button type="button" class="sort-btn">種別</button></th>
-                <th class="sortable" data-sort="category" aria-sort="none"><button type="button" class="sort-btn">カテゴリ</button></th>
-                <th class="sortable amount-col" data-sort="amount" aria-sort="none"><button type="button" class="sort-btn">金額</button></th>
-                <th>メモ</th>
-                <th class="sortable" data-sort="createdAt" aria-sort="none"><button type="button" class="sort-btn">登録日</button></th>
-                <th><span class="visually-hidden">操作</span></th>
-              </tr>
-            </thead>
-            <tbody id="entry-list"></tbody>
-          </table>
-          <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
-        </div>
-      </section>
     </main>
 
     <footer class="app-footer">

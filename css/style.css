@@ -1,4 +1,7 @@
 :root {
+  /* 入力欄・ボタンの高さ。種類ごとに既定の高さが違って数pxずつずれるので、
+     ここで揃える。スマホでは指で押せる大きさ (iOSの目安44px) にする */
+  --control-height: 40px;
   --color-bg: #f4f6f8;
   --color-surface: #ffffff;
   --color-text: #2c3e50;
@@ -373,6 +376,8 @@ html {
 
 .type-fieldset legend {
   padding: 0;
+  /* .form-group の gap と同じ間隔にする。これが無いと種別だけ4px上にずれる */
+  margin-bottom: 4px;
   font-size: 0.82rem;
   color: var(--color-text-muted);
 }
@@ -409,6 +414,9 @@ html {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+  /* 高さを明示しないと、日付39.2px・選択39px・数値37px とバラバラになり、
+     横に並べたときに下端が数pxずつずれる */
+  height: var(--control-height);
 }
 
 .form-group input:focus,
@@ -422,6 +430,8 @@ html {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   overflow: hidden;
+  height: var(--control-height);
+  box-sizing: border-box;
 }
 
 .type-option {
@@ -1378,6 +1388,7 @@ body.modal-open {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  height: var(--control-height);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 7px 10px;
@@ -1679,9 +1690,100 @@ body.modal-open {
 }
 
 /* スマホ対応 */
+@media (max-width: 768px) {
+  /* 指で押せる大きさにする (iOSの目安は44px)。
+     今まではヘッダーのボタンが32〜36pxで、隣同士も近く押しにくかった */
+  :root {
+    --control-height: 44px;
+  }
+
+  .view-tab,
+  .today-btn,
+  .nav-btn,
+  .auth-tab {
+    min-height: 44px;
+  }
+
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* 一覧の操作や編集ボタンまで44pxにすると縦に伸びすぎるので、
+     押せる下限として40pxにとどめる */
+  .btn-small,
+  .icon-btn {
+    min-height: 40px;
+  }
+
+  /* ヘッダーは中身が多く、折り返すと3段(159px)になって画面の2割を占めていた。
+     2段に収める: 1段目に見出しとログアウト、2段目に表示切替と月の移動。 */
+  .app-header {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+
+  /* 1段目: 見出し / 月別・年間 / ログアウト
+     2段目: 月の移動 (「2026年9月」の表示に幅が要るので1段まるごと使う) */
+  .app-header h1 {
+    order: 1;
+    font-size: 1.1rem;
+  }
+
+  .view-toggle {
+    order: 2;
+  }
+
+  .user-bar {
+    order: 3;
+  }
+
+  /* メールアドレスは1段目に入りきらない。どのアカウントかはPC表示で確認できる */
+  .user-email {
+    display: none;
+  }
+
+  .month-nav {
+    order: 4;
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+
+  /* 立替のチェックは16pxしかなく、指では狙いにくい。
+     チェック自体を大きくし、文字も含めて押せる高さを確保する */
+  .advance-checkbox {
+    min-height: 44px;
+  }
+
+  .advance-checkbox input {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* 「追加」は一番よく押すボタンなのに74pxしか無かった。
+     横幅いっぱいまで広げる (編集中は「キャンセル」と半分ずつになる) */
+  .form-actions .btn {
+    min-height: 44px;
+    flex: 1;
+  }
+
+  /* カードの間隔と外側の余白を詰める */
+  .container {
+    padding: 14px 16px;
+    gap: 14px;
+  }
+}
+
 @media (max-width: 600px) {
+  /* 収入・支出・収支・貯蓄を縦1列にすると4枚で360px使ってしまう。
+     数字4つのために画面半分は使いすぎなので2×2にする */
   .summary-cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .summary-cards .card {
+    padding: 12px 8px;
   }
 
   .card-value {
