@@ -206,9 +206,15 @@
           </div>
 
           <div class="payslip-section hidden" id="payslip-section">
-            <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">
-              給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)
-            </button>
+            <div class="payslip-actions">
+              <!-- 前回の明細があるときだけ出す。ほとんどの欄は毎月同じなので、
+                   引き継いでから変わった欄だけ直すのが一番早い -->
+              <button type="button" class="btn btn-primary btn-small hidden" id="payslip-copy-prev-btn"></button>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">
+                給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)
+              </button>
+            </div>
+            <p id="payslip-copy-note" class="payslip-copy-note hidden" role="status"></p>
             <div class="payslip-breakdown hidden" id="payslip-breakdown">
               <div id="payslip-salary-fields">
                 <p class="payslip-group-label">支給</p>

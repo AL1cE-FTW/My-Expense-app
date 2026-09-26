@@ -300,6 +300,8 @@ const el = {
   cardPaymentMonths: document.getElementById("card-payment-months"),
   cancelAccountsBtn: document.getElementById("cancel-accounts-btn"),
   entrySettlement: document.getElementById("entry-settlement"),
+  payslipCopyPrevBtn: document.getElementById("payslip-copy-prev-btn"),
+  payslipCopyNote: document.getElementById("payslip-copy-note"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
   totalIncome: document.getElementById("total-income"),
@@ -615,6 +617,7 @@ function render() {
   renderAdvances();
   renderNeedWantSave(entriesInPeriod, targetMultiplier);
   renderBookkeeping(entriesInPeriod);
+  updatePayslipCopyButton();
   renderList(entriesInPeriod);
 }
 
@@ -2794,6 +2797,7 @@ function closePayslipBreakdown({ clearValues = true } = {}) {
   el.payslipBreakdown.classList.add("hidden");
   el.payslipToggleBtn.classList.remove("hidden");
   el.entryAmount.readOnly = false;
+  el.payslipCopyNote.classList.add("hidden");
   if (clearValues) {
     for (const input of allPayslipInputEls()) input.value = "";
   }
@@ -2815,6 +2819,74 @@ function updatePayslipVisibility() {
     mode === "bonus"
       ? "賞与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)"
       : "給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)";
+  updatePayslipCopyButton();
+}
+
+// --- 前回の明細を引き継ぐ ----------------------------------------------------
+//
+// 本給・手当・寮社宅費・社会保険料はほぼ毎月同じで、変わるのは残業代や所得税
+// くらい。毎月13欄を打ち直すのではなく、前回の値を入れて変わった欄だけ直す。
+
+/**
+ * 引き継ぎ元にする明細。入力中の日付より前で一番新しい、同じ種類
+ * (給与なら給与、賞与なら賞与) のもの。前が無ければ一番新しいもの。
+ * 編集中の記録自身は除く。旧形式 (総支給額・社会保険料をまとめて持つ) は
+ * 今の欄に割り振れないので使わない。
+ */
+function previousPayslipEntry(mode) {
+  const editingId = el.entryId.value;
+  const formDate = el.entryDate.value || toDateInputValue(new Date());
+  const candidates = entries.filter((e) => {
+    if (e.id === editingId || e.type !== "income" || !e.payslip) return false;
+    if (mode === "bonus") return e.payslip.kind === "bonus";
+    return e.payslip.kind !== "bonus" && e.payslip.baseSalary !== undefined;
+  });
+  if (candidates.length === 0) return null;
+
+  const newestFirst = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  const before = candidates.filter((e) => e.date < formDate).sort(newestFirst);
+  return before[0] || candidates.sort(newestFirst)[0];
+}
+
+function updatePayslipCopyButton() {
+  if (el.payslipSection.classList.contains("hidden")) return;
+  const prev = previousPayslipEntry(payslipMode());
+  el.payslipCopyPrevBtn.classList.toggle("hidden", !prev);
+  if (!prev) return;
+  const [, m, d] = prev.date.split("-");
+  el.payslipCopyPrevBtn.textContent = `前回 (${Number(m)}/${Number(d)}) の明細を引き継ぐ`;
+}
+
+function copyPreviousPayslip() {
+  const mode = payslipMode();
+  const prev = previousPayslipEntry(mode);
+  if (!prev) return;
+
+  const fields = [...payslipEarningFields(mode), ...payslipDeductionFields(mode)];
+  const breakdownOpen = !el.payslipBreakdown.classList.contains("hidden");
+  const hasInput = breakdownOpen && fields.some((f) => payslipInputEl(f, mode).value !== "");
+  if (hasInput && !confirm("入力済みの内訳を、前回の明細の値で上書きします。よろしいですか?")) {
+    return;
+  }
+
+  if (!breakdownOpen) openPayslipBreakdown();
+  for (const field of fields) {
+    const value = prev.payslip[field];
+    payslipInputEl(field, mode).value = value ? String(value) : "";
+  }
+  updatePayslipPreview();
+
+  let note =
+    `${formatDateLabel(prev.date)}の明細の値を入れました。` +
+    (mode === "bonus"
+      ? "今回の賞与額と、それに応じて変わる控除を直してください。"
+      : "今月変わった欄 (残業代・所得税など) だけ直してください。");
+  // 住民税は6月から新しい年度の金額に切り替わる (特別徴収)
+  if (mode === "salary" && el.entryDate.value.slice(5, 7) === "06") {
+    note += "6月は住民税の金額が切り替わる月なので、住民税も確認してください。";
+  }
+  el.payslipCopyNote.textContent = note;
+  el.payslipCopyNote.classList.remove("hidden");
 }
 
 // 立替払いのチェックボックスは「支出」のときだけ出す
@@ -4576,6 +4648,8 @@ function setupAppEventListeners() {
 
   el.entryCategory.addEventListener("change", updatePayslipVisibility);
   el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
+  el.payslipCopyPrevBtn.addEventListener("click", copyPreviousPayslip);
+  el.entryDate.addEventListener("change", updatePayslipCopyButton);
   el.payslipClearBtn.addEventListener("click", () => closePayslipBreakdown());
   for (const input of allPayslipInputEls()) {
     input.addEventListener("input", updatePayslipPreview);
