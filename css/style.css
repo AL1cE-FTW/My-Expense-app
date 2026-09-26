@@ -494,6 +494,46 @@ html {
   gap: 8px;
 }
 
+/* 給与サイトから読み込んだときの検算結果。1行ずつ並べる */
+.import-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.import-check .icon {
+  margin-top: 0.25em;
+}
+
+.import-check.ok {
+  color: var(--color-income);
+}
+
+.import-check.ng {
+  color: var(--color-expense);
+}
+
+.setup-steps {
+  margin: 0 0 12px 1.2em;
+  font-size: 0.85rem;
+  line-height: 1.8;
+}
+
+.setup-code {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  resize: none;
+  margin-bottom: 10px;
+}
+
 .payslip-copy-note {
   margin: 10px 0 0;
   padding: 8px 10px;

@@ -1,8 +1,29 @@
 import { createIcon, hydrateIcons } from "./icons.js";
+import {
+  PAYSLIP_IMPORT_HASH,
+  buildBookmarklet,
+  interpretPayslipImport,
+} from "./payslip-import.js";
 
 // このファイルが評価まで到達したことの合図。index.html の見張りが見ている。
 // (import しているファイルが1つでも読めないと、ここより下は一切動かない)
 window.__appScriptLoaded = true;
+
+// 給与サイトのブックマークレットから渡された明細 (URL の # 以降)。
+// フォームに入れるのはログインが済んでから。それまで預かっておき、
+// URL からはすぐ消す (アドレスバーに明細の数字を出しっぱなしにしない)。
+let pendingPayslipImport = takePayslipImportFromUrl();
+
+function takePayslipImportFromUrl() {
+  if (!location.hash.startsWith(PAYSLIP_IMPORT_HASH)) return null;
+  const raw = location.hash.slice(PAYSLIP_IMPORT_HASH.length);
+  history.replaceState(null, "", location.pathname + location.search);
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch {
+    return { invalid: true };
+  }
+}
 
 "use strict";
 
@@ -94,10 +115,13 @@ const PAYSLIP_SALARY_EARNING_FIELDS = [
   "overtimePay",
   "salaryAdjustment",
 ];
+// 子ども支援金 (子ども・子育て支援金) は2026年から給与でも天引きされる。
+// 欄が無いと明細どおりに入れても手取りが合わず、その分だけ収入が多く記録されていた。
 const PAYSLIP_SALARY_DEDUCTION_FIELDS = [
   "housing",
   "healthInsurance",
   "nursingInsurance",
+  "childSupportLevy",
   "pensionInsurance",
   "employmentInsurance",
   "incomeTax",
@@ -301,6 +325,12 @@ const el = {
   cancelAccountsBtn: document.getElementById("cancel-accounts-btn"),
   entrySettlement: document.getElementById("entry-settlement"),
   payslipCopyPrevBtn: document.getElementById("payslip-copy-prev-btn"),
+  payslipLinkBtn: document.getElementById("payslip-link-btn"),
+  payslipLinkModal: document.getElementById("payslip-link-modal"),
+  payslipLinkClose: document.getElementById("payslip-link-close"),
+  payslipLinkCode: document.getElementById("payslip-link-code"),
+  payslipLinkCopy: document.getElementById("payslip-link-copy"),
+  payslipLinkDrag: document.getElementById("payslip-link-drag"),
   payslipCopyNote: document.getElementById("payslip-copy-note"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
@@ -340,6 +370,7 @@ const el = {
   payslipOvertimePay: document.getElementById("payslip-overtime-pay"),
   payslipHealthInsurance: document.getElementById("payslip-health-insurance"),
   payslipNursingInsurance: document.getElementById("payslip-nursing-insurance"),
+  payslipChildSupport: document.getElementById("payslip-child-support"),
   payslipPensionInsurance: document.getElementById("payslip-pension-insurance"),
   payslipEmploymentInsurance: document.getElementById("payslip-employment-insurance"),
   payslipIncomeTax: document.getElementById("payslip-income-tax"),
@@ -454,6 +485,7 @@ function showApp(user) {
   closeBudgetForm();
   closeIncomeBudgetForm();
   closeAccountsForm();
+  applyPendingPayslipImport();
 }
 
 // ---------------------------------------------------------------------------
@@ -2642,6 +2674,7 @@ function showPayslipDetailModal(entry) {
       payslipModalRow("寮社宅費", p.housing || 0),
       payslipModalRow("健康保険", p.healthInsurance || 0),
       payslipModalRow("介護保険", p.nursingInsurance || 0),
+      payslipModalRow("子ども支援金", p.childSupportLevy || 0),
       payslipModalRow("厚生年金", p.pensionInsurance || 0),
       payslipModalRow("雇用保険料", p.employmentInsurance || 0),
       payslipModalRow("所得税", p.incomeTax || 0),
@@ -2703,6 +2736,7 @@ const PAYSLIP_SALARY_INPUT_MAP = {
   housing: () => el.payslipHousing,
   healthInsurance: () => el.payslipHealthInsurance,
   nursingInsurance: () => el.payslipNursingInsurance,
+  childSupportLevy: () => el.payslipChildSupport,
   pensionInsurance: () => el.payslipPensionInsurance,
   employmentInsurance: () => el.payslipEmploymentInsurance,
   incomeTax: () => el.payslipIncomeTax,
@@ -2820,6 +2854,82 @@ function updatePayslipVisibility() {
       ? "賞与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)"
       : "給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)";
   updatePayslipCopyButton();
+}
+
+// --- 給与サイトから取り込む --------------------------------------------------
+
+/**
+ * ブックマークレットから受け取った明細をフォームに入れる。保存はしない。
+ * 受け取った内容は外から来たもの (URL を作れば誰でも渡せる) なので、
+ * interpretPayslipImport() で形を確かめた値だけを使い、文字は必ず
+ * textContent / value で入れる (HTML として解釈させない)。
+ */
+function applyPendingPayslipImport() {
+  const payload = pendingPayslipImport;
+  pendingPayslipImport = null;
+  if (!payload) return;
+
+  const result = payload.invalid ? null : interpretPayslipImport(payload);
+  if (!result) {
+    alert(
+      "給与サイトから受け取った内容を、給与明細として読み取れませんでした。\n\n" +
+        "明細の画面を開いた状態でもう一度ブックマークを押すか、内訳を手で入力してください。"
+    );
+    return;
+  }
+
+  const mode = result.kind;
+  document.querySelector('input[name="entry-type"][value="income"]').checked = true;
+  renderCategoryOptions("income", mode === "bonus" ? BONUS_CATEGORY : PAYSLIP_CATEGORY);
+  updateAdvanceVisibility();
+  if (result.date) el.entryDate.value = result.date;
+  // 給与は口座に振り込まれる
+  el.entrySettlement.value = "bank";
+  updatePayslipVisibility();
+
+  openPayslipBreakdown();
+  for (const field of [...payslipEarningFields(mode), ...payslipDeductionFields(mode)]) {
+    const value = result.fields[field];
+    payslipInputEl(field, mode).value = value !== undefined ? String(value) : "";
+  }
+  updatePayslipPreview();
+  el.entryMemo.value = result.memo;
+
+  // 何を読み取ったか・合っているかを並べて見せる
+  const note = el.payslipCopyNote;
+  note.replaceChildren(
+    "給与サイトから明細を読み込みました。内容を確認して「追加」を押してください。"
+  );
+  for (const check of result.checks) {
+    const line = document.createElement("span");
+    line.className = check.ok ? "import-check ok" : "import-check ng";
+    line.append(createIcon(check.ok ? "check" : "triangle-alert"), check.text);
+    note.appendChild(line);
+  }
+  note.classList.remove("hidden");
+  el.payslipSection.scrollIntoView({ block: "center" });
+}
+
+function openPayslipLinkModal() {
+  const appUrl = location.origin + location.pathname;
+  const code = buildBookmarklet(appUrl);
+  el.payslipLinkCode.value = code;
+  el.payslipLinkDrag.href = code;
+  el.payslipLinkCopy.textContent = "コードをコピー";
+  openModal(el.payslipLinkModal, el.payslipLinkClose);
+}
+
+async function copyPayslipLinkCode() {
+  const code = el.payslipLinkCode.value;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch {
+    // クリップボードが使えないブラウザでは、選択してコピーしてもらう
+    el.payslipLinkCode.focus();
+    el.payslipLinkCode.select();
+    document.execCommand("copy");
+  }
+  el.payslipLinkCopy.textContent = "コピーしました";
 }
 
 // --- 前回の明細を引き継ぐ ----------------------------------------------------
@@ -4649,6 +4759,15 @@ function setupAppEventListeners() {
   el.entryCategory.addEventListener("change", updatePayslipVisibility);
   el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
   el.payslipCopyPrevBtn.addEventListener("click", copyPreviousPayslip);
+  el.payslipLinkBtn.addEventListener("click", openPayslipLinkModal);
+  el.payslipLinkClose.addEventListener("click", () => closeModal(el.payslipLinkModal));
+  el.payslipLinkCopy.addEventListener("click", copyPayslipLinkCode);
+  // このページの上で押しても意味が無い (給与サイトで使うもの) ので、
+  // うっかり押したら使い方を伝える。ドラッグしてブックマークにするのは妨げない
+  el.payslipLinkDrag.addEventListener("click", (event) => {
+    event.preventDefault();
+    alert("このリンクはブックマークバーにドラッグして登録し、給与サイトの明細画面で押してください。");
+  });
   el.entryDate.addEventListener("change", updatePayslipCopyButton);
   el.payslipClearBtn.addEventListener("click", () => closePayslipBreakdown());
   for (const input of allPayslipInputEls()) {

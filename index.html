@@ -213,6 +213,9 @@
               <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">
                 給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)
               </button>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-link-btn">
+                給与サイトから読み込む (設定)
+              </button>
             </div>
             <p id="payslip-copy-note" class="payslip-copy-note hidden" role="status"></p>
             <div class="payslip-breakdown hidden" id="payslip-breakdown">
@@ -255,6 +258,10 @@
                   <div class="form-group">
                     <label for="payslip-nursing-insurance">介護保険</label>
                     <input type="number" id="payslip-nursing-insurance" min="0" step="1" placeholder="0">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-child-support">子ども支援金</label>
+                    <input type="number" id="payslip-child-support" min="0" step="1" placeholder="0">
                   </div>
                   <div class="form-group">
                     <label for="payslip-pension-insurance">厚生年金</label>
@@ -550,6 +557,35 @@
       <button type="button" class="modal-close" id="payslip-detail-close" aria-label="閉じる">×</button>
       <h3 class="modal-title" id="payslip-detail-title">給与明細の内訳</h3>
       <div id="payslip-detail-content"></div>
+    </div>
+  </div>
+
+  <!-- 給与サイトから読み込むためのブックマークレットの設定 -->
+  <div class="modal-overlay hidden" id="payslip-link-modal">
+    <div class="modal-box modal-box-wide" role="dialog" aria-modal="true" aria-labelledby="payslip-link-title">
+      <button type="button" class="modal-close" id="payslip-link-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="payslip-link-title">給与サイトから読み込む</h3>
+      <p class="book-form-note">
+        給与サイトで明細の画面を開いた状態でブックマークを押すと、明細の数字を拾って
+        この家計簿のフォームに入れます。保存はされないので、確認してから「追加」を押してください。
+        給与サイトにはいつもどおりログインして使うので、パスワードを家計簿に預ける必要はありません。
+      </p>
+      <p class="payslip-group-label">最初に1回だけ: ブックマークに登録する</p>
+      <ol class="setup-steps">
+        <li>下の「コードをコピー」を押す</li>
+        <li>このページをブックマークに追加する</li>
+        <li>追加したブックマークを編集し、名前を「家計簿に取り込む」に、URLをコピーしたコードに置き換える</li>
+      </ol>
+      <textarea id="payslip-link-code" class="setup-code" readonly rows="3" aria-label="ブックマークに登録するコード"></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="payslip-link-copy">コードをコピー</button>
+      </div>
+      <p class="payslip-group-label">毎月: 明細の画面で押す</p>
+      <ul class="setup-steps">
+        <li>iPhone の Safari: ブックマーク一覧から「家計簿に取り込む」を選ぶ</li>
+        <li>iPhone の Chrome: アドレスバーに「家計簿に取り込む」と入力し、候補に出たブックマークを選ぶ (動かない場合は Safari で)</li>
+        <li>PC: このリンクをブックマークバーにドラッグして登録し、明細の画面で押す → <a id="payslip-link-drag" href="#">家計簿に取り込む</a></li>
+      </ul>
     </div>
   </div>
 
