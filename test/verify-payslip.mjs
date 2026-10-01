@@ -214,12 +214,29 @@ await page.click("#today-btn");
 await page.waitForTimeout(300);
 
 // ---------------------------------------------------------------------------
-// 5. 編集で開くと内訳が復元され、ポップアップの中で編集できる
+// 5. 編集で開くと内訳が復元され、その場で編集できる
+//    (PCの幅では右側の入力欄で、狭い画面ではポップアップで)
 // ---------------------------------------------------------------------------
 const bonusRow = page.locator("#entry-list tr", { hasText: "夏の賞与" });
 await bonusRow.locator("button", { hasText: "編集" }).click();
 await page.waitForTimeout(400);
-if (!(await page.locator("#entry-edit-modal").isVisible())) {
+const editState = await page.evaluate(() => {
+  const slot = document.getElementById("entry-form-slot");
+  const rect = slot.getBoundingClientRect();
+  return {
+    modal: !document.getElementById("entry-edit-modal").classList.contains("hidden"),
+    rail: slot.classList.contains("is-editing"),
+    railInView: rect.top < innerHeight && rect.bottom > 0,
+    title: document.getElementById("form-title").textContent,
+    rowMarked: !!document.querySelector("#entry-list tr.is-editing"),
+  };
+});
+const wide = (page.viewportSize()?.width ?? 1280) >= 1200;
+if (wide) {
+  if (editState.modal || !editState.rail || !editState.railInView || editState.title !== "記録を編集" || !editState.rowMarked) {
+    throw new Error("PCでは右側の入力欄でそのまま編集するはず: " + JSON.stringify(editState));
+  }
+} else if (!editState.modal) {
   throw new Error("editing should open the popup");
 }
 if ((await page.locator("#payslip-bonus-amount").inputValue()) !== "130000") {
@@ -230,6 +247,15 @@ if (!(await page.locator("#payslip-bonus-fields").isVisible())) {
 }
 await page.click("#cancel-edit-btn");
 await page.waitForTimeout(300);
+const afterCancel = await page.evaluate(() => ({
+  rail: document.getElementById("entry-form-slot").classList.contains("is-editing"),
+  title: document.getElementById("form-title").textContent,
+  submit: document.getElementById("submit-btn").textContent,
+  marked: document.querySelectorAll("#entry-list tr.is-editing").length,
+}));
+if (afterCancel.rail || afterCancel.title !== "記録を追加" || afterCancel.submit !== "追加" || afterCancel.marked) {
+  throw new Error("キャンセルで追加に戻るはず: " + JSON.stringify(afterCancel));
+}
 
 // ---------------------------------------------------------------------------
 // 6. 内訳をクリアすると金額の自動反映も止まる

@@ -203,6 +203,76 @@ if ((await page.textContent("#list-section-title")).trim() !== "今月の記録"
   throw new Error("the heading should revert after clearing");
 }
 
+// --- PC: 記録一覧の右に入力欄が並び、編集はその場 (右側) で行う ---
+const workspace = await page.evaluate(() => {
+  const list = document.getElementById("list-section").getBoundingClientRect();
+  const form = document.getElementById("entry-form-slot").getBoundingClientRect();
+  return { formRightOfList: form.left >= list.right - 1, sameTop: Math.abs(form.top - list.top) < 2 };
+});
+if (!workspace.formRightOfList || !workspace.sameTop) {
+  throw new Error("PCでは一覧の右に入力欄が並ぶはず: " + JSON.stringify(workspace));
+}
+await page.locator("#entry-list tr", { hasText: "8日の夕食" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+const railEdit = await page.evaluate(() => ({
+  modal: !document.getElementById("entry-edit-modal").classList.contains("hidden"),
+  title: document.getElementById("form-title").textContent,
+  memo: document.getElementById("entry-memo").value,
+  marked: document.querySelector("#entry-list tr.is-editing")?.textContent.includes("8日の夕食"),
+}));
+if (railEdit.modal || railEdit.title !== "記録を編集" || railEdit.memo !== "8日の夕食" || !railEdit.marked) {
+  throw new Error("PCでは右側の入力欄で編集するはず: " + JSON.stringify(railEdit));
+}
+// Esc で編集をやめて追加に戻る (そのまま次の記録を入れても上書きしない)
+await page.keyboard.press("Escape");
+await page.waitForTimeout(300);
+if ((await page.textContent("#form-title")) !== "記録を追加" || (await page.inputValue("#entry-id")) !== "") {
+  throw new Error("Esc で編集をやめるはず");
+}
+
+// --- PC: 長いメモや立替の印があっても、表は列の幅に収まる ---
+// (右に入力欄があるので、はみ出すと操作ボタンが枠の外に押し出される)
+await page.click('.type-option:has(input[value="expense"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-09`);
+await page.selectOption("#entry-category", "趣味・娯楽");
+await page.fill("#entry-amount", "123456");
+await page.fill("#entry-memo", "とても長いメモ".repeat(8));
+await page.check("#entry-advance");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+const fits = await page.evaluate(() => {
+  const card = document.getElementById("list-section").getBoundingClientRect();
+  const out = [];
+  for (const btn of document.querySelectorAll("#entry-list button")) {
+    const r = btn.getBoundingClientRect();
+    if (r.right > card.right - 8 || r.left < card.left) out.push(btn.getAttribute("aria-label"));
+  }
+  return out;
+});
+if (fits.length) throw new Error("一覧の操作ボタンが枠からはみ出している: " + fits.join(", "));
+await page.locator("#entry-list tr", { hasText: "とても長いメモ" }).locator("button", { hasText: "削除" }).click();
+await page.waitForTimeout(300);
+
+// --- PC: キーボードショートカット (入力中は効かない) ---
+await page.locator("body").click({ position: { x: 5, y: 5 } });
+const monthBefore = (await page.textContent("#current-month")).trim();
+await page.keyboard.press("ArrowLeft");
+await page.waitForTimeout(300);
+if ((await page.textContent("#current-month")).trim() === monthBefore) throw new Error("← で前の月へ移るはず");
+await page.keyboard.press("t");
+await page.waitForTimeout(300);
+if ((await page.textContent("#current-month")).trim() !== monthBefore) throw new Error("T で今月に戻るはず");
+await page.keyboard.press("n");
+await page.waitForTimeout(300);
+if ((await page.evaluate(() => document.activeElement?.id)) !== "entry-amount") throw new Error("N で金額の欄へ移るはず");
+await page.keyboard.type("12");
+if ((await page.inputValue("#entry-amount")) !== "12") throw new Error("入力中の文字はショートカットに取られないはず");
+await page.fill("#entry-amount", "");
+await page.locator("#entry-memo").focus();
+await page.keyboard.press("ArrowLeft");
+await page.waitForTimeout(200);
+if ((await page.textContent("#current-month")).trim() !== monthBefore) throw new Error("入力欄の中の矢印キーで月が変わってはいけない");
+
 // スマホ幅ではサイドバーが消える
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(400);

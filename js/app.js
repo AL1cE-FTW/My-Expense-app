@@ -350,6 +350,9 @@ const el = {
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
   heroLabel: document.getElementById("hero-label"),
+  spendingPace: document.getElementById("spending-pace"),
+  listSummary: document.getElementById("list-summary"),
+  formTitle: document.getElementById("form-title"),
   summaryFlow: document.getElementById("summary-flow"),
   appHeader: document.querySelector(".app-header"),
   tabButtons: document.querySelectorAll(".tab-btn"),
@@ -645,17 +648,27 @@ async function saveAccountSettingsToDb(settings) {
 // 描画
 // ---------------------------------------------------------------------------
 
+/**
+ * 見ている期間の呼び名。実際の今月・今年なら「今月」「今年」、それ以外は
+ * 「9月」「2025年」と書く (先月を見ているのに「今月の記録」と出ると、
+ * どの期間の数字なのか迷う)。
+ */
+function periodName() {
+  const now = new Date();
+  if (viewMode === "year") {
+    return currentMonth.getFullYear() === now.getFullYear() ? "今年" : `${currentMonth.getFullYear()}年`;
+  }
+  const isThisMonth =
+    currentMonth.getFullYear() === now.getFullYear() && currentMonth.getMonth() === now.getMonth();
+  return isThisMonth ? "今月" : `${currentMonth.getMonth() + 1}月`;
+}
+
 function render() {
   el.currentMonth.textContent =
     viewMode === "year" ? `${currentMonth.getFullYear()}年` : formatMonth(currentMonth);
 
-  const periodLabel = viewMode === "year" ? "今年" : "今月";
-  // ヒーローの見出しは、見ている月・年をそのまま書く (先月を見ているのに
-  // 「今月の収支」と出ると、どの数字なのか迷う)
-  el.heroLabel.textContent =
-    viewMode === "year"
-      ? `${currentMonth.getFullYear()}年の収支`
-      : `${currentMonth.getMonth() + 1}月の収支`;
+  const periodLabel = periodName();
+  el.heroLabel.textContent = `${periodLabel}の収支`;
   el.budgetSectionTitle.textContent = `${periodLabel}の予算`;
   el.planActualSectionTitle.textContent = `${periodLabel}の予定と実績`;
   el.listSectionTitle.textContent = `${periodLabel}の記録`;
@@ -669,6 +682,7 @@ function render() {
   // 記録一覧と帳簿は元の記録をそのまま使う (帳簿は立替を資産として別に扱う)
   const ownEntries = ownFlows(entriesInPeriod);
   renderSummary(ownEntries);
+  renderSpendingPace(ownEntries);
   renderMonthlyBarChart();
   const budgetTotals = renderBudget(ownEntries, targetMultiplier);
   renderPlanActual(ownEntries, targetMultiplier, budgetTotals);
@@ -808,11 +822,57 @@ function entryFormIsInModal() {
 // 覚えてしまい、一覧が大きくずれる。
 function reserveEntryFormHeight() {
   if (entryFormIsInModal()) return;
+  // PCの作業台では入力欄は右側に固定されていて、一覧の位置に影響しない
+  if (RAIL_QUERY.matches) return;
   if (el.entryFormSlot.style.minHeight) return;
   el.entryFormSlot.style.minHeight = `${el.entryFormSlot.offsetHeight}px`;
 }
 
+// ---------------------------------------------------------------------------
+// PC: 右側の入力欄でそのまま編集する
+//
+// 広い画面では入力欄が一覧の右に常に出ているので、ポップアップで一覧を隠す
+// 必要がない。編集中の行に印を付け、入力欄の見出しを「記録を編集」にする。
+// Esc か「キャンセル」で追加に戻る。
+// ---------------------------------------------------------------------------
+
+const RAIL_QUERY = window.matchMedia("(min-width: 1200px)");
+
+function isRailEditing() {
+  return el.entryFormSlot.classList.contains("is-editing");
+}
+
+function startRailEdit() {
+  el.entryFormSlot.classList.add("is-editing");
+  el.formTitle.textContent = "記録を編集";
+  markEditingRow();
+  // 給与明細の内訳で長くなっていても、先頭から見せる
+  el.entryFormSlot.scrollTop = 0;
+  el.entryCategory.focus({ preventScroll: true });
+  // 入力欄は固定表示だが、念のため画面外なら見える位置へ
+  const rect = el.entryFormSlot.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) {
+    el.entryFormSlot.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function endRailEdit() {
+  if (!isRailEditing()) return;
+  el.entryFormSlot.classList.remove("is-editing");
+  el.formTitle.textContent = "記録を追加";
+  for (const row of el.entryList.querySelectorAll("tr.is-editing")) row.classList.remove("is-editing");
+}
+
+function markEditingRow() {
+  for (const row of el.entryList.querySelectorAll("tr.is-editing")) row.classList.remove("is-editing");
+  editRowElement(el.entryId.value)?.classList.add("is-editing");
+}
+
 function openEntryEditModal() {
+  if (RAIL_QUERY.matches && !entryFormIsInModal()) {
+    startRailEdit();
+    return;
+  }
   if (!entryFormIsInModal()) {
     reserveEntryFormHeight();
     el.entryEditBody.appendChild(el.form);
@@ -1213,6 +1273,8 @@ function renderMonthlyBarChart() {
   const currentRealMonth =
     year === new Date().getFullYear() ? new Date().getMonth() : -1;
 
+  // 背景の目盛り線を、左の金額の目盛りと同じ間隔にする
+  el.monthlyBarChart.style.setProperty("--grid-steps", String(Math.round(chartMax / step)));
   el.monthlyBarYaxis.innerHTML = "";
   for (let value = chartMax; value >= 0; value -= step) {
     const label = document.createElement("span");
@@ -1301,6 +1363,213 @@ function renderSummary(monthEntries) {
   el.balance.classList.toggle("negative", balance < 0);
   el.totalSave.textContent = formatYen(saved);
   renderSummaryFlow(income, expense, saved);
+}
+
+// ---------------------------------------------------------------------------
+// 支出のペース (月別のとき)
+//
+// 今月の支出の累計を日ごとの線で描き、予算を月末まで均等に使った場合の線
+// (予算のペース) と重ねる。「今のままだと予算を超えそうか」が月の途中で分かる。
+// 予算バーは月末の結果しか見せないので、それを補う。
+// ---------------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgEl(name, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+  return node;
+}
+
+function niceStep(rough) {
+  const power = 10 ** Math.floor(Math.log10(Math.max(rough, 1)));
+  for (const m of [1, 2, 2.5, 5, 10]) {
+    if (m * power >= rough) return m * power;
+  }
+  return 10 * power;
+}
+
+// グラフの目盛り用の短い金額表記 (¥120,000 → 12万)
+function formatYenShort(amount) {
+  if (Math.abs(amount) >= 10000) {
+    const man = amount / 10000;
+    return `${Number.isInteger(man) ? man : man.toFixed(1)}万`;
+  }
+  return formatYen(amount);
+}
+
+// 線を引くアニメーションは、見る月が変わったときだけ流す。記録が増えるたびに
+// (同期で render が走るたびに) 描き直しが始まると、グラフがちらついて見える
+let lastPaceAnimatedKey = null;
+
+function renderSpendingPace(ownEntries) {
+  const box = el.spendingPace;
+  box.innerHTML = "";
+  const paceKey = `${viewMode}:${currentMonth.getFullYear()}-${currentMonth.getMonth()}`;
+  box.classList.toggle("no-anim", paceKey === lastPaceAnimatedKey);
+  lastPaceAnimatedKey = paceKey;
+  const show = viewMode === "month";
+  box.classList.toggle("hidden", !show);
+  if (!show) return;
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const now = new Date();
+  const isCurrent = year === now.getFullYear() && month === now.getMonth();
+  const isFuture = new Date(year, month, 1) > now;
+  // 線を引く最後の日。今月は今日まで (先の日は未定なので描かない)
+  const lastPlotted = isCurrent ? now.getDate() : isFuture ? 0 : lastDay;
+
+  const daily = new Array(lastDay + 1).fill(0);
+  for (const e of ownEntries) {
+    if (e.type !== "expense") continue;
+    const day = Number(e.date.slice(8, 10));
+    if (day >= 1 && day <= lastDay) daily[day] += e.amount;
+  }
+  const cumulative = [0];
+  for (let d = 1; d <= lastDay; d++) cumulative[d] = cumulative[d - 1] + daily[d];
+  const spent = cumulative[lastPlotted] || 0;
+
+  const budgetTotal = Object.keys(budgets)
+    .filter((c) => budgets[c] > 0)
+    .reduce((sum, c) => sum + budgets[c], 0);
+
+  // --- 見出しと、ひとことの評価 ---
+  const caption = document.createElement("figcaption");
+  caption.className = "pace-caption";
+  const title = document.createElement("span");
+  title.className = "pace-title";
+  title.textContent = "支出のペース";
+  const status = document.createElement("span");
+  status.className = "pace-status";
+  if (lastPlotted === 0) {
+    status.textContent = "まだ記録がありません";
+  } else if (budgetTotal <= 0) {
+    status.textContent = "予算を設定すると、予算のペースと比べられます";
+  } else if (isCurrent) {
+    const expected = Math.round((budgetTotal * lastPlotted) / lastDay);
+    const diff = spent - expected;
+    status.classList.add(diff > 0 ? "over" : "under");
+    status.textContent =
+      diff > 0
+        ? `予算のペースより ${formatYen(diff)} 多い`
+        : `予算のペースより ${formatYen(-diff)} 少ない`;
+  } else {
+    const ratio = Math.round((spent / budgetTotal) * 100);
+    status.classList.add(spent > budgetTotal ? "over" : "under");
+    status.textContent = `予算 ${formatYen(budgetTotal)} に対して ${ratio}%`;
+  }
+  caption.append(title, status);
+
+  // --- グラフ ---
+  const W = 560;
+  const H = 188;
+  const pad = { left: 6, right: 6, top: 18, bottom: 24 };
+  const innerW = W - pad.left - pad.right;
+  const innerH = H - pad.top - pad.bottom;
+  const maxCumulative = Math.max(0, ...cumulative.slice(0, lastPlotted + 1));
+  const dataMax = Math.max(budgetTotal, maxCumulative, 1);
+  // 目盛りはキリのよい間隔 (1・2・2.5・5 × 10の累乗) で3本前後
+  const tickStep = niceStep(dataMax / 4);
+  const yMax = Math.max(dataMax * 1.08, tickStep);
+  const x = (day) => pad.left + (day / lastDay) * innerW;
+  const y = (amount) => pad.top + innerH - (Math.max(amount, 0) / yMax) * innerH;
+
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    class: "pace-chart",
+    role: "img",
+    "aria-label":
+      `${month + 1}月の支出の累計 ${formatYen(spent)}` +
+      (budgetTotal > 0 ? `、予算 ${formatYen(budgetTotal)}` : ""),
+  });
+
+  const gradientId = "pace-fill";
+  const defs = svgEl("defs");
+  const gradient = svgEl("linearGradient", { id: gradientId, x1: 0, y1: 0, x2: 0, y2: 1 });
+  const stopTop = svgEl("stop", { offset: "0%" });
+  stopTop.style.stopColor = "var(--expense)";
+  stopTop.style.stopOpacity = "0.22";
+  const stopBottom = svgEl("stop", { offset: "100%" });
+  stopBottom.style.stopColor = "var(--expense)";
+  stopBottom.style.stopOpacity = "0";
+  gradient.append(stopTop, stopBottom);
+  defs.appendChild(gradient);
+  svg.appendChild(defs);
+
+  // 目盛り線 (3本) と金額。金額は左端に置く (右端には予算の線の終わりが来る)
+  for (let value = tickStep; value <= yMax; value += tickStep) {
+    const gy = y(value);
+    svg.appendChild(svgEl("line", { x1: pad.left, x2: W - pad.right, y1: gy, y2: gy, class: "pace-grid" }));
+    const label = svgEl("text", { x: pad.left, y: gy - 5, class: "pace-axis", "text-anchor": "start" });
+    label.textContent = formatYenShort(Math.round(value));
+    svg.appendChild(label);
+  }
+  svg.appendChild(svgEl("line", {
+    x1: pad.left, x2: W - pad.right, y1: pad.top + innerH, y2: pad.top + innerH, class: "pace-baseline",
+  }));
+  for (const day of [1, 15, lastDay]) {
+    const label = svgEl("text", {
+      x: x(day), y: H - 6, class: "pace-axis",
+      "text-anchor": day === 1 ? "start" : day === lastDay ? "end" : "middle",
+    });
+    label.textContent = `${day}日`;
+    svg.appendChild(label);
+  }
+
+  // 右端には「予算の線の終わり」と「支出の点」の2つのラベルが来る。
+  // 高いほうは上に、低いほうは下に出して重ならないようにする
+  const endY = lastPlotted > 0 ? y(cumulative[lastPlotted]) : Infinity;
+  const budgetIsHigher = budgetTotal > 0 && y(budgetTotal) <= endY;
+
+  // 予算のペース (月初0円から、月末に予算ちょうど)
+  if (budgetTotal > 0) {
+    svg.appendChild(svgEl("line", {
+      x1: x(0), y1: y(0), x2: x(lastDay), y2: y(budgetTotal), class: "pace-budget",
+    }));
+    const by = y(budgetTotal);
+    const label = svgEl("text", {
+      x: x(lastDay) - 2,
+      y: budgetIsHigher ? by - 9 : by + 17,
+      class: "pace-budget-label",
+      "text-anchor": "end",
+    });
+    label.textContent = `予算 ${formatYenShort(budgetTotal)}`;
+    svg.appendChild(label);
+  }
+
+  if (isCurrent) {
+    svg.appendChild(svgEl("line", {
+      x1: x(lastPlotted), x2: x(lastPlotted), y1: pad.top, y2: pad.top + innerH, class: "pace-today",
+    }));
+  }
+
+  if (lastPlotted > 0) {
+    // 日ごとの階段ではなく、日の終わりの累計を結ぶ (傾きで「使った速さ」が見える)
+    const points = [];
+    for (let d = 0; d <= lastPlotted; d++) points.push([x(d), y(cumulative[d])]);
+    const line = points.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join(" ");
+    const area = `${line} L${points.at(-1)[0].toFixed(1)} ${y(0).toFixed(1)} L${points[0][0].toFixed(1)} ${y(0).toFixed(1)} Z`;
+    svg.appendChild(svgEl("path", { d: area, fill: `url(#${gradientId})`, class: "pace-area" }));
+    svg.appendChild(svgEl("path", { d: line, class: "pace-line", pathLength: 1 }));
+    const [ex, ey] = points.at(-1);
+    svg.appendChild(svgEl("circle", { cx: ex, cy: ey, r: 7, class: "pace-dot-halo" }));
+    svg.appendChild(svgEl("circle", { cx: ex, cy: ey, r: 3.5, class: "pace-dot" }));
+    // 点が右端に近いときは、ラベルを点の左に寄せて枠からはみ出さないようにする
+    const nearRight = ex > W - pad.right - 60;
+    const below = budgetTotal > 0 && budgetIsHigher && Math.abs(y(budgetTotal) - ey) < 28;
+    const value = svgEl("text", {
+      x: nearRight ? ex - 12 : Math.max(ex, pad.left + 40),
+      y: below ? ey + 20 : Math.max(ey - 14, 12),
+      class: "pace-value",
+      "text-anchor": nearRight ? "end" : "middle",
+    });
+    value.textContent = formatYen(spent);
+    svg.appendChild(value);
+  }
+
+  box.append(caption, svg);
 }
 
 /**
@@ -1995,7 +2264,7 @@ function renderList(monthEntries) {
   el.entryList.innerHTML = "";
   el.listEmptyMessage.classList.toggle("hidden", filtered.length > 0);
 
-  const periodLabel = viewMode === "year" ? "今年" : "今月";
+  const periodLabel = periodName();
   el.listEmptyMessage.textContent =
     monthEntries.length === 0 && !isFiltered
       ? `${periodLabel}の記録はまだありません。上のフォームから追加してください。`
@@ -2011,13 +2280,29 @@ function renderList(monthEntries) {
   updateSortIndicators();
 
   const refundMap = refundsByAdvanceId();
+  renderListSummary(filtered);
+
+  // 日付順に並べているときは、同じ日の2行目以降の日付を目立たせない
+  // (日ごとのまとまりが見える)
+  const groupByDay = sortColumn === "date";
+  let previousDate = null;
 
   for (const entry of sortEntries(filtered)) {
     const tr = document.createElement("tr");
+    if (groupByDay) {
+      tr.classList.add(entry.date === previousDate ? "same-day" : "new-day");
+      previousDate = entry.date;
+    }
+    if (isRailEditing() && entry.id === el.entryId.value) tr.classList.add("is-editing");
 
     const dateTd = document.createElement("td");
-    const [, m, d] = entry.date.split("-");
-    dateTd.textContent = `${Number(m)}/${Number(d)}`;
+    dateTd.className = "date-cell";
+    const [y, m, d] = entry.date.split("-");
+    const dow = new Date(Number(y), Number(m) - 1, Number(d)).getDay();
+    const dowEl = document.createElement("span");
+    dowEl.className = `dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`;
+    dowEl.textContent = "日月火水木金土"[dow];
+    dateTd.append(`${Number(m)}/${Number(d)}`, dowEl);
 
     const typeTd = document.createElement("td");
     const badge = document.createElement("span");
@@ -2047,7 +2332,12 @@ function renderList(monthEntries) {
     }
 
     const categoryTd = document.createElement("td");
-    categoryTd.textContent = entry.category;
+    categoryTd.className = "category-cell";
+    const categoryDot = document.createElement("span");
+    categoryDot.className = `category-dot ${entry.type}`;
+    if (entry.type === "expense") categoryDot.style.background = NWS_BUCKET_COLORS[categoryBucket(entry.category)];
+    categoryDot.setAttribute("aria-hidden", "true");
+    categoryTd.append(categoryDot, entry.category);
 
     const amountTd = document.createElement("td");
     amountTd.className = `amount-cell ${entry.type}`;
@@ -2059,6 +2349,8 @@ function renderList(monthEntries) {
     const memoTd = document.createElement("td");
     memoTd.className = "memo-cell";
     memoTd.textContent = entry.memo || "";
+    // 広い画面では長いメモを「…」で切るので、全文はマウスを乗せると出す
+    if (entry.memo) memoTd.title = entry.memo;
 
     // 記入・インポートした日 (取引日とは別)
     const createdAtTd = document.createElement("td");
@@ -2078,6 +2370,7 @@ function renderList(monthEntries) {
       const detailBtn = document.createElement("button");
       detailBtn.className = "icon-btn";
       detailBtn.append(createIcon("file-text"), rowButtonText("内訳"));
+      detailBtn.title = "内訳";
       detailBtn.setAttribute("aria-label", `${rowLabel} の内訳を見る`);
       detailBtn.addEventListener("click", () => showPayslipDetailModal(entry));
       actions.appendChild(detailBtn);
@@ -2086,6 +2379,7 @@ function renderList(monthEntries) {
     const editBtn = document.createElement("button");
     editBtn.className = "icon-btn";
     editBtn.append(createIcon("pencil"), rowButtonText("編集"));
+    editBtn.title = "編集";
     editBtn.setAttribute("aria-label", `${rowLabel} を編集`);
     // 更新後にこの行のボタンへフォーカスを戻すための目印
     editBtn.dataset.editId = entry.id;
@@ -2094,6 +2388,7 @@ function renderList(monthEntries) {
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "icon-btn delete";
     deleteBtn.append(createIcon("trash-2"), rowButtonText("削除"));
+    deleteBtn.title = "削除";
     deleteBtn.setAttribute("aria-label", `${rowLabel} を削除`);
     deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
 
@@ -2103,6 +2398,25 @@ function renderList(monthEntries) {
     tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, createdAtTd, actionsTd);
     el.entryList.appendChild(tr);
   }
+}
+
+// 一覧の上に、表示している記録の件数と合計を出す (絞り込み中はその分だけ)。
+// 合計は上の収支と同じ数え方 (立替を除き、返金は支出の取り消し)
+function renderListSummary(filtered) {
+  if (filtered.length === 0) {
+    el.listSummary.textContent = "";
+    return;
+  }
+  let income = 0;
+  let expense = 0;
+  for (const e of ownFlows(filtered)) {
+    if (e.type === "income") income += e.amount;
+    else if (e.type === "expense") expense += e.amount;
+  }
+  el.listSummary.textContent =
+    `${filtered.length}件` +
+    `　収入 ${formatYen(income)}` +
+    `　支出 ${formatYen(expense)}`;
 }
 
 // 一覧の行の操作ボタンの文字。スマホでは幅が足りないのでアイコンだけを見せ、
@@ -2124,10 +2438,29 @@ function renderPendingNote(monthEntries) {
   if (pending.length === 0) return;
 
   const total = pending.reduce((sum, e) => sum + e.amount, 0);
+  // どの明細を取り込めば確定するかを書く。カードの明細は「◯月お支払い分」の
+  // 単位で、中身は前の月 (締め日まで) の利用。9月に使った分は9月の明細ではなく
+  // 10月お支払い分に載るので、ここを書かないと「9月の明細を入れたのに仮が
+  // 外れない」と迷う
+  const statements = [...new Set(pending.map((e) => paymentStatementLabel(e.date)))].sort();
   el.listPendingNote.textContent =
     `未確定「仮」が${pending.length}件 (${formatYen(total)})。` +
     "メールの利用通知から取り込んだ速報で、確定時に金額が変わることがあります。" +
-    "カード利用履歴CSVを取り込むと確定版に置き換わります。";
+    `カード会社のサイトから「${statements.join("」「")}」の利用明細CSVを取り込むと確定します。`;
+}
+
+// その利用が載るカード明細の呼び名 (例: 2026年10月お支払い分)
+function paymentStatementLabel(usageDate) {
+  const [y, m] = cardPaymentDateFor(usageDate).split("-").map(Number);
+  return `${y}年${m}月お支払い分`;
+}
+
+// 2026-08-01〜2026-08-31 → 「2026年8月1日〜8月31日」
+function formatDateRange(from, to) {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const end = fy === ty ? `${tm}月${td}日` : `${ty}年${tm}月${td}日`;
+  return `${fy}年${fm}月${fd}日〜${end}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2642,6 +2975,19 @@ function bookRow(label, amount, { total = false, muted = false } = {}) {
   return row;
 }
 
+function bookColumns() {
+  const wrap = document.createElement("div");
+  wrap.className = "book-columns";
+  return wrap;
+}
+
+// 借方 (左) / 貸方 (右) の片側
+function bookSide(side) {
+  const wrap = document.createElement("div");
+  wrap.className = `book-side ${side}`;
+  return wrap;
+}
+
 function bookGroupLabel(text) {
   const el2 = document.createElement("div");
   el2.className = "book-group-label";
@@ -2656,17 +3002,24 @@ function renderProfitAndLoss(container, journal) {
     return;
   }
 
-  container.appendChild(bookGroupLabel("収益"));
-  for (const r of pl.revenues) container.appendChild(bookRow(r.account, r.amount));
-  container.appendChild(bookRow("収益合計", pl.revenueTotal, { total: true }));
+  // 広い画面では左右に並べる (勘定式: 左に費用、右に収益)。狭い画面では縦に並ぶ
+  const columns = bookColumns();
+  const revenueSide = bookSide("credit");
+  revenueSide.appendChild(bookGroupLabel("収益"));
+  for (const r of pl.revenues) revenueSide.appendChild(bookRow(r.account, r.amount));
+  revenueSide.appendChild(bookRow("収益合計", pl.revenueTotal, { total: true }));
 
-  container.appendChild(bookGroupLabel("費用"));
-  for (const r of pl.expenses) container.appendChild(bookRow(r.account, r.amount));
-  container.appendChild(bookRow("費用合計", pl.expenseTotal, { total: true }));
-
+  const expenseSide = bookSide("debit");
+  expenseSide.appendChild(bookGroupLabel("費用"));
+  for (const r of pl.expenses) expenseSide.appendChild(bookRow(r.account, r.amount));
+  expenseSide.appendChild(bookRow("費用合計", pl.expenseTotal, { total: true }));
+  // 当期純利益は収益の側に置く (収益合計のすぐ下で「収益 − 費用」の結果として読める。
+  // 左右に並べたとき、短い収益の側の空きも埋まる)
   const net = bookRow("当期純利益", pl.netIncome, { total: true });
   net.classList.add("book-net", pl.netIncome >= 0 ? "positive" : "negative");
-  container.appendChild(net);
+  revenueSide.appendChild(net);
+  columns.append(revenueSide, expenseSide);
+  container.appendChild(columns);
 }
 
 function renderTrialBalance(container, journal) {
@@ -2834,22 +3187,28 @@ function renderBalanceSheet(container, periodEnd) {
 
   const bs = buildBalanceSheet(periodEnd);
 
-  container.appendChild(bookGroupLabel("資産の部"));
-  for (const row of bs.assets) container.appendChild(bookRow(row.account, row.amount));
-  container.appendChild(bookRow("資産合計", bs.assetTotal, { total: true }));
+  // 広い画面では左右に並べる (勘定式: 左に資産、右に負債と純資産)
+  const columns = bookColumns();
+  const assetSide = bookSide("debit");
+  assetSide.appendChild(bookGroupLabel("資産の部"));
+  for (const row of bs.assets) assetSide.appendChild(bookRow(row.account, row.amount));
+  assetSide.appendChild(bookRow("資産合計", bs.assetTotal, { total: true }));
 
-  container.appendChild(bookGroupLabel("負債の部"));
+  const claimSide = bookSide("credit");
+  claimSide.appendChild(bookGroupLabel("負債の部"));
   if (bs.liabilities.length === 0) {
-    container.appendChild(bookRow("(負債なし)", 0, { muted: true }));
+    claimSide.appendChild(bookRow("(負債なし)", 0, { muted: true }));
   } else {
-    for (const row of bs.liabilities) container.appendChild(bookRow(row.account, row.amount));
+    for (const row of bs.liabilities) claimSide.appendChild(bookRow(row.account, row.amount));
   }
-  container.appendChild(bookRow("負債合計", bs.liabilityTotal, { total: true }));
+  claimSide.appendChild(bookRow("負債合計", bs.liabilityTotal, { total: true }));
 
-  container.appendChild(bookGroupLabel("純資産の部"));
+  claimSide.appendChild(bookGroupLabel("純資産の部"));
   const net = bookRow("純資産 (資産 − 負債)", bs.netAssets, { total: true });
   net.classList.add("book-net", bs.netAssets >= 0 ? "positive" : "negative");
-  container.appendChild(net);
+  claimSide.appendChild(net);
+  columns.append(assetSide, claimSide);
+  container.appendChild(columns);
 
   const asOf = document.createElement("p");
   asOf.className = "book-check";
@@ -3599,6 +3958,7 @@ function defaultSettlementFor(type) {
 function resetForm() {
   // 編集ポップアップを開いたままだと、追加用のフォームが行方不明になる
   closeEntryEditModal();
+  endRailEdit();
   el.entryId.value = "";
   el.form.reset();
   el.entryDate.value = toDateInputValue(new Date());
@@ -3762,8 +4122,9 @@ async function handleSubmit(event) {
     el.submitBtn.disabled = false;
   }
 
-  // ポップアップから編集していたか (resetForm でフォームが元に戻る前に見る)
-  const wasModalEdit = Boolean(editingId) && entryFormIsInModal();
+  // ポップアップ (またはPCの右側の入力欄) から編集していたか
+  // (resetForm でフォームが元に戻る前に見る)
+  const wasModalEdit = Boolean(editingId) && (entryFormIsInModal() || isRailEditing());
 
   resetForm();
 
@@ -4450,8 +4811,13 @@ function reconcileCardStatement(imported) {
   const unmatchedPending = candidates.filter(
     (e) => isPendingEntry(e) && !used.has(e.id) && e.date >= from && e.date <= to
   );
+  // 明細の期間より後の仮の記録。この明細には載らない (次の明細で確定する) ので、
+  // 取り込んでも仮のまま残る。黙っていると「取り込んだのに仮が外れない」に見える
+  const laterPending = entries.filter(
+    (e) => isPendingEntry(e) && !used.has(e.id) && e.date > to
+  );
 
-  return { updates, alreadyImported, additions: unmatchedRows, unmatchedPending, from, to };
+  return { updates, alreadyImported, additions: unmatchedRows, unmatchedPending, laterPending, from, to };
 }
 
 /**
@@ -4564,9 +4930,23 @@ function importCsv(file) {
       dedupeResult.skippedCount + (reconciliation ? reconciliation.alreadyImported.length : 0);
     const updateCount = reconciliation ? reconciliation.updates.length : 0;
 
+    // 明細がいつの利用分かと、この明細では確定しない仮の記録を知らせる
+    let periodNote = "";
+    if (reconciliation) {
+      periodNote = `\n\nこの明細は ${formatDateRange(reconciliation.from, reconciliation.to)} のご利用分です。`;
+      const later = reconciliation.laterPending;
+      if (later.length > 0) {
+        const statements = [...new Set(later.map((e) => paymentStatementLabel(e.date)))].sort();
+        periodNote +=
+          `\nそれより後の仮の記録 ${later.length}件 は、この明細には載っていないため仮のまま残ります。` +
+          `「${statements.join("」「")}」の明細CSVを取り込むと確定します。`;
+      }
+    }
+
     if (deduped.length === 0 && updateCount === 0) {
       alert(
         `すべて(${skippedCount}件)既に登録済みのため、新しく追加する記録はありませんでした。` +
+          periodNote +
           verificationNote
       );
       return;
@@ -4610,6 +4990,7 @@ function importCsv(file) {
         pairs.slice(0, 5).join("\n") +
         (pairs.length > 5 ? `\n...ほか${pairs.length - 5}種類` : "");
     }
+    message += periodNote;
     message += verificationNote;
     if (!confirm(message)) return;
 
@@ -4636,9 +5017,12 @@ function importCsv(file) {
       return;
     }
     alert(
-      updateCount > 0
+      (updateCount > 0
         ? `${updateCount}件を確定版に更新し、${deduped.length}件を追加しました。`
-        : `${deduped.length}件をインポートしました。`
+        : `${deduped.length}件をインポートしました。`) +
+        (reconciliation && reconciliation.laterPending.length > 0
+          ? `\n\n${reconciliation.laterPending.length}件の仮の記録は、次の明細で確定します。`
+          : "")
     );
   };
   reader.onerror = () => alert("ファイルの読み込みに失敗しました。");
@@ -5285,10 +5669,18 @@ function setupAppEventListeners() {
       trapFocus(event);
       return;
     }
-    if (event.key !== "Escape") return;
-    for (const overlay of document.querySelectorAll(".modal-overlay:not(.hidden)")) {
-      closeOverlay(overlay);
+    if (event.key === "Escape") {
+      const open = document.querySelectorAll(".modal-overlay:not(.hidden)");
+      for (const overlay of open) closeOverlay(overlay);
+      // PCの右側の入力欄で編集中なら、編集をやめて追加に戻る
+      if (open.length === 0 && isRailEditing()) {
+        const editingId = el.entryId.value;
+        resetForm();
+        editRowElement(editingId)?.querySelector("[data-edit-id]")?.focus({ preventScroll: true });
+      }
+      return;
     }
+    handleShortcut(event);
   });
 
   renderFilterCategoryOptions();
@@ -5378,7 +5770,16 @@ function setupSidebarScrollSpy() {
   }
 
   for (const link of links) {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", (event) => {
+      // 移動は滑らかに (動きを減らす設定なら一瞬で)。ページ全体の
+      // scroll-behavior は使わない (CSS のコメント参照)
+      const target = document.getElementById(link.getAttribute("href").slice(1));
+      if (target) {
+        event.preventDefault();
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        target.scrollIntoView({ behavior: reduce ? "instant" : "smooth", block: "start" });
+        history.replaceState(null, "", link.getAttribute("href"));
+      }
       lockedHref = link.getAttribute("href");
       setActive(lockedHref);
       clearTimeout(lockTimer);
@@ -5453,8 +5854,47 @@ function jumpToEntryForm() {
   // 後回しになり、まだ隠れている金額欄にフォーカスできない。また iOS は
   // タップの処理の中で focus() したときだけキーボードを出す
   switchTab("home", { animate: false });
-  el.entryFormSlot.scrollIntoView({ block: "start", behavior: "smooth" });
+  const rect = el.entryFormSlot.getBoundingClientRect();
+  const visible = rect.top >= 0 && rect.top < window.innerHeight * 0.6;
+  if (!visible) el.entryFormSlot.scrollIntoView({ block: "start", behavior: "smooth" });
   el.entryAmount.focus({ preventScroll: true });
+}
+
+// PC向けのキーボードショートカット。入力中・ポップアップ表示中は何もしない
+// (文字入力や、ラジオボタンの矢印キー操作を横取りしない)
+function handleShortcut(event) {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (document.body.classList.contains("modal-open")) return;
+  const target = event.target;
+  if (target instanceof HTMLElement && target.closest("input, select, textarea, [contenteditable]")) {
+    return;
+  }
+  if (el.appRoot.classList.contains("hidden")) return;
+
+  switch (event.key) {
+    case "n":
+    case "N":
+      event.preventDefault();
+      jumpToEntryForm();
+      break;
+    case "ArrowLeft":
+      // ボタンなどにフォーカスがあるときの矢印キーは、そのまま (タブの移動などに使う)
+      if (target instanceof HTMLElement && target.closest("button, [role=tab]")) return;
+      event.preventDefault();
+      el.prevMonth.click();
+      break;
+    case "ArrowRight":
+      if (target instanceof HTMLElement && target.closest("button, [role=tab]")) return;
+      event.preventDefault();
+      el.nextMonth.click();
+      break;
+    case "t":
+    case "T":
+      event.preventDefault();
+      el.todayBtn.click();
+      break;
+    default:
+  }
 }
 
 function setupTabBar() {

@@ -150,6 +150,9 @@ const note = await page.textContent("#list-pending-note");
 console.log("pending note:", note.trim());
 if (!note.includes("4件")) throw new Error("未確定の件数が出るはず: " + note);
 if (!note.includes("¥4,640")) throw new Error("未確定の合計が出るはず: " + note);
+// どの明細 (◯月お支払い分) を取り込めば確定するかを書く。
+// 9月の利用は9月お支払い分ではなく、その次の明細に載るため
+if (!/\d+年\d+月お支払い分/.test(note)) throw new Error("確定させる明細の月を書くはず: " + note);
 
 // ---------------------------------------------------------------------------
 // 2. 確定明細 (カード利用履歴CSV) を取り込むと、仮の記録が置き換わる
@@ -273,6 +276,47 @@ await page.waitForTimeout(400);
 // 手入力1件を足したので6件。ここから増えていないこと
 if ((await page.locator("#entry-list tr").count()) !== 6) {
   throw new Error("後から来たメールで増えてはいけない");
+}
+
+// ---------------------------------------------------------------------------
+// 6. 明細の期間より後の仮の記録は、この明細では確定しない。それを伝える
+// ---------------------------------------------------------------------------
+// 例: 「2026年9月お支払い分」の明細は8月の利用分。9月に使った分の仮は、
+// その明細を入れても外れない (次の明細に載る)。黙っていると不具合に見える
+const NEXT = new Date(CUR_Y, NOW.getMonth() + 1, 5);
+const NEXT_DATE = `${NEXT.getFullYear()}-${String(NEXT.getMonth() + 1).padStart(2, "0")}-05`;
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/later-pending", {
+    date, type: "expense", category: "食費", amount: 777, memo: "来月のコンビニ",
+    source: "gmail", createdAt: Date.now(),
+  });
+}, NEXT_DATE);
+await page.waitForTimeout(300);
+dialogs.length = 0;
+const laterPath = path.join(scratch, "reconcile-later.csv");
+fs.writeFileSync(laterPath, [
+  "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
+  `${CUR_Y}/${MM}/20,ドラッグストア,450,１,１,450,`,
+  ",,,,,450,",
+].join("\n"), "utf-8");
+await page.setInputFiles("#import-csv-input", laterPath);
+await page.waitForTimeout(900);
+const laterMsg = dialogs.find((m) => m.includes("よろしいですか")) || "";
+console.log("later pending:", JSON.stringify(laterMsg));
+if (!laterMsg.includes(`${CUR_Y}年${Number(MM)}月20日〜${Number(MM)}月20日 のご利用分`)) {
+  throw new Error("明細がいつの利用分かを書くはず: " + laterMsg);
+}
+if (!laterMsg.includes("それより後の仮の記録 1件") || !laterMsg.includes("お支払い分")) {
+  throw new Error("この明細では確定しない仮の記録があることを伝えるはず: " + laterMsg);
+}
+// 来月分の仮は、この明細では触らない (仮のまま残る)
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+await page.click("#next-month");
+await page.waitForTimeout(400);
+const laterRow = page.locator("#entry-list tr", { hasText: "来月のコンビニ" });
+if ((await laterRow.locator(".pending-badge").count()) !== 1) {
+  throw new Error("明細の期間より後の仮の記録は仮のまま残るはず");
 }
 
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });

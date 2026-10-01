@@ -129,8 +129,10 @@
   box-sizing: border-box;
 }
 
+/* scroll-behavior: smooth はページ全体には付けない。付けるとフォーカスの移動や
+   スクリプトからのスクロールまで全部ゆっくり動き、押そうとした場所が
+   動いている途中になる。滑らかに動かすのはサイドバーの移動だけ (JS で指定) */
 html {
-  scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -498,7 +500,10 @@ body {
   gap: 20px;
 }
 
-.container > * {
+.container > *,
+.workspace > * {
+  /* .workspace はPC以外では display: contents なので、中身が直接ここの
+     グリッドに並ぶ。中身にも全幅を指定しないと細い列に押し込まれる */
   grid-column: 1 / -1;
   min-width: 0;
 }
@@ -566,7 +571,11 @@ h2:focus {
    =========================================================================== */
 .hero-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "main"
+    "pace"
+    "stats";
   align-items: center;
   gap: 24px 48px;
   padding: 30px 32px 18px;
@@ -588,6 +597,10 @@ h2:focus {
 .hero-card > * {
   position: relative;
 }
+
+.hero-main { grid-area: main; min-width: 0; }
+.hero-card > .pace { grid-area: pace; }
+.hero-card > .summary-cards { grid-area: stats; }
 
 .hero-label {
   font-size: 0.85rem;
@@ -2081,9 +2094,12 @@ select.filter-select {
 /* ===========================================================================
    年間: 月ごとの収支
    =========================================================================== */
+/* 月の名前はグラフの下 (枠の外) に出す。枠の中に置くと、棒の下端が
+   ¥0 の線より上に浮いて、左の金額の目盛りと合わなくなる */
 .monthly-chart-row {
   display: flex;
   gap: 4px;
+  padding-bottom: 26px;
 }
 
 .monthly-bar-yaxis {
@@ -2112,12 +2128,13 @@ select.filter-select {
   height: 200px;
   margin-top: 12px;
   border-bottom: 1px solid var(--line-strong);
-  overflow-x: auto;
+  overflow: visible;
   background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px);
-  background-size: 100% 25%;
+  background-size: 100% calc(100% / var(--grid-steps, 4));
 }
 
 .month-bar-group {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2152,9 +2169,13 @@ select.filter-select {
 .month-bar.expense { background: var(--expense); }
 
 .month-bar-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.72rem;
   color: var(--faint);
-  margin-top: 6px;
+  white-space: nowrap;
 }
 
 .month-bar-label.current {
@@ -2701,6 +2722,551 @@ body.modal-open {
   50% { transform: scale(0.94); opacity: 0.7; }
 }
 
+
+/* ===========================================================================
+   支出のペース (ヒーローのグラフ)
+   =========================================================================== */
+.pace {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pace-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.pace-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.pace-status {
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-tint);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-status.under { background: var(--income-soft); color: var(--income); }
+.pace-status.over { background: var(--expense-soft); color: var(--expense); }
+
+.pace-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.pace-grid { stroke: var(--line); stroke-width: 1; }
+.pace-baseline { stroke: var(--line-strong); stroke-width: 1; }
+.pace-today { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 2 4; }
+
+.pace-axis {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  fill: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-budget {
+  stroke: var(--muted);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 5;
+  opacity: 0.8;
+}
+
+.pace-budget-label {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--muted);
+}
+
+.pace-line {
+  fill: none;
+  stroke: var(--expense);
+  stroke-width: 2.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw-line 1.2s var(--ease) 0.1s forwards;
+}
+
+.pace-area {
+  opacity: 0;
+  animation: fade-in 0.8s var(--ease) 0.6s forwards;
+}
+
+.pace-dot { fill: var(--expense); }
+.pace-dot-halo { fill: var(--expense); opacity: 0.16; }
+.pace-dot,
+.pace-dot-halo,
+.pace-value {
+  opacity: 0;
+  animation: fade-in 0.4s var(--ease) 1.1s forwards;
+}
+
+.pace-value {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 650;
+  fill: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace.no-anim .pace-line,
+.pace.no-anim .pace-area,
+.pace.no-anim .pace-dot,
+.pace.no-anim .pace-dot-halo,
+.pace.no-anim .pace-value {
+  animation: none;
+  opacity: 1;
+  stroke-dashoffset: 0;
+}
+
+.pace.no-anim .pace-dot-halo {
+  opacity: 0.16;
+}
+
+@keyframes draw-line {
+  to { stroke-dashoffset: 0; }
+}
+
+/* キーボードショートカットの表示 */
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  padding: 0 0.4em;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+.shortcut-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  color: var(--muted);
+}
+
+.shortcut-help span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-help kbd {
+  margin-right: 4px;
+}
+
+/* 指で操作する端末ではショートカットの案内を出さない */
+@media (hover: none), (max-width: 768px) {
+  .form-shortcut,
+  .shortcut-help {
+    display: none !important;
+  }
+}
+
+/* ===========================================================================
+   記録一覧の細部 (曜日・日ごとのまとまり・件数と合計・編集中の行)
+   =========================================================================== */
+.list-summary {
+  margin: -4px 0 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.list-summary:empty {
+  display: none;
+}
+
+.date-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.dow {
+  margin-left: 5px;
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+.dow.sun { color: var(--expense); }
+.dow.sat { color: var(--need); }
+
+/* 同じ日の2行目以降は日付を消し、行の区切りも弱める (日ごとのまとまりが見える) */
+.entry-table tbody tr.same-day td.date-cell,
+.entry-table tbody tr.same-day td.date-cell .dow {
+  color: transparent;
+}
+
+.entry-table tbody tr:has(+ tr.same-day) td {
+  border-bottom-color: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.category-cell .category-dot {
+  display: inline-block;
+  margin-right: 9px;
+  vertical-align: 0.08em;
+}
+
+.category-dot.income { background: var(--income); }
+.category-dot.save { background: var(--save); }
+.category-dot.transfer { background: var(--transfer); }
+
+/* 行の操作はアイコンだけ (文字は読み上げ用に残す) */
+.entry-table .icon-btn {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.entry-table .icon-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.entry-table .icon-btn .btn-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* マウスのある画面では、行の操作は指した行だけはっきり出す */
+@media (hover: hover) and (min-width: 769px) {
+  .entry-table .row-actions {
+    opacity: 0.38;
+    transition: opacity 0.15s var(--ease);
+  }
+  .entry-table tbody tr:hover .row-actions,
+  .entry-table tbody tr:focus-within .row-actions,
+  .entry-table tbody tr.is-editing .row-actions {
+    opacity: 1;
+  }
+}
+
+/* PCの右側の入力欄で編集している行 */
+.entry-table tbody tr.is-editing,
+.entry-table tbody tr.is-editing:hover {
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+}
+
+.entry-table tbody tr.is-editing td:first-child {
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.entry-table tbody tr.is-editing td.date-cell,
+.entry-table tbody tr.is-editing td.date-cell .dow {
+  color: var(--ink);
+}
+
+/* 編集中の入力欄 */
+.form-card.is-editing {
+  border-color: color-mix(in srgb, var(--focus) 45%, transparent);
+  box-shadow: var(--shadow-md), 0 0 0 4px color-mix(in srgb, var(--focus) 10%, transparent);
+}
+
+.form-card.is-editing #form-title {
+  color: var(--focus);
+}
+
+.form-card.is-editing .form-shortcut {
+  display: none;
+}
+
+/* ===========================================================================
+   帳簿: 勘定式 (左右) の並び
+   =========================================================================== */
+#bookkeeping-section {
+  container-type: inline-size;
+  container-name: book;
+}
+
+.book-columns {
+  display: grid;
+  gap: 18px;
+}
+
+@container book (min-width: 720px) {
+  .book-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 0;
+  }
+  .book-side.debit {
+    order: -1;
+    padding-right: 28px;
+  }
+  .book-side.credit {
+    padding-left: 28px;
+    border-left: 1px solid var(--line);
+  }
+}
+
+/* ===========================================================================
+   PC (広い画面)
+   =========================================================================== */
+.workspace {
+  display: contents;
+}
+
+/* サイドバーはアイコンだけにたたむ (1440px 未満)。項目名はマウスを乗せると出る */
+@media (min-width: 769px) and (max-width: 1439px) {
+  :root {
+    --sidebar-w: 76px;
+  }
+
+  .app-sidebar {
+    padding: 22px 12px 18px;
+    align-items: center;
+    overflow: visible;
+  }
+
+  .sidebar-brand {
+    padding: 2px 0 18px;
+  }
+
+  .sidebar-nav-label {
+    width: 28px;
+    height: 1px;
+    padding: 0;
+    margin: 12px 0;
+    font-size: 0;
+    background: var(--line);
+  }
+
+  .sidebar-link {
+    position: relative;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .sidebar-link .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .sidebar-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .sidebar-link:hover .sidebar-text,
+  .sidebar-link:focus-visible .sidebar-text {
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    z-index: 40;
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+  }
+
+  .sidebar-foot {
+    display: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1440px;
+    gap: 22px;
+  }
+
+  /* ヘッダーの中身を本文の幅にそろえる */
+  .app-header {
+    padding-inline: max(32px, calc((100% - 1440px) / 2 + 32px));
+  }
+
+  /* ヒーロー: 左に収支、右に支出のペース、下に4つの数字 */
+  .hero-card {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-areas:
+      "main pace"
+      "stats stats";
+    align-items: stretch;
+    gap: 22px 56px;
+    padding: 32px 36px 22px;
+  }
+
+  .hero-card:has(> .pace.hidden) {
+    grid-template-areas:
+      "main main"
+      "stats stats";
+  }
+
+  .hero-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .hero-value {
+    font-size: 4rem;
+  }
+
+  .summary-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.25fr);
+    border-bottom: 0;
+    align-items: center;
+  }
+
+  .stat.cumulative-card {
+    grid-column: auto;
+    margin: 12px 0 12px 14px;
+  }
+
+  /* 作業台: 一覧 (左) と入力欄 (右)。入力欄はスクロールしても画面に残る */
+  .workspace {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-areas: "list form";
+    align-items: start;
+    gap: 22px;
+  }
+
+  .workspace > #list-section {
+    grid-area: list;
+  }
+
+  .workspace > #entry-form-slot {
+    grid-area: form;
+    position: sticky;
+    top: calc(var(--header-height, 72px) + 12px);
+    max-height: calc(100vh - var(--header-height, 72px) - 28px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  /* 一覧の見出しは、スクロールしてもヘッダーの下に残す。
+     横は clip (はみ出した分を切る) にする。visible だと、幅の広い行が右の
+     入力欄の上にはみ出して重なる。auto (スクロール) にすると、見出しの
+     sticky が表の枠の中でしか効かなくなる */
+  #list-section .table-wrapper {
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  /* キーボードで行を移ったときなどに、行がヘッダーと表の見出し (どちらも
+     画面に固定) の裏に隠れないようにする */
+  html {
+    scroll-padding-top: calc(var(--header-height, 72px) + 16px);
+  }
+
+  #summary-section,
+  #budget-section,
+  #plan-actual-section,
+  #advance-section,
+  #nws-section,
+  #bookkeeping-section,
+  #list-section,
+  #entry-form-slot {
+    scroll-margin-top: 0;
+  }
+
+  #list-section tbody :is(tr, td, button) {
+    scroll-margin-top: 44px;
+  }
+
+  /* 表は列の幅に必ず収める (右の入力欄があるので横に広げられない)。
+     列の幅を決めておき (table-layout: fixed)、長いカテゴリ名とメモは「…」で
+     切る。中身しだいで幅が変わると、操作ボタンが枠の外に押し出される */
+  #list-section .entry-table {
+    table-layout: fixed;
+  }
+
+  #list-section .entry-table th:nth-child(1) { width: 76px; }
+  #list-section .entry-table th:nth-child(2) { width: 92px; }
+  #list-section .entry-table th:nth-child(3) { width: 21%; }
+  #list-section .entry-table th:nth-child(4) { width: 112px; }
+  #list-section .entry-table th:nth-child(6) { width: 60px; }
+  #list-section .entry-table th:nth-child(7) { width: 112px; }
+
+  #list-section .entry-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #list-section .entry-table td.memo-cell {
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  /* 種別の欄は印 (立替・仮) が増えると折り返す */
+  #list-section .entry-table td:nth-child(2) {
+    white-space: normal;
+    line-height: 2;
+  }
+
+  #list-section .entry-table td:last-child {
+    overflow: visible;
+  }
+
+  #list-section .entry-table thead th {
+    position: sticky;
+    top: var(--header-height, 72px);
+    z-index: 2;
+    background: var(--surface);
+    box-shadow: inset 0 -1px 0 var(--line);
+    border-bottom: 0;
+  }
+
+  #list-section .entry-table thead th:first-child {
+    border-top-left-radius: 8px;
+  }
+}
+
+/* とても広い画面: 作業台の入力欄を少し広げる */
+@media (min-width: 1680px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+}
+
 /* ===========================================================================
    スマホの下部タブ (PCでは出さない)
    =========================================================================== */
@@ -2725,14 +3291,7 @@ body.modal-open {
   }
 }
 
-@media (max-width: 960px) {
-  :root {
-    --sidebar-w: 212px;
-  }
-  .hero-card {
-    grid-template-columns: 1fr;
-  }
-}
+
 
 /* PCとスマホの間 (タブレット): ログアウトはアイコンだけにしてヘッダーを1段に収める */
 @media (max-width: 1100px) {
@@ -2761,6 +3320,12 @@ body.modal-open {
 
   body {
     font-size: 15px;
+  }
+
+  /* 下のタブは画面に固定されて中身の上に重なる。フォーカスの移動や
+     scrollIntoView で見せる位置が、タブの裏に隠れないようにする */
+  html {
+    scroll-padding-bottom: calc(var(--tabbar-h) + 24px + env(safe-area-inset-bottom));
   }
 
   .app-sidebar {
@@ -2976,6 +3541,11 @@ body.modal-open {
   }
 
   /* --- ヒーロー --- */
+  /* 支出のペースのグラフは、スマホのホームでは場所を取りすぎるので出さない */
+  .hero-card > .pace {
+    display: none;
+  }
+
   .hero-card {
     padding: 22px 18px 18px;
     gap: 18px;

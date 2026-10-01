@@ -88,18 +88,25 @@
   <div id="app-root" class="hidden" data-tab="home">
    <div class="app-shell">
     <nav class="app-sidebar" aria-label="セクション">
-      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span>家計簿</div>
+      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span><span class="sidebar-text">家計簿</span></div>
       <div class="sidebar-nav-label">毎日</div>
-      <a class="sidebar-link" href="#summary-section"><span data-icon="house"></span>概要</a>
-      <a class="sidebar-link" href="#list-section"><span data-icon="receipt"></span>記録一覧</a>
+      <a class="sidebar-link" href="#summary-section"><span data-icon="house"></span><span class="sidebar-text">概要</span></a>
+      <a class="sidebar-link" href="#list-section"><span data-icon="receipt"></span><span class="sidebar-text">記録一覧</span></a>
       <div class="sidebar-nav-label">予算と分析</div>
-      <a class="sidebar-link" href="#budget-section"><span data-icon="wallet"></span>予算</a>
-      <a class="sidebar-link" href="#nws-section"><span data-icon="chart-pie"></span>Need / Want / Save</a>
-      <a class="sidebar-link" href="#plan-actual-section"><span data-icon="chart-column"></span>予定と実績</a>
+      <a class="sidebar-link" href="#budget-section"><span data-icon="wallet"></span><span class="sidebar-text">予算</span></a>
+      <a class="sidebar-link" href="#nws-section"><span data-icon="chart-pie"></span><span class="sidebar-text">Need / Want / Save</span></a>
+      <a class="sidebar-link" href="#plan-actual-section"><span data-icon="chart-column"></span><span class="sidebar-text">予定と実績</span></a>
       <div class="sidebar-nav-label">帳簿</div>
-      <a class="sidebar-link" href="#advance-section"><span data-icon="hand-coins"></span>立替金</a>
-      <a class="sidebar-link" href="#bookkeeping-section"><span data-icon="book-open"></span>帳簿 (簿記)</a>
-      <p class="sidebar-foot">記録はアカウントに保存され、スマホとPCで同期されます。</p>
+      <a class="sidebar-link" href="#advance-section"><span data-icon="hand-coins"></span><span class="sidebar-text">立替金</span></a>
+      <a class="sidebar-link" href="#bookkeeping-section"><span data-icon="book-open"></span><span class="sidebar-text">帳簿 (簿記)</span></a>
+      <div class="sidebar-foot">
+        <p class="shortcut-help sidebar-text" aria-label="キーボードショートカット">
+          <span><kbd>N</kbd>記録を追加</span>
+          <span><kbd>←</kbd><kbd>→</kbd>前後の月</span>
+          <span><kbd>T</kbd>今月へ</span>
+        </p>
+        <p class="sidebar-text">記録はアカウントに保存され、スマホとPCで同期されます。</p>
+      </div>
     </nav>
     <div class="app-content">
     <header class="app-header">
@@ -128,6 +135,8 @@
           <div class="hero-value" id="balance">¥0</div>
           <div class="flow" id="summary-flow"></div>
         </div>
+        <!-- 今月の支出の進み方 (予算のペースとの比較)。月別のときだけ出す -->
+        <figure class="pace" id="spending-pace"></figure>
         <div class="summary-cards">
           <div class="stat income-card">
             <div class="card-label"><span class="stat-dot"></span>収入</div>
@@ -162,11 +171,17 @@
         </div>
       </section>
 
+      <!-- PCでは、記録一覧 (左) と入力欄 (右、スクロールしても残る) を横に並べる作業台。
+           スマホ・タブレットでは中身をそのまま縦に並べる (display: contents) -->
+      <div class="workspace">
       <!-- 入力フォーム -->
       <!-- 編集のときは、このフォーム要素をそのまま下のポップアップへ移動する
            (記録一覧はページ最下部にあるため、編集のたびに上まで戻るのを避ける) -->
       <section class="card form-card" id="entry-form-slot" data-panel="home">
-        <div class="card-head"><h2 id="form-title">記録を追加</h2></div>
+        <div class="card-head">
+          <h2 id="form-title">記録を追加</h2>
+          <span class="card-head-note form-shortcut" aria-hidden="true"><kbd>N</kbd></span>
+        </div>
         <form id="entry-form">
           <input type="hidden" id="entry-id">
           <div class="entry-fields">
@@ -373,6 +388,7 @@
                     title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用"><span data-icon="sparkles"></span>分析用に書き出す</button>
           </div>
         </div>
+        <p id="list-summary" class="list-summary" aria-live="polite"></p>
         <p id="list-pending-note" class="list-pending-note hidden"></p>
         <div class="list-filters">
           <select id="filter-type" class="filter-select" aria-label="種別で絞り込み">
@@ -408,6 +424,8 @@
           <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
         </div>
       </section>
+
+      </div>
 
       <!-- 予算 -->
       <section class="card" id="budget-section" data-panel="budget">
