@@ -2,18 +2,26 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>家計簿</title>
   <!-- Lucide の notebook-pen。data URI に入れるため " と # をエスケープしている -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4'/%3E%3Cpath d='M2 6h4'/%3E%3Cpath d='M2 10h4'/%3E%3Cpath d='M2 14h4'/%3E%3Cpath d='M2 18h4'/%3E%3Cpath d='M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z'/%3E%3C/svg%3E">
+  <!-- 数字と英字は Geist、和文は Zen Kaku Gothic New。読めなくても system フォントで崩れずに出る -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <!-- 読み込み中 -->
-  <div id="loading-screen" class="auth-screen">
-    <div class="auth-card">
-      <p>読み込み中...</p>
-    </div>
+  <div id="loading-screen" class="auth-screen loading-screen">
+    <div class="loading-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></div>
+    <p class="loading-text">読み込み中...</p>
   </div>
 
   <!-- Firebase SDK 自体の読み込みに失敗した場合 (ネットワーク不調・広告ブロッカーなど) -->
@@ -52,7 +60,9 @@
   <!-- ログイン / 新規登録 -->
   <div id="auth-screen" class="auth-screen hidden">
     <div class="auth-card">
-      <h1><span data-icon="notebook-pen"></span>家計簿</h1>
+      <div class="auth-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></div>
+      <h1>家計簿</h1>
+      <p class="auth-tagline">毎日の記録から、帳簿まで。</p>
       <p class="auth-sub">スマホとPCでデータを同期するには、ログインしてください。</p>
       <div class="auth-tabs">
         <button type="button" class="auth-tab active" data-mode="login" aria-pressed="true">ログイン</button>
@@ -75,69 +85,73 @@
   </div>
 
   <!-- アプリ本体 -->
-  <div id="app-root" class="hidden">
+  <div id="app-root" class="hidden" data-tab="home">
    <div class="app-shell">
-    <nav class="app-sidebar">
-      <div class="sidebar-brand"><span data-icon="notebook-pen"></span>家計簿</div>
-      <div class="sidebar-nav-label">セクション</div>
-      <a class="sidebar-link" href="#summary-section">概要</a>
-      <a class="sidebar-link" href="#list-section">記録一覧</a>
-      <a class="sidebar-link" href="#budget-section">予算</a>
-      <a class="sidebar-link" href="#plan-actual-section">予定と実績</a>
-      <a class="sidebar-link" href="#advance-section">立替金</a>
-      <a class="sidebar-link" href="#nws-section">Need / Want / Save</a>
-      <a class="sidebar-link" href="#bookkeeping-section">帳簿 (簿記)</a>
+    <nav class="app-sidebar" aria-label="セクション">
+      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span>家計簿</div>
+      <div class="sidebar-nav-label">毎日</div>
+      <a class="sidebar-link" href="#summary-section"><span data-icon="house"></span>概要</a>
+      <a class="sidebar-link" href="#list-section"><span data-icon="receipt"></span>記録一覧</a>
+      <div class="sidebar-nav-label">予算と分析</div>
+      <a class="sidebar-link" href="#budget-section"><span data-icon="wallet"></span>予算</a>
+      <a class="sidebar-link" href="#nws-section"><span data-icon="chart-pie"></span>Need / Want / Save</a>
+      <a class="sidebar-link" href="#plan-actual-section"><span data-icon="chart-column"></span>予定と実績</a>
+      <div class="sidebar-nav-label">帳簿</div>
+      <a class="sidebar-link" href="#advance-section"><span data-icon="hand-coins"></span>立替金</a>
+      <a class="sidebar-link" href="#bookkeeping-section"><span data-icon="book-open"></span>帳簿 (簿記)</a>
+      <p class="sidebar-foot">記録はアカウントに保存され、スマホとPCで同期されます。</p>
     </nav>
     <div class="app-content">
     <header class="app-header">
-      <h1><span data-icon="notebook-pen"></span>家計簿</h1>
-      <div class="view-toggle">
-        <button type="button" class="view-tab active" data-view="month" aria-pressed="true">月別</button>
-        <button type="button" class="view-tab" data-view="year" aria-pressed="false">年間</button>
-      </div>
+      <h1 class="app-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span>家計簿</h1>
       <div class="month-nav">
         <button id="prev-month" class="nav-btn" aria-label="前へ"><span data-icon="chevron-left"></span></button>
         <span id="current-month" class="current-month" aria-live="polite"></span>
         <button id="next-month" class="nav-btn" aria-label="次へ"><span data-icon="chevron-right"></span></button>
         <button id="today-btn" class="today-btn">今月</button>
       </div>
+      <div class="view-toggle">
+        <button type="button" class="view-tab active" data-view="month" aria-pressed="true">月別</button>
+        <button type="button" class="view-tab" data-view="year" aria-pressed="false">年間</button>
+      </div>
       <div class="user-bar">
         <span id="user-email" class="user-email"></span>
-        <button id="logout-btn" class="btn btn-secondary btn-small">ログアウト</button>
+        <button id="logout-btn" class="btn btn-ghost btn-small logout-btn" aria-label="ログアウト"><span data-icon="log-out"></span><span class="logout-text">ログアウト</span></button>
       </div>
     </header>
 
     <main class="container">
-      <!-- 累計貯金額 (全期間) -->
-      <section class="card cumulative-card">
-        <div class="cumulative-label">累計貯金額 (全期間の収支合計)</div>
-        <div class="cumulative-value" id="cumulative-savings">¥0</div>
-        <div class="cumulative-change" id="cumulative-change"></div>
-      </section>
-
-      <!-- 月間サマリー -->
-      <section class="summary-cards" id="summary-section">
-        <div class="card income-card">
-          <div class="card-label">収入</div>
-          <div class="card-value" id="total-income">¥0</div>
+      <!-- 収支 (この期間) と累計。一番大事な数字を一番大きく出す -->
+      <section class="card hero-card" id="summary-section" data-panel="home">
+        <div class="hero-main">
+          <div class="hero-label" id="hero-label">今月の収支</div>
+          <div class="hero-value" id="balance">¥0</div>
+          <div class="flow" id="summary-flow"></div>
         </div>
-        <div class="card expense-card">
-          <div class="card-label">支出</div>
-          <div class="card-value" id="total-expense">¥0</div>
-        </div>
-        <div class="card balance-card">
-          <div class="card-label">収支</div>
-          <div class="card-value" id="balance">¥0</div>
-        </div>
-        <div class="card save-card">
-          <div class="card-label">貯蓄・投資</div>
-          <div class="card-value" id="total-save">¥0</div>
+        <div class="summary-cards">
+          <div class="stat income-card">
+            <div class="card-label"><span class="stat-dot"></span>収入</div>
+            <div class="card-value" id="total-income">¥0</div>
+          </div>
+          <div class="stat expense-card">
+            <div class="card-label"><span class="stat-dot"></span>支出</div>
+            <div class="card-value" id="total-expense">¥0</div>
+          </div>
+          <div class="stat save-card">
+            <div class="card-label"><span class="stat-dot"></span>貯蓄・投資</div>
+            <div class="card-value" id="total-save">¥0</div>
+          </div>
+          <div class="stat cumulative-card">
+            <div class="card-label cumulative-label">累計貯金額</div>
+            <div class="card-value cumulative-value" id="cumulative-savings">¥0</div>
+            <div class="cumulative-change" id="cumulative-change"></div>
+          </div>
         </div>
       </section>
 
       <!-- 年間表示のみ: 月ごとの収入・支出の推移 -->
-      <section class="card hidden" id="yearly-chart-section">
-        <h2>月別の収支推移</h2>
+      <section class="card hidden" id="yearly-chart-section" data-panel="home">
+        <div class="card-head"><h2>月別の収支推移</h2></div>
         <div class="monthly-chart-row">
           <div id="monthly-bar-yaxis" class="monthly-bar-yaxis"></div>
           <div id="monthly-bar-chart" class="monthly-bar-chart"></div>
@@ -151,15 +165,11 @@
       <!-- 入力フォーム -->
       <!-- 編集のときは、このフォーム要素をそのまま下のポップアップへ移動する
            (記録一覧はページ最下部にあるため、編集のたびに上まで戻るのを避ける) -->
-      <section class="card form-card" id="entry-form-slot">
-        <h2 id="form-title">記録を追加</h2>
+      <section class="card form-card" id="entry-form-slot" data-panel="home">
+        <div class="card-head"><h2 id="form-title">記録を追加</h2></div>
         <form id="entry-form">
           <input type="hidden" id="entry-id">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="entry-date">日付</label>
-              <input type="date" id="entry-date" required>
-            </div>
+          <div class="entry-fields">
             <fieldset class="form-group type-fieldset">
               <legend>種別</legend>
               <div class="type-toggle">
@@ -181,24 +191,31 @@
                 </label>
               </div>
             </fieldset>
-            <div class="form-group">
+            <div class="form-group fg-amount">
+              <label for="entry-amount">金額</label>
+              <div class="amount-field">
+                <span class="amount-prefix" aria-hidden="true">¥</span>
+                <input type="number" id="entry-amount" min="1" step="1" inputmode="numeric" placeholder="0" required>
+              </div>
+            </div>
+            <div class="form-group fg-category">
               <label for="entry-category">カテゴリ</label>
               <select id="entry-category" required></select>
             </div>
-            <div class="form-group">
-              <label for="entry-amount">金額 (円)</label>
-              <input type="number" id="entry-amount" min="1" step="1" placeholder="1000" required>
+            <div class="form-group fg-date">
+              <label for="entry-date">日付</label>
+              <input type="date" id="entry-date" required>
             </div>
-            <div class="form-group" id="entry-settlement-group">
-              <label for="entry-settlement">支払い・入金の口座</label>
+            <div class="form-group fg-memo">
+              <label for="entry-memo">メモ</label>
+              <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
+            </div>
+            <div class="form-group fg-settlement" id="entry-settlement-group">
+              <label for="entry-settlement">口座</label>
               <select id="entry-settlement">
                 <option value="cash">現金</option>
                 <option value="bank">銀行口座</option>
               </select>
-            </div>
-            <div class="form-group form-group-wide">
-              <label for="entry-memo">メモ</label>
-              <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
             </div>
           </div>
 
@@ -214,13 +231,10 @@
               <!-- 前回の明細があるときだけ出す。ほとんどの欄は毎月同じなので、
                    引き継いでから変わった欄だけ直すのが一番早い -->
               <button type="button" class="btn btn-primary btn-small hidden" id="payslip-copy-prev-btn"></button>
-              <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">
-                給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)
-              </button>
-              <button type="button" class="btn btn-secondary btn-small" id="payslip-link-btn">
-                給与サイトから読み込む (設定)
-              </button>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">給与明細の内訳を入力</button>
+              <button type="button" class="btn btn-ghost btn-small" id="payslip-link-btn">給与サイトから読み込む (設定)</button>
             </div>
+            <p class="payslip-hint">内訳を入れると、支給と控除から手取り (振込額) を自動で計算します。</p>
             <p id="payslip-copy-note" class="payslip-copy-note hidden" role="status"></p>
             <div class="payslip-breakdown hidden" id="payslip-breakdown">
               <div id="payslip-salary-fields">
@@ -345,18 +359,18 @@
       </section>
 
       <!-- 記録一覧 -->
-      <section class="card" id="list-section">
-        <div class="list-header">
+      <section class="card" id="list-section" data-panel="home">
+        <div class="list-header card-head">
           <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
-          <div class="csv-actions">
-            <button class="btn btn-secondary btn-small" id="gmail-import-btn">メールから読み込み</button>
-            <button class="btn btn-secondary btn-small" id="export-csv-btn">CSVエクスポート</button>
-            <button class="btn btn-secondary btn-small" id="export-analysis-btn"
-                    title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用">分析用に書き出す</button>
+          <div class="csv-actions" role="group" aria-label="取り込みと書き出し">
+            <button class="btn btn-ghost btn-small" id="gmail-import-btn"><span data-icon="mail"></span>メールから読み込み</button>
             <!-- ファイル入力自体は display:none でフォーカスできないため、
                  ボタンから開く (label だけだとキーボードで到達できない) -->
-            <button class="btn btn-secondary btn-small" id="import-csv-btn">CSVインポート</button>
+            <button class="btn btn-ghost btn-small" id="import-csv-btn"><span data-icon="upload"></span>CSVインポート</button>
             <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden" tabindex="-1" aria-hidden="true">
+            <button class="btn btn-ghost btn-small" id="export-csv-btn"><span data-icon="download"></span>CSVエクスポート</button>
+            <button class="btn btn-ghost btn-small" id="export-analysis-btn"
+                    title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用"><span data-icon="sparkles"></span>分析用に書き出す</button>
           </div>
         </div>
         <p id="list-pending-note" class="list-pending-note hidden"></p>
@@ -396,10 +410,10 @@
       </section>
 
       <!-- 予算 -->
-      <section class="card" id="budget-section">
-        <div class="list-header">
+      <section class="card" id="budget-section" data-panel="budget">
+        <div class="list-header card-head">
           <h2 id="budget-section-title">今月の予算</h2>
-          <button type="button" class="btn btn-secondary btn-small" id="edit-budget-btn">予算を編集</button>
+          <button type="button" class="btn btn-ghost btn-small" id="edit-budget-btn"><span data-icon="pencil"></span>予算を編集</button>
         </div>
 
         <div id="budget-overall" class="budget-overall"></div>
@@ -417,9 +431,22 @@
         </form>
       </section>
 
+      <!-- Need / Want / Save -->
+      <section class="card" id="nws-section" data-panel="budget">
+        <div class="card-head">
+          <h2>Need / Want / Save</h2>
+          <span class="card-head-note">目安 50 : 30 : 20</span>
+        </div>
+        <div class="nws-wrapper">
+          <svg id="nws-chart" class="nws-chart" viewBox="0 0 200 200" width="184" height="184"
+               role="img" aria-label="Need / Want / Save の達成状況。詳しい金額は下の一覧に表示されます"></svg>
+          <div id="nws-legend" class="nws-legend"></div>
+        </div>
+      </section>
+
       <!-- 予定と実績 -->
-      <section class="card" id="plan-actual-section">
-        <h2 id="plan-actual-section-title">今月の予定と実績</h2>
+      <section class="card" id="plan-actual-section" data-panel="budget">
+        <div class="card-head"><h2 id="plan-actual-section-title">今月の予定と実績</h2></div>
 
         <div class="plan-actual-group">
           <h3 class="plan-actual-heading">支出</h3>
@@ -429,7 +456,7 @@
         <div class="plan-actual-group">
           <div class="list-header">
             <h3 class="plan-actual-heading">収入</h3>
-            <button type="button" class="btn btn-secondary btn-small" id="edit-income-budget-btn">収入目標を編集</button>
+            <button type="button" class="btn btn-ghost btn-small" id="edit-income-budget-btn"><span data-icon="pencil"></span>収入目標を編集</button>
           </div>
           <div id="income-plan-actual" class="plan-actual-chart"></div>
 
@@ -454,27 +481,18 @@
       </section>
 
       <!-- 立替金 (仮払い) -->
-      <section class="card" id="advance-section">
-        <h2>立替金(未回収)</h2>
+      <section class="card" id="advance-section" data-panel="book">
+        <div class="card-head"><h2>立替金 (未回収)</h2></div>
         <div class="advance-total">
-          未回収合計: <strong id="advance-outstanding-total">¥0</strong>
+          <span class="advance-total-label">未回収合計</span>
+          <strong id="advance-outstanding-total">¥0</strong>
         </div>
         <div id="advance-list"></div>
       </section>
 
-      <!-- Need / Want / Save -->
-      <section class="card" id="nws-section">
-        <h2>Need / Want / Save (50:30:20)</h2>
-        <div class="nws-wrapper">
-          <svg id="nws-chart" class="nws-chart" viewBox="0 0 200 200" width="180" height="180"
-               role="img" aria-label="Need / Want / Save の達成状況。詳しい金額は下の一覧に表示されます"></svg>
-          <div id="nws-legend" class="nws-legend"></div>
-        </div>
-      </section>
-
       <!-- 帳簿 (簿記の見方) -->
-      <section class="card" id="bookkeeping-section">
-        <div class="list-header">
+      <section class="card" id="bookkeeping-section" data-panel="book">
+        <div class="list-header card-head">
           <h2 id="bookkeeping-section-title">今月の帳簿</h2>
           <div class="book-actions">
             <div class="book-tabs" role="tablist" aria-label="帳簿の表示">
@@ -487,7 +505,7 @@
               <button type="button" class="book-tab" data-book="journal"
                       role="tab" aria-selected="false">仕訳帳</button>
             </div>
-            <button type="button" class="btn btn-secondary btn-small" id="edit-accounts-btn">口座を設定</button>
+            <button type="button" class="btn btn-ghost btn-small" id="edit-accounts-btn"><span data-icon="settings"></span>口座を設定</button>
           </div>
         </div>
 
@@ -551,6 +569,14 @@
     </footer>
     </div>
    </div>
+
+   <!-- スマホ: 画面の切り替え。PCではすべて1ページに並ぶので出さない -->
+   <nav class="tab-bar" aria-label="画面の切り替え">
+     <button type="button" class="tab-btn active" data-tab="home" aria-current="page"><span data-icon="house"></span><span class="tab-label">ホーム</span></button>
+     <button type="button" class="tab-btn" data-tab="budget"><span data-icon="chart-pie"></span><span class="tab-label">予算・分析</span></button>
+     <button type="button" class="tab-btn" data-tab="book"><span data-icon="book-open"></span><span class="tab-label">帳簿</span></button>
+     <button type="button" class="tab-add" id="tab-add-btn" aria-label="記録を追加"><span data-icon="plus"></span></button>
+   </nav>
   </div>
 
   <!-- 記録の編集ポップアップ (入力フォームをここへ移動して使う) -->

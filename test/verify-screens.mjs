@@ -222,6 +222,33 @@ await page.waitForTimeout(500);
 await page.click("#today-btn");
 await page.waitForTimeout(400);
 
+// スマホでは画面が「ホーム / 予算・分析 / 帳簿」の3つに分かれる。
+// ホームには入力と一覧だけがあり、予算や帳簿は出ない
+const panels = await page.evaluate(() => {
+  const shown = (id) => !!document.getElementById(id).offsetParent;
+  return {
+    tabBar: document.querySelector(".tab-bar").getBoundingClientRect().height > 0,
+    form: shown("entry-form-slot"),
+    list: shown("list-section"),
+    budget: shown("budget-section"),
+    book: shown("bookkeeping-section"),
+  };
+});
+if (!panels.tabBar || !panels.form || !panels.list || panels.budget || panels.book) {
+  throw new Error("スマホのホームは入力と一覧だけのはず: " + JSON.stringify(panels));
+}
+await page.click('.tab-btn[data-tab="budget"]');
+await page.waitForTimeout(400);
+const budgetPanels = await page.evaluate(() => ({
+  budget: !!document.getElementById("budget-section").offsetParent,
+  nws: !!document.getElementById("nws-section").offsetParent,
+  form: !!document.getElementById("entry-form-slot").offsetParent,
+  current: document.querySelector('.tab-btn[data-tab="budget"]').getAttribute("aria-current"),
+}));
+if (!budgetPanels.budget || !budgetPanels.nws || budgetPanels.form || budgetPanels.current !== "page") {
+  throw new Error("「予算・分析」タブで予算が出るはず: " + JSON.stringify(budgetPanels));
+}
+
 // ドーナツは、折り返して1段になったとき左端に張り付かず中央に来る
 const donut = await page.evaluate(() => {
   const wrap = document.querySelector(".nws-wrapper").getBoundingClientRect();
@@ -275,17 +302,41 @@ if (
   throw new Error(`the page must not overflow horizontally on mobile: ${JSON.stringify(overflow)}`);
 }
 
-// PCに戻すと横並びのまま (ドーナツは左、凡例が残りを埋める)
+// 「＋」でホームの入力欄へ戻り、金額から打ち始められる
+await page.click("#tab-add-btn");
+await page.waitForTimeout(700);
+const afterAdd = await page.evaluate(() => ({
+  tab: document.getElementById("app-root").dataset.tab,
+  focused: document.activeElement?.id,
+  formTop: Math.round(document.getElementById("entry-form-slot").getBoundingClientRect().top),
+}));
+if (afterAdd.tab !== "home" || afterAdd.focused !== "entry-amount" || afterAdd.formTop > 300) {
+  throw new Error("「＋」で入力欄の金額に移るはず: " + JSON.stringify(afterAdd));
+}
+
+// PCではタブを使わず、全部のセクションが1ページに並ぶ。
+// Need/Want/Save は横に並べた半分幅のカードに入るので、ドーナツと凡例が
+// 横に並ぶか、折り返したときはドーナツが中央に来る (左に張り付かない)
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.waitForTimeout(400);
 const desktopDonut = await page.evaluate(() => {
   const wrap = document.querySelector(".nws-wrapper").getBoundingClientRect();
   const chart = document.querySelector("#nws-chart").getBoundingClientRect();
   const legend = document.querySelector("#nws-legend").getBoundingClientRect();
-  return { leftGap: Math.round(chart.left - wrap.left), sameRow: Math.abs(chart.top - legend.top) < 200 };
+  return {
+    leftGap: Math.round(chart.left - wrap.left),
+    rightGap: Math.round(wrap.right - chart.right),
+    sameRow: Math.abs(chart.top - legend.top) < 100,
+    tabBar: document.querySelector(".tab-bar").getBoundingClientRect().height > 0,
+    budgetShown: !!document.getElementById("budget-section").offsetParent,
+    formShown: !!document.getElementById("entry-form-slot").offsetParent,
+  };
 });
-if (desktopDonut.leftGap > 2 || !desktopDonut.sameRow) {
-  throw new Error("the desktop side-by-side layout should be unchanged: " + JSON.stringify(desktopDonut));
+const donutOk = desktopDonut.sameRow
+  ? desktopDonut.leftGap <= 2
+  : Math.abs(desktopDonut.leftGap - desktopDonut.rightGap) <= 2;
+if (!donutOk || desktopDonut.tabBar || !desktopDonut.budgetShown || !desktopDonut.formShown) {
+  throw new Error("PCのレイアウトが崩れている: " + JSON.stringify(desktopDonut));
 }
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(300);
@@ -307,7 +358,9 @@ const controls = await page.evaluate(() => {
   };
 });
 console.log("入力欄:", JSON.stringify(controls));
-const heights = new Set(Object.values(controls).map((c) => c.height));
+const heights = new Set(
+  Object.entries(controls).filter(([k]) => k !== "金額").map(([, c]) => c.height)
+);
 if (heights.size !== 1) {
   throw new Error("入力欄の高さは揃っているはず: " + JSON.stringify(controls));
 }
@@ -325,15 +378,24 @@ if (typeWidths.length !== 4 || typeWidths.some((w) => w < 44)) {
 if (controls.日付.top !== controls.カテゴリ.top || controls.日付.bottom !== controls.カテゴリ.bottom) {
   throw new Error("横に並ぶ欄は上端も下端も揃うはず: " + JSON.stringify(controls));
 }
-if (controls.金額.top !== controls.口座.top || controls.金額.bottom !== controls.口座.bottom) {
-  throw new Error("金額と口座が揃っていない: " + JSON.stringify(controls));
+// 金額は入力の主役なので、スマホでは1段まるごと使って大きく出す
+if (!(controls.金額.bottom <= controls.日付.top) || controls.金額.height < controls.日付.height) {
+  throw new Error("金額は日付・カテゴリより上に、大きく出るはず: " + JSON.stringify(controls));
+}
+const memoRow = await page.evaluate(() => {
+  const m = document.getElementById("entry-memo").getBoundingClientRect();
+  const a = document.getElementById("entry-settlement").getBoundingClientRect();
+  return { memoTop: m.top, memoBottom: m.bottom, accTop: a.top, accBottom: a.bottom };
+});
+if (memoRow.memoTop !== memoRow.accTop || memoRow.memoBottom !== memoRow.accBottom) {
+  throw new Error("メモと口座が揃っていない: " + JSON.stringify(memoRow));
 }
 
 // --- スマホ幅で指で押せる大きさがある ---
 const tiny = await page.evaluate(() => {
   const out = [];
   for (const sel of ["#prev-month", "#next-month", "#today-btn", "#submit-btn",
-                     '.view-tab', ".advance-checkbox"]) {
+                     '.view-tab', ".advance-checkbox", "#logout-btn", ".tab-btn", "#tab-add-btn"]) {
     const e = document.querySelector(sel);
     const r = e.getBoundingClientRect();
     if (r.height < 44) out.push(`${sel}: ${Math.round(r.width)}x${Math.round(r.height)}`);
@@ -343,12 +405,13 @@ const tiny = await page.evaluate(() => {
 if (tiny.length) throw new Error("よく押すものは44px以上にするはず: " + tiny.join(", "));
 
 // --- よく使う2つが上のほうにある ---
+await page.evaluate(() => window.scrollTo(0, 0));
 const order = await page.evaluate(() => {
   const top = (sel) => Math.round(document.querySelector(sel).getBoundingClientRect().top + window.scrollY);
-  return { 入力: top("#entry-form-slot"), 一覧: top("#list-section"), 予算: top("#budget-section") };
+  return { 入力: top("#entry-form-slot"), 一覧: top("#list-section") };
 });
 console.log("位置:", JSON.stringify(order));
-if (order.一覧 > order.予算) throw new Error("記録一覧は予算より上にあるはず: " + JSON.stringify(order));
+if (order.一覧 < order.入力) throw new Error("一覧は入力の下にあるはず: " + JSON.stringify(order));
 if (order.入力 > 700) throw new Error("入力フォームが下すぎる: " + JSON.stringify(order));
 
 await page.screenshot({ path: path.join(scratch, "screens.png"), fullPage: true });

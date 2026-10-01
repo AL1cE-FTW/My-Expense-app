@@ -152,7 +152,8 @@ const PAYSLIP_BONUS_DEDUCTION_FIELDS = [
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
 const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
 const NWS_TARGET_RATIO = { need: 0.5, want: 0.3, save: 0.2 };
-const NWS_BUCKET_COLORS = { need: "#2f7dea", want: "#f5c518" };
+// 色は css/style.css のトークン (ダークモードで切り替わる)
+const NWS_BUCKET_COLORS = { need: "var(--need)", want: "var(--want)" };
 
 function categoryBucket(category) {
   return NEED_CATEGORIES.includes(category) ? "need" : "want";
@@ -348,6 +349,11 @@ const el = {
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
+  heroLabel: document.getElementById("hero-label"),
+  summaryFlow: document.getElementById("summary-flow"),
+  appHeader: document.querySelector(".app-header"),
+  tabButtons: document.querySelectorAll(".tab-btn"),
+  tabAddBtn: document.getElementById("tab-add-btn"),
   totalSave: document.getElementById("total-save"),
   form: document.getElementById("entry-form"),
   entryFormSlot: document.getElementById("entry-form-slot"),
@@ -644,6 +650,12 @@ function render() {
     viewMode === "year" ? `${currentMonth.getFullYear()}年` : formatMonth(currentMonth);
 
   const periodLabel = viewMode === "year" ? "今年" : "今月";
+  // ヒーローの見出しは、見ている月・年をそのまま書く (先月を見ているのに
+  // 「今月の収支」と出ると、どの数字なのか迷う)
+  el.heroLabel.textContent =
+    viewMode === "year"
+      ? `${currentMonth.getFullYear()}年の収支`
+      : `${currentMonth.getMonth() + 1}月の収支`;
   el.budgetSectionTitle.textContent = `${periodLabel}の予算`;
   el.planActualSectionTitle.textContent = `${periodLabel}の予定と実績`;
   el.listSectionTitle.textContent = `${periodLabel}の記録`;
@@ -1095,7 +1107,7 @@ function renderAdvances() {
     const settleBtn = document.createElement("button");
     settleBtn.type = "button";
     settleBtn.className = "icon-btn";
-    settleBtn.textContent = "精算";
+    settleBtn.append(createIcon("check"), "精算");
     settleBtn.setAttribute(
       "aria-label",
       `${entry.date} ${entry.category} ${formatYen(entry.amount)} の立替金を精算`
@@ -1288,6 +1300,70 @@ function renderSummary(monthEntries) {
   el.balance.classList.toggle("positive", balance > 0);
   el.balance.classList.toggle("negative", balance < 0);
   el.totalSave.textContent = formatYen(saved);
+  renderSummaryFlow(income, expense, saved);
+}
+
+/**
+ * 収入がどこへ行ったかを1本の帯で見せる: 支出 / 貯蓄・投資 / 手元に残った分。
+ * 収入を100%とする。使いすぎて収入を超えた月は、超えた分を斜線で示す
+ * (帯の幅は「支出+貯蓄」を100%として描き直す)。
+ */
+function renderSummaryFlow(income, expense, saved) {
+  el.summaryFlow.innerHTML = "";
+  const spent = Math.max(expense, 0);
+  const savedPart = Math.max(saved, 0);
+  if (income <= 0) {
+    const p = document.createElement("p");
+    p.className = "flow-empty";
+    p.textContent =
+      spent + savedPart > 0
+        ? `収入が未登録です (支出 ${formatYen(spent)})`
+        : "収入と支出を記録すると、お金の行き先がここに出ます";
+    el.summaryFlow.appendChild(p);
+    return;
+  }
+
+  const left = income - spent - savedPart;
+  const total = Math.max(income, spent + savedPart);
+  const segments = [
+    { key: "expense", label: "支出", amount: spent },
+    { key: "save", label: "貯蓄", amount: savedPart },
+    left >= 0
+      ? { key: "left", label: "手元に残る", amount: left }
+      : { key: "over", label: "収入を超えた分", amount: -left },
+  ];
+
+  const bar = document.createElement("div");
+  bar.className = "flow-bar";
+  bar.setAttribute("role", "img");
+  bar.setAttribute(
+    "aria-label",
+    segments.map((seg) => `${seg.label} ${formatYen(seg.amount)}`).join("、")
+  );
+  segments.forEach((seg, i) => {
+    if (seg.amount <= 0) return;
+    const part = document.createElement("span");
+    part.className = `flow-seg ${seg.key}`;
+    part.style.flexGrow = String(seg.amount / total);
+    part.style.flexBasis = "0";
+    part.style.animationDelay = `${i * 90}ms`;
+    bar.appendChild(part);
+  });
+
+  const legend = document.createElement("div");
+  legend.className = "flow-legend";
+  for (const seg of segments) {
+    if (seg.key === "over" && seg.amount <= 0) continue;
+    const item = document.createElement("span");
+    item.className = seg.key === "over" ? "expense" : seg.key;
+    const dot = document.createElement("i");
+    const strong = document.createElement("strong");
+    strong.textContent = `${Math.round((seg.amount / income) * 100)}%`;
+    item.append(dot, `${seg.label} `, strong);
+    legend.appendChild(item);
+  }
+
+  el.summaryFlow.append(bar, legend);
 }
 
 /**
@@ -1335,6 +1411,26 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
   if (totalBudget > 0) {
     const ratio = totalActual / totalBudget;
     const percent = Math.round(ratio * 100);
+
+    // 一番知りたいのは「あといくら使えるか」なので、それを大きく出す
+    const remaining = totalBudget - totalActual;
+    const head = document.createElement("div");
+    head.className = "budget-remaining";
+    const remainingLabel = document.createElement("span");
+    remainingLabel.className = "budget-remaining-label";
+    remainingLabel.textContent = remaining >= 0 ? "残り" : "予算オーバー";
+    const remainingValue = document.createElement("span");
+    remainingValue.className = "budget-remaining-value" + (remaining < 0 ? " over" : "");
+    remainingValue.textContent = formatYen(Math.abs(remaining));
+    head.append(remainingLabel, remainingValue);
+    const pace = budgetPaceText(remaining);
+    if (pace) {
+      const paceEl = document.createElement("span");
+      paceEl.className = "budget-pace";
+      paceEl.textContent = pace;
+      head.appendChild(paceEl);
+    }
+    el.budgetOverall.appendChild(head);
 
     const text = document.createElement("div");
     text.className = "budget-overall-text";
@@ -1415,11 +1511,39 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
       amountText.textContent = `${formatYen(actual)} (予算未設定)`;
     }
 
-    row.append(name, percentText, amountText);
+    const track = document.createElement("div");
+    track.className = "budget-row-track";
+    if (budget > 0) {
+      const bar = document.createElement("div");
+      const ratio = actual / budget;
+      bar.className = budgetBarClass(ratio);
+      bar.style.width = `${Math.min(Math.max(ratio, 0), 1) * 100}%`;
+      track.appendChild(bar);
+    }
+
+    row.append(name, percentText, track, amountText);
     el.budgetBreakdown.appendChild(row);
   }
 
   return { totalActual, totalBudget, unbudgetedActual };
+}
+
+/**
+ * 今日を含めた残りの日数で割った「1日あたり使える額」。
+ * 実際の今月を月別で見ているときだけ出す (過去の月・年間では意味がない)。
+ */
+function budgetPaceText(remaining) {
+  if (viewMode !== "month" || remaining <= 0) return "";
+  const now = new Date();
+  if (
+    currentMonth.getFullYear() !== now.getFullYear() ||
+    currentMonth.getMonth() !== now.getMonth()
+  ) {
+    return "";
+  }
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysLeft = lastDay - now.getDate() + 1;
+  return `あと${daysLeft}日 · 1日 ${formatYen(Math.floor(remaining / daysLeft))}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1560,11 +1684,14 @@ function buildPlanActualRow(label, amount, max, barClass) {
 }
 
 const NWS_SVG_NS = "http://www.w3.org/2000/svg";
-const NWS_RADIUS = 50;
-const NWS_STROKE_WIDTH = 90;
+const NWS_RADIUS = 80;
+const NWS_STROKE_WIDTH = 18;
+// 区切りのすき間 (円周上の長さ)
+const NWS_GAP = 4;
 const NWS_CIRCUMFERENCE = 2 * Math.PI * NWS_RADIUS;
-const NWS_COLORS = { ...NWS_BUCKET_COLORS, save: "#4caf50" };
-const NWS_BG_COLORS = { need: "#bcd7fa", want: "#faedb0", save: "#c3e6c4" };
+const NWS_COLORS = { ...NWS_BUCKET_COLORS, save: "var(--nws-save)" };
+const NWS_BG_COLORS = { need: "var(--need-soft)", want: "var(--want-soft)", save: "var(--nws-save-soft)" };
+const NWS_OVER_COLOR = "var(--expense)";
 const NWS_LABELS = { need: "Need", want: "Want", save: "Save" };
 const NWS_ICONS = { need: "house", want: "shopping-bag", save: "piggy-bank" };
 const NWS_CATEGORY_DESCRIPTIONS = {
@@ -1579,7 +1706,8 @@ function nwsArc(offset, length, color) {
   circle.setAttribute("cy", "100");
   circle.setAttribute("r", String(NWS_RADIUS));
   circle.setAttribute("fill", "none");
-  circle.setAttribute("stroke", color);
+  // stroke 属性には var() が書けないので style で指定する
+  circle.style.stroke = color;
   circle.setAttribute("stroke-width", String(NWS_STROKE_WIDTH));
   circle.setAttribute(
     "stroke-dasharray",
@@ -1645,7 +1773,9 @@ function renderNeedWantSave(monthEntries, targetMultiplier) {
 
   let offset = 0;
   for (const bucket of buckets) {
-    const segmentLength = NWS_CIRCUMFERENCE * NWS_TARGET_RATIO[bucket.key];
+    const fullLength = NWS_CIRCUMFERENCE * NWS_TARGET_RATIO[bucket.key];
+    // 隣の区切りとくっつかないよう、少しすき間を空けて描く
+    const segmentLength = fullLength - NWS_GAP;
     group.appendChild(nwsArc(offset, segmentLength, NWS_BG_COLORS[bucket.key]));
 
     const ratio = bucket.target > 0 ? bucket.actual / bucket.target : 0;
@@ -1656,14 +1786,33 @@ function renderNeedWantSave(monthEntries, targetMultiplier) {
     // 「ちょうど0円貯金」と見分けがつかないので、警告として赤で埋める。
     const fillRatio = isOver && bucket.key === "save" ? 1 : Math.min(Math.max(ratio, 0), 1);
     const fillLength = segmentLength * fillRatio;
-    const fillColor = isOver ? "#ef4444" : NWS_COLORS[bucket.key];
-    group.appendChild(nwsArc(offset, fillLength, fillColor));
+    const fillColor = isOver ? NWS_OVER_COLOR : NWS_COLORS[bucket.key];
+    const fill = nwsArc(offset, fillLength, fillColor);
+    fill.classList.add("nws-fill");
+    group.appendChild(fill);
 
     bucket.ratio = ratio;
     bucket.isOver = isOver;
-    offset += segmentLength;
+    offset += fullLength;
   }
   el.nwsChart.appendChild(group);
+
+  // 真ん中には、収入のうち実際に残せた割合 (Save の実績) を出す
+  const saveRate = Math.round((saveAmount / totalIncome) * 100);
+  const centerValue = document.createElementNS(NWS_SVG_NS, "text");
+  centerValue.setAttribute("x", "100");
+  centerValue.setAttribute("y", "104");
+  centerValue.setAttribute("text-anchor", "middle");
+  centerValue.setAttribute("class", "nws-center-value");
+  centerValue.textContent = `${saveRate}%`;
+  if (saveRate < 0) centerValue.style.fill = NWS_OVER_COLOR;
+  const centerLabel = document.createElementNS(NWS_SVG_NS, "text");
+  centerLabel.setAttribute("x", "100");
+  centerLabel.setAttribute("y", "126");
+  centerLabel.setAttribute("text-anchor", "middle");
+  centerLabel.setAttribute("class", "nws-center-label");
+  centerLabel.textContent = "残せた割合";
+  el.nwsChart.append(centerValue, centerLabel);
 
   for (const bucket of buckets) {
     const item = document.createElement("div");
@@ -1674,7 +1823,7 @@ function renderNeedWantSave(monthEntries, targetMultiplier) {
 
     const swatch = document.createElement("span");
     swatch.className = "nws-swatch";
-    swatch.style.background = bucket.isOver ? "#ef4444" : NWS_COLORS[bucket.key];
+    swatch.style.background = bucket.isOver ? NWS_OVER_COLOR : NWS_COLORS[bucket.key];
 
     const label = document.createElement("span");
     label.className = "nws-legend-label";
@@ -1928,7 +2077,7 @@ function renderList(monthEntries) {
     if (entry.payslip) {
       const detailBtn = document.createElement("button");
       detailBtn.className = "icon-btn";
-      detailBtn.textContent = "内訳";
+      detailBtn.append(createIcon("file-text"), rowButtonText("内訳"));
       detailBtn.setAttribute("aria-label", `${rowLabel} の内訳を見る`);
       detailBtn.addEventListener("click", () => showPayslipDetailModal(entry));
       actions.appendChild(detailBtn);
@@ -1936,7 +2085,7 @@ function renderList(monthEntries) {
 
     const editBtn = document.createElement("button");
     editBtn.className = "icon-btn";
-    editBtn.textContent = "編集";
+    editBtn.append(createIcon("pencil"), rowButtonText("編集"));
     editBtn.setAttribute("aria-label", `${rowLabel} を編集`);
     // 更新後にこの行のボタンへフォーカスを戻すための目印
     editBtn.dataset.editId = entry.id;
@@ -1944,7 +2093,7 @@ function renderList(monthEntries) {
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "icon-btn delete";
-    deleteBtn.textContent = "削除";
+    deleteBtn.append(createIcon("trash-2"), rowButtonText("削除"));
     deleteBtn.setAttribute("aria-label", `${rowLabel} を削除`);
     deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
 
@@ -1954,6 +2103,15 @@ function renderList(monthEntries) {
     tr.append(dateTd, typeTd, categoryTd, amountTd, memoTd, createdAtTd, actionsTd);
     el.entryList.appendChild(tr);
   }
+}
+
+// 一覧の行の操作ボタンの文字。スマホでは幅が足りないのでアイコンだけを見せ、
+// 文字は読み上げ用に残す (CSS の .btn-text)
+function rowButtonText(text) {
+  const span = document.createElement("span");
+  span.className = "btn-text";
+  span.textContent = text;
+  return span;
 }
 
 // 未確定(メールから取り込んだ仮の記録)が期間内にいくつあるかを一覧の上に出す。
@@ -3086,9 +3244,7 @@ function updatePayslipVisibility() {
   el.payslipSalaryFields.classList.toggle("hidden", mode !== "salary");
   el.payslipBonusFields.classList.toggle("hidden", mode !== "bonus");
   el.payslipToggleBtn.textContent =
-    mode === "bonus"
-      ? "賞与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)"
-      : "給与明細の内訳を入力する(支給・控除の内訳から手取りを自動計算)";
+    mode === "bonus" ? "賞与明細の内訳を入力" : "給与明細の内訳を入力";
   updatePayslipCopyButton();
 }
 
@@ -3105,6 +3261,8 @@ function applyPendingPayslipImport() {
   pendingPayslipImport = null;
   if (!payload) return;
 
+  // スマホで予算や帳簿の画面を開いたままでも、入力欄のある画面に戻す
+  switchTab("home");
   const result = payload.invalid ? null : interpretPayslipImport(payload);
   if (!result) {
     alert(
@@ -4954,6 +5112,7 @@ function setupAuthForm() {
 
 function setupAppEventListeners() {
   setupBookTabs();
+  setupTabBar();
   el.editAccountsBtn.addEventListener("click", openAccountsForm);
   el.cancelAccountsBtn.addEventListener("click", closeAccountsForm);
   el.accountsForm.addEventListener("submit", submitAccountsForm);
@@ -5167,6 +5326,13 @@ function setupSidebarScrollSpy() {
 
   trackHeaderHeight();
 
+  // 下にスクロールしたらヘッダーに境界線を出す (一番上では紙と一体に見せる)
+  const updateHeaderEdge = () => {
+    el.appHeader?.classList.toggle("scrolled", window.scrollY > 4);
+  };
+  window.addEventListener("scroll", updateHeaderEdge, { passive: true });
+  updateHeaderEdge();
+
   const links = [...document.querySelectorAll(".sidebar-link")];
   if (links.length === 0) return;
   const sections = links
@@ -5175,8 +5341,19 @@ function setupSidebarScrollSpy() {
   if (sections.length === 0) return;
 
   const REFERENCE_Y = 140;
+  // リンクを押した直後は、そのリンクを光らせたままにする。広い画面では
+  // 2つのセクションが横に並ぶので、位置だけで決めると隣が光ってしまう
+  let lockedHref = null;
+  let lockTimer = 0;
+
+  function setActive(href) {
+    for (const link of links) {
+      link.classList.toggle("active", link.getAttribute("href") === href);
+    }
+  }
 
   function updateActiveSidebarLink() {
+    if (lockedHref) return;
     // ページ最下部までスクロールすると、最後のセクションがページの高さ不足で
     // REFERENCE_Y まで届かないことがあるため、末尾到達時は最後のリンクを優先する
     const atBottom =
@@ -5186,20 +5363,112 @@ function setupSidebarScrollSpy() {
     if (atBottom) {
       current = sections[sections.length - 1];
     } else {
+      // 基準線より上に来たもののうち、一番下にあるもの。横に並んで上端が
+      // 同じものは、先に並んでいる (左にある) ほうを選ぶ
+      let bestTop = -Infinity;
       for (const section of sections) {
-        if (section.getBoundingClientRect().top <= REFERENCE_Y) current = section;
+        const top = Math.round(section.getBoundingClientRect().top);
+        if (top <= REFERENCE_Y && top > bestTop + 1) {
+          bestTop = top;
+          current = section;
+        }
       }
     }
+    setActive(`#${current.id}`);
+  }
 
-    for (const link of links) {
-      link.classList.toggle("active", link.getAttribute("href") === `#${current.id}`);
-    }
+  for (const link of links) {
+    link.addEventListener("click", () => {
+      lockedHref = link.getAttribute("href");
+      setActive(lockedHref);
+      clearTimeout(lockTimer);
+      lockTimer = setTimeout(() => {
+        lockedHref = null;
+      }, 900);
+    });
   }
 
   // 初期状態 (ログイン前で #app-root がまだ非表示のときは getBoundingClientRect が
   // 全て0になってしまうため、レイアウト計算に頼らず先頭リンクを既定でアクティブにする)
   links[0].classList.add("active");
   window.addEventListener("scroll", updateActiveSidebarLink, { passive: true });
+}
+
+// ---------------------------------------------------------------------------
+// スマホの下部タブ
+//
+// PC では全セクションを1ページに並べる (サイドバーで移動)。スマホでは縦に
+// 長くなりすぎるので、「ホーム (入力と一覧)」「予算・分析」「帳簿」の3画面に
+// 分ける。どの画面にどのセクションが出るかは HTML の data-panel で決め、
+// 切り替えは #app-root の data-tab を変えるだけ (表示は CSS)。
+// ---------------------------------------------------------------------------
+
+const MOBILE_QUERY = window.matchMedia("(max-width: 768px)");
+// 画面ごとのスクロール位置。戻ってきたときに、見ていた場所から再開する
+const tabScrollPositions = {};
+
+function currentTab() {
+  return el.appRoot.dataset.tab || "home";
+}
+
+function switchTab(tab, { scrollTop, animate = true } = {}) {
+  const previous = currentTab();
+  if (previous === tab && scrollTop === undefined) return;
+  // ポップアップを開いているあいだは body を固定しているので切り替えない
+  if (document.body.classList.contains("modal-open")) return;
+
+  const apply = () => {
+    if (previous !== tab) tabScrollPositions[previous] = window.scrollY;
+    el.appRoot.dataset.tab = tab;
+    for (const btn of el.tabButtons) {
+      const active = btn.dataset.tab === tab;
+      btn.classList.toggle("active", active);
+      if (active) btn.setAttribute("aria-current", "page");
+      else btn.removeAttribute("aria-current");
+    }
+    if (MOBILE_QUERY.matches) {
+      const top = scrollTop ?? tabScrollPositions[tab] ?? 0;
+      window.scrollTo({ top, behavior: "instant" });
+    }
+  };
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (
+    animate &&
+    MOBILE_QUERY.matches &&
+    previous !== tab &&
+    document.startViewTransition &&
+    !reduceMotion
+  ) {
+    document.startViewTransition(apply);
+  } else {
+    apply();
+  }
+}
+
+// 「＋」: 入力欄へ移動して、金額から打ち始められるようにする
+function jumpToEntryForm() {
+  if (entryFormIsInModal()) return;
+  // 切り替えは同期で行う。アニメーション (View Transition) を挟むと切り替えが
+  // 後回しになり、まだ隠れている金額欄にフォーカスできない。また iOS は
+  // タップの処理の中で focus() したときだけキーボードを出す
+  switchTab("home", { animate: false });
+  el.entryFormSlot.scrollIntoView({ block: "start", behavior: "smooth" });
+  el.entryAmount.focus({ preventScroll: true });
+}
+
+function setupTabBar() {
+  for (const btn of el.tabButtons) {
+    btn.addEventListener("click", () => {
+      // 今いる画面のタブをもう一度押したら先頭へ戻る (iOS のタブと同じ)
+      if (btn.dataset.tab === currentTab()) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      switchTab(btn.dataset.tab);
+    });
+  }
+  el.tabAddBtn.addEventListener("click", jumpToEntryForm);
 }
 
 async function main() {

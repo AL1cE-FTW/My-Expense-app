@@ -156,7 +156,7 @@ const sortIcon = await page.evaluate(() => {
     // 矢印は枠いっぱいに描かれるものを使う (chevron は絵の高さが枠の1/4しかない)
     viewBoxSpan: active.innerHTML.includes("M12 19V5") || active.innerHTML.includes("M12 5v14"),
     color: getComputedStyle(active).color,
-    primary: root.getPropertyValue("--color-primary").trim(),
+    primary: root.getPropertyValue("--ink").trim(),
     inactiveVisibility: getComputedStyle(inactive).visibility,
     inactiveWidth: inactive.getBoundingClientRect().width,
   };
@@ -170,7 +170,7 @@ const toRgb = (hex) => {
   return `rgb(${m.join(", ")})`;
 };
 if (sortIcon.color !== toRgb(sortIcon.primary)) {
-  throw new Error("矢印の色は --color-primary から来るはず: " + JSON.stringify(sortIcon));
+  throw new Error("矢印の色は --ink (文字色のトークン) から来るはず: " + JSON.stringify(sortIcon));
 }
 if (sortIcon.inactiveVisibility !== "hidden" || sortIcon.inactiveWidth === 0) {
   throw new Error("使っていない列の矢印は見えないが場所は取るはず: " + JSON.stringify(sortIcon));
