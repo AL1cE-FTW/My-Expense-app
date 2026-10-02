@@ -462,6 +462,8 @@ if (memoRow.memoTop !== memoRow.accTop || memoRow.memoBottom !== memoRow.accBott
 }
 
 // --- スマホ幅で指で押せる大きさがある ---
+// (入力欄にフォーカスがあると下のタブは隠れるので、外してから測る)
+await page.evaluate(() => document.activeElement?.blur());
 const tiny = await page.evaluate(() => {
   const out = [];
   for (const sel of ["#prev-month", "#next-month", "#today-btn", "#submit-btn",
@@ -483,6 +485,65 @@ const order = await page.evaluate(() => {
 console.log("位置:", JSON.stringify(order));
 if (order.一覧 < order.入力) throw new Error("一覧は入力の下にあるはず: " + JSON.stringify(order));
 if (order.入力 > 700) throw new Error("入力フォームが下すぎる: " + JSON.stringify(order));
+
+// ---------------------------------------------------------------------------
+// スマホのレビューで見つかった不具合の再発防止
+// ---------------------------------------------------------------------------
+// 同じ日の2件目以降も、スマホのカードでは日付を出す (表ではないのでまとまりが見えない)
+const sameDayDates = await page.evaluate(() =>
+  [...document.querySelectorAll("#entry-list tr.same-day td.date-cell")].map((td) => getComputedStyle(td).color)
+);
+if (sameDayDates.some((c) => c === "rgba(0, 0, 0, 0)")) {
+  throw new Error("スマホでは同じ日の記録にも日付を出すはず");
+}
+// 文字を入力しているあいだは、下のタブがキーボードの上で入力欄を覆わないよう隠す
+await page.locator("#entry-memo").focus();
+if ((await page.locator(".tab-bar").evaluate((e) => getComputedStyle(e).display)) !== "none") {
+  throw new Error("入力中は下のタブを隠すはず");
+}
+await page.locator("#entry-memo").blur();
+// 帳簿の合計試算表は、一覧用のカード表示に巻き込まれず表のまま
+await page.click('.tab-btn[data-tab="book"]');
+await page.waitForTimeout(300);
+await page.click('.book-tab[data-book="trial"]');
+await page.waitForTimeout(300);
+const trial = await page.evaluate(() => {
+  const t = document.querySelector("#bookkeeping-body table");
+  return t && { display: getComputedStyle(t).display, head: getComputedStyle(t.tHead).position };
+});
+if (!trial || trial.display !== "table" || trial.head === "absolute") {
+  throw new Error("合計試算表は表のまま出るはず: " + JSON.stringify(trial));
+}
+// 年間の棒グラフは12か月とも画面 (カード) の中に収まる
+await page.click('.tab-btn[data-tab="home"]');
+await page.click('.view-tab[data-view="year"]');
+await page.waitForTimeout(500);
+const yearFit = await page.evaluate(() => {
+  const card = document.getElementById("yearly-chart-section").getBoundingClientRect();
+  return [...document.querySelectorAll("#monthly-bar-chart .month-bar-group")]
+    .filter((g) => g.getBoundingClientRect().right > card.right + 1).length;
+});
+if (yearFit) throw new Error(`年間グラフの ${yearFit} か月分がカードの外にはみ出している`);
+await page.click('.view-tab[data-view="month"]');
+await page.waitForTimeout(300);
+// 幅320pxの端末でも、月の移動ボタンが画面に収まり、金額が「…」で切れない
+await page.setViewportSize({ width: 320, height: 640 });
+await page.waitForTimeout(400);
+const narrow = await page.evaluate(() => {
+  const vw = document.documentElement.clientWidth;
+  const off = ["#prev-month", "#next-month", "#today-btn", "#logout-btn"].filter(
+    (sel) => document.querySelector(sel).getBoundingClientRect().right > vw
+  );
+  const cut = [...document.querySelectorAll(".summary-cards .card-value")]
+    .filter((e) => e.scrollWidth > e.clientWidth + 1)
+    .map((e) => e.textContent);
+  return { off, cut };
+});
+if (narrow.off.length || narrow.cut.length) {
+  throw new Error("幅320pxで画面からはみ出す・金額が切れる: " + JSON.stringify(narrow));
+}
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
 
 await page.screenshot({ path: path.join(scratch, "screens.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));

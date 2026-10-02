@@ -857,6 +857,17 @@ h2:focus {
 .fg-memo { grid-column: span 6; }
 .fg-settlement { grid-column: span 6; }
 
+/* 画面がとても狭い (幅320pxの端末など) ときは、日付とメモを1段まるごと使う。
+   半分の幅だと日付が「10/02/20」のように途中で切れる */
+@container entry (max-width: 300px) {
+  .fg-category,
+  .fg-date,
+  .fg-memo,
+  .fg-settlement {
+    grid-column: 1 / -1;
+  }
+}
+
 /* 振替は口座を選ばない (方向はカテゴリで決まる) ので、メモが行を使い切る */
 .entry-fields:has(.fg-settlement.hidden) .fg-memo {
   grid-column: 1 / -1;
@@ -2882,8 +2893,9 @@ kbd {
   margin-right: 4px;
 }
 
-/* 指で操作する端末ではショートカットの案内を出さない */
+/* 指で操作する端末ではショートカットの案内やPC向けの手順を出さない */
 @media (hover: none), (max-width: 768px) {
+  .pc-only,
   .form-shortcut,
   .shortcut-help {
     display: none !important;
@@ -2917,14 +2929,18 @@ kbd {
 .dow.sun { color: var(--expense); }
 .dow.sat { color: var(--need); }
 
-/* 同じ日の2行目以降は日付を消し、行の区切りも弱める (日ごとのまとまりが見える) */
-.entry-table tbody tr.same-day td.date-cell,
-.entry-table tbody tr.same-day td.date-cell .dow {
-  color: transparent;
-}
+/* 同じ日の2行目以降は日付を消し、行の区切りも弱める (日ごとのまとまりが見える)。
+   スマホでは1件ずつのカードなので、日付を消すと何日の記録か分からなくなる。
+   表として並ぶ幅だけにする */
+@media (min-width: 769px) {
+  .entry-table tbody tr.same-day td.date-cell,
+  .entry-table tbody tr.same-day td.date-cell .dow {
+    color: transparent;
+  }
 
-.entry-table tbody tr:has(+ tr.same-day) td {
-  border-bottom-color: color-mix(in srgb, var(--line) 45%, transparent);
+  .entry-table tbody tr:has(+ tr.same-day) td {
+    border-bottom-color: color-mix(in srgb, var(--line) 45%, transparent);
+  }
 }
 
 .category-cell .category-dot {
@@ -3396,8 +3412,10 @@ kbd {
   .current-month {
     order: -1;
     flex: 1;
+    /* PC用の最小幅 (6.4em) のままだと、幅の狭い端末で「今月」が画面の外に押し出される */
+    min-width: 0;
+    font-size: clamp(1.25rem, 6.4vw, 1.6rem);
     text-align: left;
-    font-size: 1.6rem;
     font-weight: 700;
     letter-spacing: -0.02em;
   }
@@ -3529,6 +3547,12 @@ kbd {
     transition: transform 0.2s var(--ease);
   }
 
+  /* 文字を入力しているあいだは下のタブを隠す。キーボードの上に浮いて
+     入力欄を覆ってしまう (Android は画面が縮むので特に) */
+  #app-root:has(.app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea):focus) .tab-bar {
+    display: none;
+  }
+
   .tab-add:active {
     transform: scale(0.92);
   }
@@ -3566,6 +3590,9 @@ kbd {
 
   .card-value {
     font-size: 1.02rem;
+    /* 金額は「…」で切らない (¥150,… では読めない) */
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .stat.cumulative-card {
@@ -3580,6 +3607,30 @@ kbd {
   .flow-legend {
     font-size: 0.74rem;
     gap: 4px 12px;
+  }
+
+  /* --- 金額の桁が多い・画面が狭いとき: 収入・支出・貯蓄を3列に詰めず、1行ずつ並べる --- */
+  @media (max-width: 400px) {
+    .summary-cards {
+      grid-template-columns: 1fr;
+    }
+    .stat {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 9px 0;
+    }
+    .stat + .stat {
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+    .stat .card-value {
+      margin-top: 0;
+    }
+    .stat.cumulative-card {
+      display: grid;
+      padding: 12px 14px;
+    }
   }
 
   /* --- 記録一覧: 表をカードの並びに組み替える ---
@@ -3621,11 +3672,11 @@ kbd {
     grid-column: 1 / -1;
   }
 
-  .table-wrapper {
+  #list-section .table-wrapper {
     overflow: visible;
   }
 
-  .entry-table thead {
+  #list-section .entry-table thead {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -3633,12 +3684,12 @@ kbd {
     clip-path: inset(50%);
   }
 
-  .entry-table,
-  .entry-table tbody {
+  #list-section .entry-table,
+  #list-section .entry-table tbody {
     display: block;
   }
 
-  .entry-table tbody tr {
+  #list-section .entry-table tbody tr {
     display: grid;
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     grid-template-areas:
@@ -3651,42 +3702,42 @@ kbd {
     border-bottom: 1px solid var(--line);
   }
 
-  .entry-table tbody tr:hover {
+  #list-section .entry-table tbody tr:hover {
     background: transparent;
   }
 
-  .entry-table tbody tr:last-child {
+  #list-section .entry-table tbody tr:last-child {
     border-bottom: 0;
   }
 
-  .entry-table td {
+  #list-section .entry-table td {
     padding: 0;
     border: 0;
     min-width: 0;
   }
 
-  .entry-table td:nth-child(1) {
+  #list-section .entry-table td:nth-child(1) {
     grid-area: date;
     font-size: 0.78rem;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
 
-  .entry-table td:nth-child(2) {
+  #list-section .entry-table td:nth-child(2) {
     grid-area: type;
     display: flex;
     gap: 2px;
   }
 
-  .entry-table td:nth-child(2) .type-badge,
-  .entry-table td:nth-child(2) .advance-badge,
-  .entry-table td:nth-child(2) .pending-badge {
+  #list-section .entry-table td:nth-child(2) .type-badge,
+  #list-section .entry-table td:nth-child(2) .advance-badge,
+  #list-section .entry-table td:nth-child(2) .pending-badge {
     font-size: 0.66rem;
     padding: 0 7px;
     margin-left: 0;
   }
 
-  .entry-table td:nth-child(3) {
+  #list-section .entry-table td:nth-child(3) {
     grid-area: cat;
     font-weight: 600;
     font-size: 0.95rem;
@@ -3694,12 +3745,12 @@ kbd {
     text-overflow: ellipsis;
   }
 
-  .entry-table td.amount-cell {
+  #list-section .entry-table td.amount-cell {
     grid-area: amount;
     font-size: 1rem;
   }
 
-  .entry-table td.memo-cell {
+  #list-section .entry-table td.memo-cell {
     grid-area: memo;
     min-width: 0;
     font-size: 0.78rem;
@@ -3709,11 +3760,11 @@ kbd {
     text-overflow: ellipsis;
   }
 
-  .entry-table td.created-at-cell {
+  #list-section .entry-table td.created-at-cell {
     display: none;
   }
 
-  .entry-table td:last-child {
+  #list-section .entry-table td:last-child {
     grid-area: actions;
   }
 
@@ -3723,18 +3774,18 @@ kbd {
   }
 
   /* 行の操作はアイコンだけ見せる (文字は読み上げ用に残す) */
-  .entry-table .icon-btn {
+  #list-section .entry-table .icon-btn {
     width: 40px;
     padding: 0;
     justify-content: center;
   }
 
-  .entry-table .icon-btn .icon {
+  #list-section .entry-table .icon-btn .icon {
     width: 17px;
     height: 17px;
   }
 
-  .entry-table .icon-btn .btn-text {
+  #list-section .entry-table .icon-btn .btn-text {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -3782,8 +3833,33 @@ kbd {
     flex-basis: 100%;
   }
 
+  /* 年間の棒グラフ: 12か月を画面の幅に収める (はみ出すとカードの外に棒が出る) */
   .monthly-bar-yaxis {
-    width: 52px;
+    width: 40px;
+  }
+
+  .monthly-bar-chart {
+    gap: 2px;
+  }
+
+  .month-bar-group {
+    min-width: 0;
+  }
+
+  .month-bars {
+    gap: 2px;
+  }
+
+  .month-bar {
+    width: min(7px, 30%);
+  }
+
+  .month-bar-label {
+    font-size: 0.64rem;
+  }
+
+  .month-bar-label .month-suffix {
+    display: none;
   }
 
   /* --- ポップアップは画面下から出るシートにする (片手で届く) --- */

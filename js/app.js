@@ -1280,7 +1280,7 @@ function renderMonthlyBarChart() {
     const label = document.createElement("span");
     label.className = "monthly-bar-yaxis-label";
     label.style.top = `${100 - (value / chartMax) * 100}%`;
-    label.textContent = formatYen(value);
+    label.textContent = MOBILE_QUERY.matches ? formatYenShort(value) : formatYen(value);
     el.monthlyBarYaxis.appendChild(label);
   }
 
@@ -1306,7 +1306,11 @@ function renderMonthlyBarChart() {
 
     const label = document.createElement("div");
     label.className = "month-bar-label" + (index === currentRealMonth ? " current" : "");
-    label.textContent = `${index + 1}月`;
+    // 狭い画面では「月」を省いて数字だけにする (12か月を幅に収めるため)
+    const suffix = document.createElement("span");
+    suffix.className = "month-suffix";
+    suffix.textContent = "月";
+    label.append(String(index + 1), suffix);
 
     group.append(bars, label);
     el.monthlyBarChart.appendChild(group);
@@ -5909,6 +5913,10 @@ function setupTabBar() {
     });
   }
   el.tabAddBtn.addEventListener("click", jumpToEntryForm);
+  // 年間グラフの目盛りの書き方はスマホとPCで違うので、幅が切り替わったら描き直す
+  MOBILE_QUERY.addEventListener("change", () => {
+    if (!el.appRoot.classList.contains("hidden")) render();
+  });
 }
 
 async function main() {
