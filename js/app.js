@@ -516,6 +516,9 @@ function entriesCollection(uid) {
   return firestoreApi.collection(db, `users/${uid}/entries`);
 }
 
+// この画面から記録を削除している最中か (上の「別の端末で削除された」と区別する)
+let deletingLocally = false;
+
 function subscribeEntries(uid) {
   if (unsubscribeEntries) unsubscribeEntries();
   const q = firestoreApi.query(entriesCollection(uid), firestoreApi.orderBy("date", "desc"));
@@ -523,9 +526,17 @@ function subscribeEntries(uid) {
     q,
     (snapshot) => {
       entries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // PCの右側の入力欄で編集中の記録が、別の端末などで消されたら編集をやめる
-      // (そのまま「更新」を押すと、存在しない記録への保存で失敗する)
-      if (isRailEditing() && !entries.some((e) => e.id === el.entryId.value)) resetForm();
+      // 編集中の記録が別の端末などで消されたら、理由を伝えて編集をやめる
+      // (そのまま「更新」を押すと、存在しない記録への保存で失敗する。
+      //  黙って入力欄を空にすると、打っていた内容が消えた理由が分からない)。
+      // この画面で自分で消したときは deleteEntry の中で編集をやめる
+      const editingId = el.entryId.value;
+      if (editingId && !deletingLocally && !entries.some((e) => e.id === editingId)) {
+        resetForm();
+        render();
+        alert("編集していた記録が、別の端末などで削除されました。編集をやめます。");
+        return;
+      }
       render();
     },
     (error) => {
@@ -4026,6 +4037,18 @@ function resetForm() {
   updateAdvanceVisibility();
   el.submitBtn.textContent = "追加";
   el.cancelEditBtn.classList.add("hidden");
+  editBaseline = null;
+}
+
+// 編集を始めた時点の記録の中身。保存するときに比べて、そのあいだに
+// 別の端末や取り込みで書き換わっていたら、古い内容で黙って上書きしない
+let editBaseline = null;
+
+function entryFingerprint(entry) {
+  return JSON.stringify([
+    entry.date, entry.type, entry.category, entry.amount, entry.memo || "",
+    entry.settlement || "", entry.advance === true, entry.payslip || null,
+  ]);
 }
 
 function startEdit(id) {
@@ -4073,6 +4096,7 @@ function startEdit(id) {
 
   el.submitBtn.textContent = "更新";
   el.cancelEditBtn.classList.remove("hidden");
+  editBaseline = entryFingerprint(entry);
   // 一覧まで戻らずに直せるよう、その場でポップアップとして開く。
   // 見出し (#form-title) は追加用のフォームのものなので触らない
   openEntryEditModal();
@@ -4115,6 +4139,8 @@ async function deleteEntry(id) {
   if (!confirm(message)) return;
 
   // 対になる記録と一緒に、1回のまとめ書き込みで消す (片方だけ残ることがない)
+  const removedIds = new Set([id, ...linked.map((e) => e.id)]);
+  deletingLocally = true;
   try {
     const batch = firestoreApi.writeBatch(db);
     for (const e of linked) batch.delete(entryDocRef(e.id));
@@ -4123,8 +4149,11 @@ async function deleteEntry(id) {
   } catch (err) {
     alert("削除に失敗しました: " + err.message);
     return;
+  } finally {
+    deletingLocally = false;
   }
-  if (el.entryId.value === id) resetForm();
+  // 編集中の記録 (または一緒に消えた対の記録) を消したら、編集をやめる
+  if (removedIds.has(el.entryId.value)) resetForm();
 }
 
 async function handleSubmit(event) {
@@ -4154,6 +4183,21 @@ async function handleSubmit(event) {
   };
 
   const editingId = el.entryId.value;
+
+  if (editingId && editBaseline) {
+    const stored = entries.find((e) => e.id === editingId);
+    if (stored && entryFingerprint(stored) !== editBaseline) {
+      const ok = confirm(
+        "この記録は、編集を始めたあとに変更されています (別の端末・明細の取り込みなど)。\n" +
+          `いまの内容: ${stored.date} ${stored.category} ${formatYen(stored.amount)}\n\n` +
+          "入力欄の内容で上書きしますか? (キャンセルすると編集をやめ、いまの内容を残します)"
+      );
+      if (!ok) {
+        resetForm();
+        return;
+      }
+    }
+  }
 
   // 立替のチェックを外す / 種別を支出以外に変えると未回収リストから消えるが、
   // 対になる返金の収入が残ると累計貯金額がずれるため、一緒に消すか確認する。

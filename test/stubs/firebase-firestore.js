@@ -17,6 +17,12 @@ if (typeof window !== "undefined") {
     store.set(fullPath, data);
     notify(parts.slice(0, -1).join("/"));
   };
+  // 別の端末で消された、を再現する
+  window.__removeDoc = (fullPath) => {
+    const parts = fullPath.split("/");
+    store.delete(fullPath);
+    notify(parts.slice(0, -1).join("/"));
+  };
 }
 
 export function initializeFirestore(app) {

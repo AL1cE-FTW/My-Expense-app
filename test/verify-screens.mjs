@@ -297,6 +297,20 @@ await page.waitForTimeout(300);
 await page.locator("#entry-list tr", { hasText: "とても長いメモ" }).locator("button", { hasText: "削除" }).click();
 await page.waitForTimeout(300);
 
+// --- PC: 編集中の行を自分で削除しても、「別の端末で削除」とは言わない ---
+const seenDialogs = [];
+const recordDialog = (d) => seenDialogs.push(d.message());
+page.on("dialog", recordDialog);
+await page.locator("#entry-list tr", { hasText: "5日の電車" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.locator("#entry-list tr", { hasText: "5日の電車" }).locator("button", { hasText: "削除" }).click();
+await page.waitForTimeout(400);
+page.off("dialog", recordDialog);
+if (seenDialogs.some((m) => m.includes("別の端末"))) {
+  throw new Error("自分で消したのに「別の端末で削除」と出た: " + seenDialogs.join(" / "));
+}
+if ((await page.textContent("#form-title")) !== "記録を追加") throw new Error("編集中の行を消したら編集をやめるはず");
+
 // --- PC: キーボードショートカット (入力中は効かない) ---
 await page.locator("body").click({ position: { x: 5, y: 5 } });
 const monthBefore = (await page.textContent("#current-month")).trim();

@@ -356,6 +356,47 @@ if (!(await page.locator("#entry-list tr", { hasText: "ベーカリー" }).textC
   throw new Error("確定版の金額になっているはず");
 }
 
+// ---------------------------------------------------------------------------
+// 8. 編集中に別の端末で記録が変わった・消えた
+// ---------------------------------------------------------------------------
+// 変わった: 古い内容のまま黙って上書きせず、確かめる
+await page.locator("#entry-list tr", { hasText: "ベーカリー" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/editing-pending", {
+    date, type: "expense", category: "食費", amount: 700, memo: "ベーカリー (スマホで修正)",
+    source: "card", createdAt: Date.now(),
+  });
+}, `${CUR_Y}-${MM}-21`);
+await page.waitForTimeout(300);
+dialogs.length = 0;
+page.removeAllListeners("dialog");
+page.on("dialog", (d) => { dialogs.push(d.message()); d.message().includes("変更されています") ? d.dismiss() : d.accept(); });
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+if (!dialogs.some((m) => m.includes("変更されています"))) {
+  throw new Error("編集中に別の端末で変わった記録は、上書きする前に確かめるはず: " + dialogs.join(" / "));
+}
+if (!(await page.locator("#entry-list tr", { hasText: "ベーカリー" }).textContent()).includes("¥700")) {
+  throw new Error("確かめて「キャンセル」なら、別の端末での変更が残るはず");
+}
+page.removeAllListeners("dialog");
+page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+// キャンセルしたら編集をやめ、別の端末での内容が残る
+if ((await page.textContent("#form-title")) !== "記録を追加") throw new Error("キャンセルしたら編集をやめるはず");
+// 消えた: 黙って入力欄を空にせず、理由を伝えて編集をやめる
+await page.locator("#entry-list tr", { hasText: "ベーカリー" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+dialogs.length = 0;
+await page.evaluate(() => window.__removeDoc("users/uid-reconcile-test@example.com/entries/editing-pending"));
+await page.waitForTimeout(400);
+if (!dialogs.some((m) => m.includes("削除"))) {
+  throw new Error("編集中の記録が消えたら、理由を伝えるはず: " + dialogs.join(" / "));
+}
+if ((await page.textContent("#form-title")) !== "記録を追加" || (await page.inputValue("#entry-id")) !== "") {
+  throw new Error("編集中の記録が消えたら、編集をやめるはず");
+}
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");
