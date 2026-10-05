@@ -223,6 +223,21 @@ const railEdit = await page.evaluate(() => ({
 if (railEdit.modal || railEdit.title !== "記録を編集" || railEdit.memo !== "8日の夕食" || !railEdit.marked) {
   throw new Error("PCでは右側の入力欄で編集するはず: " + JSON.stringify(railEdit));
 }
+// 編集中に N (記録を追加) を押したら、編集をやめて追加に戻る。
+// そのままだと、新しい記録のつもりで打った内容で編集中の記録を上書きしてしまう
+await page.locator("body").click({ position: { x: 5, y: 5 } });
+await page.keyboard.press("n");
+await page.waitForTimeout(300);
+const nWhileEditing = await page.evaluate(() => ({
+  title: document.getElementById("form-title").textContent,
+  id: document.getElementById("entry-id").value,
+  focus: document.activeElement?.id,
+}));
+if (nWhileEditing.title !== "記録を追加" || nWhileEditing.id !== "" || nWhileEditing.focus !== "entry-amount") {
+  throw new Error("編集中に N を押したら追加に戻るはず: " + JSON.stringify(nWhileEditing));
+}
+await page.locator("#entry-list tr", { hasText: "8日の夕食" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
 // Esc で編集をやめて追加に戻る (そのまま次の記録を入れても上書きしない)
 await page.keyboard.press("Escape");
 await page.waitForTimeout(300);
@@ -250,6 +265,20 @@ const fits = await page.evaluate(() => {
   return out;
 });
 if (fits.length) throw new Error("一覧の操作ボタンが枠からはみ出している: " + fits.join(", "));
+// 作業台が出る一番狭い幅 (1200px) でも、メモの列が読める幅で残る
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.waitForTimeout(300);
+const narrowPc = await page.evaluate(() => {
+  const memo = document.querySelector("#list-section thead th:nth-child(5)").getBoundingClientRect().width;
+  const card = document.getElementById("list-section").getBoundingClientRect();
+  const out = [...document.querySelectorAll("#entry-list button")].filter((b) => b.getBoundingClientRect().right > card.right - 8).length;
+  return { memo: Math.round(memo), out };
+});
+if (narrowPc.memo < 80 || narrowPc.out) {
+  throw new Error("幅1200pxでメモの列が潰れる・ボタンがはみ出す: " + JSON.stringify(narrowPc));
+}
+await page.setViewportSize({ width: 1280, height: 800 });
+await page.waitForTimeout(300);
 await page.locator("#entry-list tr", { hasText: "とても長いメモ" }).locator("button", { hasText: "削除" }).click();
 await page.waitForTimeout(300);
 

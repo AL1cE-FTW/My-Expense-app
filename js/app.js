@@ -5854,6 +5854,9 @@ function switchTab(tab, { scrollTop, animate = true } = {}) {
 // 「＋」: 入力欄へ移動して、金額から打ち始められるようにする
 function jumpToEntryForm() {
   if (entryFormIsInModal()) return;
+  // 「記録を追加」なので、PCの右側の入力欄で編集中ならそれをやめて追加に戻す
+  // (そのまま打ち込むと、編集していた記録を上書きしてしまう)
+  if (isRailEditing()) resetForm();
   // 切り替えは同期で行う。アニメーション (View Transition) を挟むと切り替えが
   // 後回しになり、まだ隠れている金額欄にフォーカスできない。また iOS は
   // タップの処理の中で focus() したときだけキーボードを出す

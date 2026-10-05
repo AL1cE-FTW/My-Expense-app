@@ -1854,6 +1854,11 @@ select.filter-select {
 .budget-bar.actual-income { background: var(--income); }
 .budget-bar.actual-expense { background: var(--expense); }
 
+/* 期首日は日付1つだけなので、横幅いっぱいに伸ばさない */
+#accounts-form > .form-row {
+  grid-template-columns: minmax(0, 260px);
+}
+
 .budget-form {
   margin-top: 20px;
   padding-top: 20px;
@@ -3177,7 +3182,7 @@ kbd {
   .workspace {
     display: grid;
     grid-column: 1 / -1;
-    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1fr) 340px;
     grid-template-areas: "list form";
     align-items: start;
     gap: 22px;
@@ -3235,12 +3240,18 @@ kbd {
     table-layout: fixed;
   }
 
-  #list-section .entry-table th:nth-child(1) { width: 76px; }
-  #list-section .entry-table th:nth-child(2) { width: 92px; }
-  #list-section .entry-table th:nth-child(3) { width: 21%; }
-  #list-section .entry-table th:nth-child(4) { width: 112px; }
-  #list-section .entry-table th:nth-child(6) { width: 60px; }
+  /* 幅1200px前後でもメモが読める幅 (90px以上) を残す。操作の列は
+     ボタン3つ (内訳・編集・削除) が入る幅にする */
+  #list-section .entry-table th:nth-child(1) { width: 72px; }
+  #list-section .entry-table th:nth-child(2) { width: 84px; }
+  #list-section .entry-table th:nth-child(3) { width: 18%; }
+  #list-section .entry-table th:nth-child(4) { width: 108px; }
+  #list-section .entry-table th:nth-child(6) { width: 56px; }
   #list-section .entry-table th:nth-child(7) { width: 112px; }
+
+  #list-section .entry-table td:last-child {
+    padding-inline: 4px;
+  }
 
   #list-section .entry-table td {
     overflow: hidden;
@@ -3273,6 +3284,12 @@ kbd {
 
   #list-section .entry-table thead th:first-child {
     border-top-left-radius: 8px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 380px;
   }
 }
 
