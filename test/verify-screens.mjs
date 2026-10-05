@@ -344,6 +344,14 @@ const budgetPanels = await page.evaluate(() => ({
   form: !!document.getElementById("entry-form-slot").offsetParent,
   current: document.querySelector('.tab-btn[data-tab="budget"]').getAttribute("aria-current"),
 }));
+const firstInBudgetTab = await page.evaluate(() =>
+  [...document.querySelectorAll("[data-panel='budget']")]
+    .filter((e) => e.offsetParent)
+    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]?.id
+);
+if (firstInBudgetTab !== "nws-section") {
+  throw new Error("「予算・分析」タブの一番上は Need/Want/Save のはず: " + firstInBudgetTab);
+}
 if (!budgetPanels.budget || !budgetPanels.nws || budgetPanels.form || budgetPanels.current !== "page") {
   throw new Error("「予算・分析」タブで予算が出るはず: " + JSON.stringify(budgetPanels));
 }
