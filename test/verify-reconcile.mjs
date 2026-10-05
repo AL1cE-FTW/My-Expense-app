@@ -319,6 +319,43 @@ if ((await laterRow.locator(".pending-badge").count()) !== 1) {
   throw new Error("明細の期間より後の仮の記録は仮のまま残るはず");
 }
 
+// ---------------------------------------------------------------------------
+// 7. PCの右側の入力欄で編集中に明細CSVを取り込んでも、古い内容で上書きしない
+// ---------------------------------------------------------------------------
+// 取り込みで仮の記録が確定版 (金額が変わる) に置き換わったあと、編集中の
+// 入力欄に残っている古い金額のまま「更新」を押すと、確定した金額が消える
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/editing-pending", {
+    date, type: "expense", category: "食費", amount: 600, memo: "ベーカリー",
+    source: "gmail", createdAt: Date.now(),
+  });
+}, `${CUR_Y}-${MM}-21`);
+await page.waitForTimeout(300);
+await page.locator("#entry-list tr", { hasText: "ベーカリー" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+if ((await page.textContent("#form-title")) !== "記録を編集") throw new Error("右側の入力欄で編集が始まるはず");
+dialogs.length = 0;
+const editingPath = path.join(scratch, "reconcile-editing.csv");
+fs.writeFileSync(editingPath, [
+  "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
+  `${CUR_Y}/${MM}/21,ベーカリー,650,１,１,650,`,
+  ",,,,,650,",
+].join("\n"), "utf-8");
+await page.setInputFiles("#import-csv-input", editingPath);
+await page.waitForTimeout(900);
+const afterImport = await page.evaluate(() => ({
+  title: document.getElementById("form-title").textContent,
+  id: document.getElementById("entry-id").value,
+}));
+if (afterImport.title !== "記録を追加" || afterImport.id !== "") {
+  throw new Error("取り込みの前に編集をやめるはず (古い内容で上書きしないため): " + JSON.stringify(afterImport));
+}
+if (!(await page.locator("#entry-list tr", { hasText: "ベーカリー" }).textContent()).includes("¥650")) {
+  throw new Error("確定版の金額になっているはず");
+}
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");

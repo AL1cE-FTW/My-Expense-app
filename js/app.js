@@ -523,6 +523,9 @@ function subscribeEntries(uid) {
     q,
     (snapshot) => {
       entries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // PCの右側の入力欄で編集中の記録が、別の端末などで消されたら編集をやめる
+      // (そのまま「更新」を押すと、存在しない記録への保存で失敗する)
+      if (isRailEditing() && !entries.some((e) => e.id === el.entryId.value)) resetForm();
       render();
     },
     (error) => {
@@ -4920,7 +4923,16 @@ function decodeCsvBuffer(buffer) {
   return new TextDecoder("shift_jis").decode(buffer);
 }
 
+// PCの右側の入力欄で編集しているあいだも、取り込みのボタンは押せる。
+// 取り込みで編集中の記録が書き換わる (仮→確定で金額や日付が変わる) と、
+// 入力欄に残った古い内容のまま「更新」を押したときに確定版を上書きしてしまう。
+// 取り込みの前に編集をやめる (ポップアップの編集中は、そもそも押せない)
+function stopRailEditBeforeImport() {
+  if (isRailEditing()) resetForm();
+}
+
 function importCsv(file) {
+  stopRailEditBeforeImport();
   const reader = new FileReader();
   reader.onload = async () => {
     const text = decodeCsvBuffer(reader.result);
@@ -5379,6 +5391,7 @@ function requestGmailAccessToken() {
 }
 
 async function importFromGmail() {
+  stopRailEditBeforeImport();
   if (!googleClientId) {
     alert(
       "メールからの読み込み機能を使うには設定が必要です。\n\n" +
