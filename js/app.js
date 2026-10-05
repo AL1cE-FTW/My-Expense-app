@@ -5565,8 +5565,15 @@ function setupAppEventListeners() {
     el.filterDate.value = "";
   };
 
+  // PCの右側の入力欄で編集中に、見る期間を変えたら編集をやめて追加に戻る。
+  // 編集中の行が一覧から消え、何を編集しているのか分からなくなるため
+  const stopRailEdit = () => {
+    if (isRailEditing()) resetForm();
+  };
+
   el.prevMonth.addEventListener("click", () => {
     clearDateFilter();
+    stopRailEdit();
     currentMonth =
       viewMode === "year"
         ? new Date(currentMonth.getFullYear() - 1, currentMonth.getMonth(), 1)
@@ -5576,6 +5583,7 @@ function setupAppEventListeners() {
 
   el.nextMonth.addEventListener("click", () => {
     clearDateFilter();
+    stopRailEdit();
     currentMonth =
       viewMode === "year"
         ? new Date(currentMonth.getFullYear() + 1, currentMonth.getMonth(), 1)
@@ -5585,6 +5593,7 @@ function setupAppEventListeners() {
 
   el.todayBtn.addEventListener("click", () => {
     clearDateFilter();
+    stopRailEdit();
     currentMonth = startOfMonth(new Date());
     render();
   });
@@ -5592,6 +5601,7 @@ function setupAppEventListeners() {
   for (const tab of el.viewTabs) {
     tab.addEventListener("click", () => {
       clearDateFilter();
+      if (tab.dataset.view !== viewMode) stopRailEdit();
       viewMode = tab.dataset.view;
       for (const t of el.viewTabs) {
         const isActive = t === tab;
@@ -5687,7 +5697,10 @@ function setupAppEventListeners() {
       const sameYear = picked.getFullYear() === currentMonth.getFullYear();
       const inPeriod =
         viewMode === "year" ? sameYear : sameYear && picked.getMonth() === currentMonth.getMonth();
-      if (!inPeriod) currentMonth = startOfMonth(picked);
+      if (!inPeriod) {
+        stopRailEdit();
+        currentMonth = startOfMonth(picked);
+      }
     }
     render();
   });

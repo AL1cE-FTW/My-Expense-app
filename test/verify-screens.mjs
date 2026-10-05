@@ -238,6 +238,21 @@ if (nWhileEditing.title !== "記録を追加" || nWhileEditing.id !== "" || nWhi
 }
 await page.locator("#entry-list tr", { hasText: "8日の夕食" }).locator("button", { hasText: "編集" }).click();
 await page.waitForTimeout(300);
+// 編集中に月を移動したら、編集をやめて追加に戻る (編集中の行が一覧から消えるため)
+await page.click("#prev-month");
+await page.waitForTimeout(300);
+const afterMove = await page.evaluate(() => ({
+  title: document.getElementById("form-title").textContent,
+  id: document.getElementById("entry-id").value,
+  submit: document.getElementById("submit-btn").textContent,
+}));
+if (afterMove.title !== "記録を追加" || afterMove.id !== "" || afterMove.submit !== "追加") {
+  throw new Error("月を移動したら編集をやめるはず: " + JSON.stringify(afterMove));
+}
+await page.click("#today-btn");
+await page.waitForTimeout(300);
+await page.locator("#entry-list tr", { hasText: "8日の夕食" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
 // Esc で編集をやめて追加に戻る (そのまま次の記録を入れても上書きしない)
 await page.keyboard.press("Escape");
 await page.waitForTimeout(300);
