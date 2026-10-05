@@ -2782,6 +2782,12 @@ body.modal-open {
   font-variant-numeric: tabular-nums;
 }
 
+.pace-note {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
 .pace-status.under { background: var(--income-soft); color: var(--income); }
 .pace-status.over { background: var(--expense-soft); color: var(--expense); }
 

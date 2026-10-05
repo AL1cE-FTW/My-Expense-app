@@ -299,6 +299,31 @@ if (!flowAfter.includes("支出 13%") || (await page.locator("#flow-basis-note")
   throw new Error("収入を記録したら帯は実績が基準になるはず: " + flowAfter);
 }
 
+// ---------------------------------------------------------------------------
+// 9. 収入を超えて使った月の帯と、予算外の支出があるときの「支出のペース」
+// ---------------------------------------------------------------------------
+// 先月: 収入 300,000、食費 40,000 (予算あり)。ここに予算を設定していない
+// その他支出 300,000 を足して、収入を超えさせる
+await addEntry({ date: `${PREV_Y}-${PREV_MM}-20`, category: "その他支出", amount: 300000, memo: "予算外の大きな出費" });
+await page.waitForTimeout(400);
+const flow = await page.evaluate(() => ({
+  sum: [...document.querySelectorAll("#summary-flow .flow-seg")].reduce((t, s) => t + Number(s.style.flexGrow), 0),
+  over: document.querySelectorAll("#summary-flow .flow-seg.over").length,
+}));
+// 超えた分は支出の一部。別の区間として足すと帯の合計が 100% を超える (二重計上)
+if (Math.abs(flow.sum - 1) > 0.001 || flow.over === 0) {
+  throw new Error("収入を超えた月の帯は合計100%で、超えた分を斜線で示すはず: " + JSON.stringify(flow));
+}
+// 支出のペースは予算カードと同じく、予算を設定したカテゴリの支出だけで比べる
+const pace = await txt("#spending-pace");
+console.log("pace (unbudgeted spending):", pace);
+if (!pace.includes("予算を設定していないカテゴリの支出 ¥300,000 は含みません")) {
+  throw new Error("予算外の支出をペースに含めないこと・その旨を書くはず: " + pace);
+}
+if (/に対して (\d{3,})%/.test(pace) && Number(pace.match(/に対して (\d+)%/)[1]) >= 100) {
+  throw new Error("予算内なのにペースが予算超えと出ている: " + pace);
+}
+
 await page.screenshot({ path: path.join(scratch, "aggregation.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL AGGREGATION CHECKS PASSED");

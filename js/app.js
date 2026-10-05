@@ -1435,9 +1435,18 @@ function renderSpendingPace(ownEntries) {
   // 線を引く最後の日。今月は今日まで (先の日は未定なので描かない)
   const lastPlotted = isCurrent ? now.getDate() : isFuture ? 0 : lastDay;
 
+  // 予算と比べるので、数えるのは予算を設定したカテゴリの支出だけ
+  // (予算カードの「残り」と同じ数え方。全支出で比べると、予算を設定して
+  //  いない家賃などのせいで、予算内なのに「ペースより多い」と出てしまう)
   const daily = new Array(lastDay + 1).fill(0);
+  let unbudgeted = 0;
+  const hasBudget = Object.values(budgets).some((v) => v > 0);
   for (const e of ownEntries) {
     if (e.type !== "expense") continue;
+    if (hasBudget && !(budgets[e.category] > 0)) {
+      unbudgeted += e.amount;
+      continue;
+    }
     const day = Number(e.date.slice(8, 10));
     if (day >= 1 && day <= lastDay) daily[day] += e.amount;
   }
@@ -1475,6 +1484,12 @@ function renderSpendingPace(ownEntries) {
     status.textContent = `予算 ${formatYen(budgetTotal)} に対して ${ratio}%`;
   }
   caption.append(title, status);
+  if (unbudgeted > 0) {
+    const note = document.createElement("span");
+    note.className = "pace-note";
+    note.textContent = `予算を設定していないカテゴリの支出 ${formatYen(unbudgeted)} は含みません`;
+    caption.appendChild(note);
+  }
 
   // --- グラフ ---
   const W = 560;
@@ -1495,7 +1510,7 @@ function renderSpendingPace(ownEntries) {
     class: "pace-chart",
     role: "img",
     "aria-label":
-      `${month + 1}月の支出の累計 ${formatYen(spent)}` +
+      `${month + 1}月の${hasBudget ? "予算を設定したカテゴリの" : ""}支出の累計 ${formatYen(spent)}` +
       (budgetTotal > 0 ? `、予算 ${formatYen(budgetTotal)}` : ""),
   });
 
@@ -1625,11 +1640,22 @@ function renderSummaryFlow({ earned, target, expense, saved }) {
     "aria-label",
     segments.map((seg) => `${seg.label} ${formatYen(seg.amount)}`).join("、")
   );
-  segments.forEach((seg, i) => {
-    if (seg.amount <= 0) return;
+  // 帯に描く部分。収入を超えた分は支出・貯蓄の「中の」収入より先の部分なので、
+  // 別の区間として足すと二重に数えてしまう (帯の合計が 100% を超える)。
+  // 支出 → 貯蓄 の順に積んで、収入を超えたところから先を斜線にする
+  const pieces = [];
+  let room = income;
+  for (const [key, amount] of [["expense", spent], ["save", savedPart]]) {
+    const inside = Math.min(amount, Math.max(room, 0));
+    room -= amount;
+    if (inside > 0) pieces.push({ key, amount: inside });
+    if (amount - inside > 0) pieces.push({ key: "over", amount: amount - inside });
+  }
+  if (left > 0) pieces.push({ key: "left", amount: left });
+  pieces.forEach((piece, i) => {
     const part = document.createElement("span");
-    part.className = `flow-seg ${seg.key}`;
-    part.style.flexGrow = String(seg.amount / total);
+    part.className = `flow-seg ${piece.key}`;
+    part.style.flexGrow = String(piece.amount / total);
     part.style.flexBasis = "0";
     part.style.animationDelay = `${i * 90}ms`;
     bar.appendChild(part);
@@ -2296,7 +2322,7 @@ function renderList(monthEntries) {
   const periodLabel = periodName();
   el.listEmptyMessage.textContent =
     monthEntries.length === 0 && !isFiltered
-      ? `${periodLabel}の記録はまだありません。上のフォームから追加してください。`
+      ? `${periodLabel}の記録はまだありません。「記録を追加」から入力してください。`
       : "条件に一致する記録がありません。";
 
   // 日付で絞り込んでいるときは、見出しにその日を出して現在の表示条件を分かりやすくする
@@ -5911,12 +5937,12 @@ function handleShortcut(event) {
       break;
     case "ArrowLeft":
       // ボタンなどにフォーカスがあるときの矢印キーは、そのまま (タブの移動などに使う)
-      if (target instanceof HTMLElement && target.closest("button, [role=tab]")) return;
+      if (target instanceof HTMLElement && target.closest("button, a[href], [role=tab]")) return;
       event.preventDefault();
       el.prevMonth.click();
       break;
     case "ArrowRight":
-      if (target instanceof HTMLElement && target.closest("button, [role=tab]")) return;
+      if (target instanceof HTMLElement && target.closest("button, a[href], [role=tab]")) return;
       event.preventDefault();
       el.nextMonth.click();
       break;
