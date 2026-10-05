@@ -271,6 +271,17 @@ if (!basisNote.includes("収入目標") || !basisNote.includes("¥250,000")) {
   throw new Error("the basis should be stated: " + basisNote);
 }
 
+// ホーム上部の帯 (支出 / 貯蓄 / 手元に残る) も同じ基準で、給与の記録前から出る。
+// 収入目標 250,000 のうち 40,000 を使った → 支出16% / 手元に残る84%
+const flowBefore = await txt("#summary-flow");
+console.log("flow (income not recorded yet):", flowBefore);
+if (!flowBefore.includes("支出 16%") || !flowBefore.includes("手元に残る 84%")) {
+  throw new Error("帯は収入目標を基準に出るはず: " + flowBefore);
+}
+if (!(await txt("#flow-basis-note")).includes("収入目標 ¥250,000")) {
+  throw new Error("帯の基準が収入目標だと書くはず");
+}
+
 // 実績が目標を超えたら実績に切り替わる
 await addEntry({ type: "income", date: `${PREV_Y}-${PREV_MM}-25`, category: "給与", amount: 300000, memo: "先月の給与" });
 await page.waitForTimeout(400);
@@ -281,6 +292,11 @@ if (!nwsText.includes("¥150,000")) {
 }
 if ((await page.locator("#nws-basis-note").count()) !== 0) {
   throw new Error("the basis note should disappear once actuals are used");
+}
+// 帯も実績 (300,000) に切り替わる: 支出 40,000 → 13%
+const flowAfter = await txt("#summary-flow");
+if (!flowAfter.includes("支出 13%") || (await page.locator("#flow-basis-note").count()) !== 0) {
+  throw new Error("収入を記録したら帯は実績が基準になるはず: " + flowAfter);
 }
 
 await page.screenshot({ path: path.join(scratch, "aggregation.png"), fullPage: true });

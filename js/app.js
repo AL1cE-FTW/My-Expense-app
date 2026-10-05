@@ -1366,7 +1366,17 @@ function renderSummary(monthEntries) {
   el.balance.classList.toggle("positive", balance > 0);
   el.balance.classList.toggle("negative", balance < 0);
   el.totalSave.textContent = formatYen(saved);
-  renderSummaryFlow(income, expense, saved);
+
+  // 帯の基準にする収入は Need/Want/Save と同じ考え方にする:
+  // 返金は稼いだお金ではないので数えず、給与を記録する前 (月の前半) でも
+  // 帯が出るよう、収入目標を下限にする。実績が目標を超えたら実績に切り替わる
+  let earned = 0;
+  for (const e of monthEntries) {
+    if (e.type === "income" && !isRefundIncome(e)) earned += e.amount;
+  }
+  const targetMultiplier = viewMode === "year" ? elapsedMonthsInYear() : 1;
+  const target = computeIncomeBudgetTotal(targetMultiplier);
+  renderSummaryFlow({ earned, target, expense, saved });
 }
 
 // ---------------------------------------------------------------------------
@@ -1581,16 +1591,18 @@ function renderSpendingPace(ownEntries) {
  * 収入を100%とする。使いすぎて収入を超えた月は、超えた分を斜線で示す
  * (帯の幅は「支出+貯蓄」を100%として描き直す)。
  */
-function renderSummaryFlow(income, expense, saved) {
+function renderSummaryFlow({ earned, target, expense, saved }) {
   el.summaryFlow.innerHTML = "";
   const spent = Math.max(expense, 0);
   const savedPart = Math.max(saved, 0);
+  const income = Math.max(earned, target);
+  const usingTarget = income > earned;
   if (income <= 0) {
     const p = document.createElement("p");
     p.className = "flow-empty";
     p.textContent =
       spent + savedPart > 0
-        ? `収入が未登録です (支出 ${formatYen(spent)})`
+        ? `収入が未登録です (支出 ${formatYen(spent)})。収入目標を設定すると、給与の記録前でも割合が出ます`
         : "収入と支出を記録すると、お金の行き先がここに出ます";
     el.summaryFlow.appendChild(p);
     return;
@@ -1637,6 +1649,19 @@ function renderSummaryFlow(income, expense, saved) {
   }
 
   el.summaryFlow.append(bar, legend);
+
+  // 何を基準にしているかを書く (Need/Want/Save の注記と同じ)。黙って目標を
+  // 使うと、給与を記録した瞬間に割合が動いて理由が分からなくなる
+  if (usingTarget) {
+    const note = document.createElement("p");
+    note.className = "flow-basis-note";
+    note.id = "flow-basis-note";
+    note.textContent =
+      earned > 0
+        ? `収入目標 ${formatYen(income)} を基準にしています (記録済みの収入は ${formatYen(earned)})`
+        : `収入目標 ${formatYen(income)} を基準にしています (収入はまだ記録されていません)`;
+    el.summaryFlow.appendChild(note);
+  }
 }
 
 /**

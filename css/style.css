@@ -681,6 +681,13 @@ h2:focus {
   font-weight: 600;
 }
 
+.flow-basis-note {
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: var(--faint);
+  line-height: 1.6;
+}
+
 .flow-empty {
   font-size: 0.8rem;
   color: var(--faint);
