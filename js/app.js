@@ -556,10 +556,15 @@ async function deleteEntryFromDb(id) {
   await firestoreApi.deleteDoc(firestoreApi.doc(db, `users/${currentUid}/entries/${id}`));
 }
 
-async function importEntriesToDb(items) {
+// 書き込みはすべてその場で出して (端末にすぐ保管される)、サーバーに届くのは
+// 待たない。1つ目が届くのを待ってから次を書くと、オフラインでは2つ目以降が
+// 書き込みすら始まらず、そのままアプリを閉じると消えてしまう。
+// 返り値は、全部がサーバーに届いたら終わる Promise (whenSynced に渡す)
+function importEntriesToDb(items) {
   const CHUNK_SIZE = 400;
   // インポートした日時を記録しておく (CSV・メールからの取り込み共通)
   const importedAt = nowTimestamp();
+  const commits = [];
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
     const chunk = items.slice(i, i + CHUNK_SIZE);
     const batch = firestoreApi.writeBatch(db);
@@ -569,21 +574,25 @@ async function importEntriesToDb(items) {
         ...item,
       });
     }
-    await batch.commit();
+    commits.push(batch.commit());
   }
+  return Promise.all(commits);
 }
 
 // 複数の記録をまとめて更新する。updateDoc と同じく、渡したキーだけを書き換える
 // (source を確定に変えても、手で直したカテゴリやメモはそのまま残る)。
-async function updateEntriesInDb(updates) {
+// importEntriesToDb と同じく、書き込みはその場で全部出してサーバーは待たない
+function updateEntriesInDb(updates) {
   const CHUNK_SIZE = 400;
+  const commits = [];
   for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
     const batch = firestoreApi.writeBatch(db);
     for (const { id, data } of updates.slice(i, i + CHUNK_SIZE)) {
       batch.update(firestoreApi.doc(db, `users/${currentUid}/entries/${id}`), data);
     }
-    await batch.commit();
+    commits.push(batch.commit());
   }
+  return Promise.all(commits);
 }
 
 function budgetDocRef(uid) {
@@ -5106,11 +5115,12 @@ function importCsv(file) {
     message += verificationNote;
     if (!confirm(message)) return;
 
+    const writes = [];
     try {
       if (updateCount > 0) {
         // 確定で動くのは日付と金額だけ。カテゴリとメモは手で直している
         // 可能性があるので触らない。
-        await updateEntriesInDb(
+        writes.push(updateEntriesInDb(
           reconciliation.updates.map(({ entry, row }) => ({
             id: entry.id,
             data: {
@@ -5121,13 +5131,15 @@ function importCsv(file) {
               ...(row.installments ? { installments: row.installments } : {}),
             },
           }))
-        );
+        ));
       }
-      if (deduped.length > 0) await importEntriesToDb(deduped);
+      if (deduped.length > 0) writes.push(importEntriesToDb(deduped));
     } catch (err) {
       alert("インポートに失敗しました: " + err.message);
       return;
     }
+    // 端末には反映済み。サーバーに届くのは待たない (whenSynced のコメント参照)
+    whenSynced(Promise.all(writes), "インポートした記録の同期に失敗しました");
     alert(
       (updateCount > 0
         ? `${updateCount}件を確定版に更新し、${deduped.length}件を追加しました。`
@@ -5516,20 +5528,19 @@ async function importFromGmail() {
       "\n取り込んだ記録は「仮」として入ります。カード利用履歴CSVを取り込むと確定します。";
     if (!confirm(message)) return;
 
-    await importEntriesToDb(deduped);
-
+    // 記録も「取り込み済みのメール」の記録も、サーバーに届くのは待たない
+    // (電波が途切れても、書き込みは端末に保管されて、あとで同期される)
+    whenSynced(importEntriesToDb(deduped), "インポートした記録の同期に失敗しました");
     // 記録は入ったので、履歴の記録に失敗しても取り込み自体は成功として扱う。
     // (次回また同じメールを拾っても、上の重複チェックで弾かれる)
-    try {
-      await markGmailIdsImported(newIds);
-      alert(`${deduped.length}件をインポートしました。`);
-    } catch {
+    markGmailIdsImported(newIds).catch((err) => {
+      console.error(err);
       alert(
-        `${deduped.length}件をインポートしました。\n\n` +
-          "ただし取り込み済みメールの記録に失敗しました。次回同じメールが再度見つかりますが、" +
+        "取り込み済みメールの記録に失敗しました。次回同じメールが再度見つかりますが、" +
           "重複チェックで自動的にスキップされます。"
       );
-    }
+    });
+    alert(`${deduped.length}件をインポートしました。`);
   } catch (err) {
     console.error(err);
     alert("メールの読み込みに失敗しました: " + err.message);

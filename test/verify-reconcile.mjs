@@ -419,6 +419,42 @@ if (dialogs.some((m) => m.includes("変更されています"))) {
   throw new Error("キーの並び順が違うだけで「変更されています」と出てはいけない");
 }
 
+// ---------------------------------------------------------------------------
+// 9. オフラインで明細を取り込んでも、確定と新規追加の両方がすぐ反映される
+// ---------------------------------------------------------------------------
+// 確定版への更新がサーバーに届くのを待ってから新規追加を書いていたため、
+// オフラインだと新規の行は書き込みすら始まらず、そのままアプリを閉じると消えた
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/offline-pending", {
+    date, type: "expense", category: "食費", amount: 880, memo: "オフライン確認の店",
+    source: "gmail", createdAt: Date.now(),
+  });
+}, `${CUR_Y}-${MM}-23`);
+await page.waitForTimeout(300);
+await page.evaluate(() => window.__setOffline(true));
+dialogs.length = 0;
+const offlinePath = path.join(scratch, "reconcile-offline.csv");
+fs.writeFileSync(offlinePath, [
+  "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
+  `${CUR_Y}/${MM}/23,オフライン確認の店,880,１,１,880,`,
+  `${CUR_Y}/${MM}/24,オフラインの新しい店,1500,１,１,1500,`,
+  ",,,,,2380,",
+].join("\n"), "utf-8");
+await page.setInputFiles("#import-csv-input", offlinePath);
+await page.waitForTimeout(900);
+const offlineImport = await page.evaluate(() => ({
+  confirmed: !document.querySelector("#entry-list tr .pending-badge") ||
+    ![...document.querySelectorAll("#entry-list tr")].find((r) => r.textContent.includes("オフライン確認の店"))?.querySelector(".pending-badge"),
+  added: [...document.querySelectorAll("#entry-list tr")].some((r) => r.textContent.includes("オフラインの新しい店")),
+}));
+const doneMsg = dialogs.find((m) => m.includes("確定版に更新し"));
+await page.evaluate(() => window.__setOffline(false));
+await page.waitForTimeout(300);
+if (!offlineImport.confirmed || !offlineImport.added) {
+  throw new Error("オフラインでも確定と新規追加の両方がすぐ反映されるはず: " + JSON.stringify(offlineImport));
+}
+if (!doneMsg) throw new Error("オフラインでも取り込みの完了を伝えるはず: " + dialogs.join(" / "));
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");
