@@ -180,6 +180,65 @@ if ((await page.locator('.entry-table th[data-sort="amount"]').getAttribute("ari
   throw new Error("sorting by amount should work");
 }
 
+// ---------------------------------------------------------------------------
+// オフラインでも入力・編集・削除・予算の保存ができる
+// ---------------------------------------------------------------------------
+// Firestore はオフラインでも書き込みをすぐ手元に反映するが、書き込みの
+// Promise はサーバーに届くまで終わらない。それを待つと、電波の無い場所では
+// 「追加」が押せないまま固まり、入力欄も残ったままになる
+await page.evaluate(() => window.__setOffline(true));
+const offlineRowsBefore = await page.locator("#entry-list tr").count();
+await page.click('.type-option:has(input[value="expense"]) span');
+await page.fill("#entry-date", `${CUR_Y}-${MM}-12`);
+await page.selectOption("#entry-category", "交通");
+await page.fill("#entry-amount", "420");
+await page.fill("#entry-memo", "地下鉄 (オフライン)");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+const offlineAdd = await page.evaluate(() => ({
+  amount: document.getElementById("entry-amount").value,
+  disabled: document.getElementById("submit-btn").disabled,
+  rows: document.querySelectorAll("#entry-list tr").length,
+}));
+if (offlineAdd.amount !== "" || offlineAdd.disabled || offlineAdd.rows !== offlineRowsBefore + 1) {
+  throw new Error("オフラインでも追加できて、入力欄が空に戻るはず: " + JSON.stringify(offlineAdd));
+}
+// 編集
+await page.locator("#entry-list tr", { hasText: "地下鉄 (オフライン)" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.fill("#entry-amount", "460");
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+if ((await page.inputValue("#entry-id")) !== "" || (await page.locator("#entry-edit-modal").isVisible())) {
+  throw new Error("オフラインでも更新したら編集を終えるはず");
+}
+if (!(await page.locator("#entry-list tr", { hasText: "地下鉄 (オフライン)" }).textContent()).includes("¥460")) {
+  throw new Error("オフラインでの更新が一覧に反映されるはず");
+}
+// 削除 (編集中の行)
+await page.locator("#entry-list tr", { hasText: "地下鉄 (オフライン)" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+if (await page.locator("#entry-edit-modal").isVisible()) {
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+}
+await page.locator("#entry-list tr", { hasText: "地下鉄 (オフライン)" }).locator("button", { hasText: "削除" }).click();
+await page.waitForTimeout(400);
+if ((await page.locator("#entry-list tr", { hasText: "地下鉄 (オフライン)" }).count()) !== 0 || (await page.inputValue("#entry-id")) !== "") {
+  throw new Error("オフラインでも削除できて、編集が残らないはず");
+}
+// 予算の保存
+await page.click("#edit-budget-btn");
+await page.waitForTimeout(200);
+await page.fill("#budget-input-交通", "9000");
+await page.click("#budget-form button[type=submit]");
+await page.waitForTimeout(400);
+if (!(await page.locator("#budget-form").evaluate((f) => f.classList.contains("hidden")))) {
+  throw new Error("オフラインでも予算を保存したらフォームが閉じるはず");
+}
+await page.evaluate(() => window.__setOffline(false));
+await page.waitForTimeout(300);
+
 await page.screenshot({ path: path.join(scratch, "smoke.png"), fullPage: true });
 
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));

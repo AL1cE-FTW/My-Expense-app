@@ -397,6 +397,28 @@ if ((await page.textContent("#form-title")) !== "記録を追加" || (await page
   throw new Error("編集中の記録が消えたら、編集をやめるはず");
 }
 
+// 中身が同じで、給与明細の内訳のキーの並び順だけが違う (サーバーから戻ってきた形)
+// なら、「変更されています」とは言わない
+const payslipDoc = "users/uid-reconcile-test@example.com/entries/order-only";
+await page.evaluate(([p, date]) => {
+  window.__seedDoc(p, { date, type: "income", category: "給与", amount: 200000, memo: "並び順の確認",
+    settlement: "bank", payslip: { kind: "salary", baseSalary: 200000, incomeTax: 0 }, createdAt: Date.now() });
+}, [payslipDoc, `${CUR_Y}-${MM}-25`]);
+await page.waitForTimeout(300);
+await page.locator("#entry-list tr", { hasText: "並び順の確認" }).locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.evaluate(([p, date]) => {
+  window.__seedDoc(p, { date, type: "income", category: "給与", amount: 200000, memo: "並び順の確認",
+    settlement: "bank", payslip: { incomeTax: 0, baseSalary: 200000, kind: "salary" }, createdAt: Date.now() });
+}, [payslipDoc, `${CUR_Y}-${MM}-25`]);
+await page.waitForTimeout(300);
+dialogs.length = 0;
+await page.click("#submit-btn");
+await page.waitForTimeout(400);
+if (dialogs.some((m) => m.includes("変更されています"))) {
+  throw new Error("キーの並び順が違うだけで「変更されています」と出てはいけない");
+}
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");

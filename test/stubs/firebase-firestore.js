@@ -3,6 +3,15 @@ const store = new Map(); // fullPath -> data
 const listenersByCollection = new Map(); // collectionPath -> Set<fn>
 let autoIdCounter = 0;
 
+// 本物の Firestore はオフラインでも書き込みをすぐ手元に反映し (画面も更新される)、
+// 書き込みの Promise はサーバーに届くまで終わらない。それを再現する
+let offline = false;
+const pendingAcks = [];
+function serverAck() {
+  if (!offline) return Promise.resolve();
+  return new Promise((resolve) => pendingAcks.push(resolve));
+}
+
 function notify(collectionPath) {
   const set = listenersByCollection.get(collectionPath);
   if (!set) return;
@@ -12,6 +21,10 @@ function notify(collectionPath) {
 // テストから直接データを仕込むための入口。
 // (createdAt を持たない「昔の記録」など、UI経由では作れない状態を再現する用)
 if (typeof window !== "undefined") {
+  window.__setOffline = (value) => {
+    offline = value;
+    if (!offline) for (const resolve of pendingAcks.splice(0)) resolve();
+  };
   window.__seedDoc = (fullPath, data) => {
     const parts = fullPath.split("/");
     store.set(fullPath, data);
@@ -85,6 +98,7 @@ export async function addDoc(collRef, data) {
   const id = "auto" + ++autoIdCounter;
   store.set(`${collRef.path}/${id}`, { ...data });
   notify(collRef.path);
+  await serverAck();
   return { id, path: `${collRef.path}/${id}` };
 }
 
@@ -95,6 +109,7 @@ export async function updateDoc(docRef, data) {
   store.set(docRef.path, applyFieldValues(store.get(docRef.path) || {}, data));
   notify(docRef.collectionPath);
   notify(docRef.path);
+  await serverAck();
 }
 
 export async function setDoc(docRef, data, options) {
@@ -103,12 +118,14 @@ export async function setDoc(docRef, data, options) {
   store.set(docRef.path, applyFieldValues(base, data));
   notify(docRef.collectionPath);
   notify(docRef.path);
+  await serverAck();
 }
 
 export async function deleteDoc(docRef) {
   store.delete(docRef.path);
   notify(docRef.collectionPath);
   notify(docRef.path);
+  await serverAck();
 }
 
 export async function getDoc(docRef) {
@@ -153,6 +170,7 @@ export function writeBatch() {
         touched.add(op.docRef.collectionPath);
       }
       for (const path of touched) notify(path);
+      await serverAck();
     },
   };
 }

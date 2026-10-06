@@ -516,9 +516,6 @@ function entriesCollection(uid) {
   return firestoreApi.collection(db, `users/${uid}/entries`);
 }
 
-// この画面から記録を削除している最中か (上の「別の端末で削除された」と区別する)
-let deletingLocally = false;
-
 function subscribeEntries(uid) {
   if (unsubscribeEntries) unsubscribeEntries();
   const q = firestoreApi.query(entriesCollection(uid), firestoreApi.orderBy("date", "desc"));
@@ -529,9 +526,9 @@ function subscribeEntries(uid) {
       // 編集中の記録が別の端末などで消されたら、理由を伝えて編集をやめる
       // (そのまま「更新」を押すと、存在しない記録への保存で失敗する。
       //  黙って入力欄を空にすると、打っていた内容が消えた理由が分からない)。
-      // この画面で自分で消したときは deleteEntry の中で編集をやめる
+      // この画面で自分で消すときは、deleteEntry が先に編集をやめている
       const editingId = el.entryId.value;
-      if (editingId && !deletingLocally && !entries.some((e) => e.id === editingId)) {
+      if (editingId && !entries.some((e) => e.id === editingId)) {
         resetForm();
         render();
         alert("編集していた記録が、別の端末などで削除されました。編集をやめます。");
@@ -991,7 +988,20 @@ function housingEntryData(salaryId, data, housing) {
  * 「振込額 + 寮社宅費」なので、家賃の支出が無いと収入がその分多いままになる。
  * まとめ書き込みなら、全部が反映されるか、何も反映されないかのどちらかになる。
  */
-async function saveEntryWithLinked({ editingId, data, refundToDelete }) {
+/**
+ * Firestore の書き込みは、オフラインでもすぐ手元に反映される (一覧も更新される)。
+ * 返ってくる Promise はサーバーに届いたときに終わるので、それを待つと電波の
+ * 無い場所では「追加」が押せないまま固まり、入力欄も残ったままになる。
+ * 待たずに先へ進み、あとで失敗したときだけ知らせる。
+ */
+function whenSynced(written, failMessage) {
+  written.catch((err) => {
+    console.error(err);
+    alert(`${failMessage}: ${err.message}`);
+  });
+}
+
+function saveEntryWithLinked({ editingId, data, refundToDelete }) {
   const batch = firestoreApi.writeBatch(db);
   const ref = editingId ? entryDocRef(editingId) : firestoreApi.doc(entriesCollection(currentUid));
   if (editingId) {
@@ -1012,8 +1022,8 @@ async function saveEntryWithLinked({ editingId, data, refundToDelete }) {
     batch.delete(entryDocRef(existing.id));
   }
 
-  await batch.commit();
-  return ref.id;
+  // サーバーに届くのは待たない (whenSynced のコメント参照)
+  return { id: ref.id, written: batch.commit() };
 }
 
 // --- 立替を自分のお金の出入りに数えない -------------------------------------
@@ -3405,18 +3415,16 @@ async function submitAccountsForm(event) {
     if (value > 0) balances[input.dataset.account] = value;
   }
 
-  try {
-    await saveAccountSettingsToDb({
+  whenSynced(
+    saveAccountSettingsToDb({
       openingDate,
       balances,
       closingDay: Number(el.cardClosingDay.value),
       paymentDay: Number(el.cardPaymentDay.value),
       paymentMonths: Number(el.cardPaymentMonths.value),
-    });
-  } catch (err) {
-    alert("口座の設定の保存に失敗しました: " + err.message);
-    return;
-  }
+    }),
+    "口座の設定の保存に失敗しました"
+  );
   closeAccountsForm();
 }
 
@@ -3917,12 +3925,7 @@ async function handleBudgetSubmit(event) {
 
   if (!confirmOverwriteIfChanged(budgetSnapshotOnOpen, budgets, "予算")) return;
 
-  try {
-    await saveBudgetsToDb(newBudgets);
-  } catch (err) {
-    alert("予算の保存に失敗しました: " + err.message);
-    return;
-  }
+  whenSynced(saveBudgetsToDb(newBudgets), "予算の保存に失敗しました");
   closeBudgetForm();
 }
 
@@ -4005,12 +4008,7 @@ async function handleIncomeBudgetSubmit(event) {
 
   if (!confirmOverwriteIfChanged(incomeBudgetSnapshotOnOpen, incomeBudgets, "収入目標")) return;
 
-  try {
-    await saveIncomeBudgetsToDb(newIncomeBudgets);
-  } catch (err) {
-    alert("収入目標の保存に失敗しました: " + err.message);
-    return;
-  }
+  whenSynced(saveIncomeBudgetsToDb(newIncomeBudgets), "収入目標の保存に失敗しました");
   closeIncomeBudgetForm();
 }
 
@@ -4045,9 +4043,15 @@ function resetForm() {
 let editBaseline = null;
 
 function entryFingerprint(entry) {
+  // 給与明細の内訳 (payslip) はオブジェクト。サーバーから戻ってきたものは、
+  // 書いたときとキーの並び順が違うことがあるので、並べ替えてから比べる
+  // (並び順の違いだけで「変更されています」と誤って出さないため)
+  const payslip = entry.payslip
+    ? Object.keys(entry.payslip).sort().map((k) => [k, entry.payslip[k]])
+    : null;
   return JSON.stringify([
     entry.date, entry.type, entry.category, entry.amount, entry.memo || "",
-    entry.settlement || "", entry.advance === true, entry.payslip || null,
+    entry.settlement || "", entry.advance === true, payslip,
   ]);
 }
 
@@ -4138,22 +4142,20 @@ async function deleteEntry(id) {
     : `この記録を削除しますか?\n${label}`;
   if (!confirm(message)) return;
 
-  // 対になる記録と一緒に、1回のまとめ書き込みで消す (片方だけ残ることがない)
+  // 編集中の記録 (または一緒に消える対の記録) を消すなら、先に編集をやめる。
+  // 先にやめておけば、消えたことを「別の端末で削除された」と取り違えない
   const removedIds = new Set([id, ...linked.map((e) => e.id)]);
-  deletingLocally = true;
+  if (removedIds.has(el.entryId.value)) resetForm();
+
+  // 対になる記録と一緒に、1回のまとめ書き込みで消す (片方だけ残ることがない)
   try {
     const batch = firestoreApi.writeBatch(db);
     for (const e of linked) batch.delete(entryDocRef(e.id));
     batch.delete(entryDocRef(id));
-    await batch.commit();
+    whenSynced(batch.commit(), "削除に失敗しました");
   } catch (err) {
     alert("削除に失敗しました: " + err.message);
-    return;
-  } finally {
-    deletingLocally = false;
   }
-  // 編集中の記録 (または一緒に消えた対の記録) を消したら、編集をやめる
-  if (removedIds.has(el.entryId.value)) resetForm();
 }
 
 async function handleSubmit(event) {
@@ -4214,15 +4216,14 @@ async function handleSubmit(event) {
     }
   }
 
-  el.submitBtn.disabled = true;
+  let saving;
   try {
-    await saveEntryWithLinked({ editingId, data, refundToDelete });
+    saving = saveEntryWithLinked({ editingId, data, refundToDelete });
   } catch (err) {
     alert("保存に失敗しました: " + err.message);
     return;
-  } finally {
-    el.submitBtn.disabled = false;
   }
+  whenSynced(saving.written, "保存に失敗しました (入力した内容は同期されていません)");
 
   // ポップアップ (またはPCの右側の入力欄) から編集していたか
   // (resetForm でフォームが元に戻る前に見る)
