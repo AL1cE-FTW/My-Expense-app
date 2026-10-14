@@ -228,6 +228,26 @@ await page.click("#today-btn");
 await page.waitForTimeout(400);
 if (!(await page.textContent("#entry-list")).includes("モバイルＳｕｉｃａ")) throw new Error("auto-imported entry missing");
 
+// ---------------------------------------------------------------------------
+// 8. 自動読み込みで許可が取れないときは、黙らずボタンで知らせる
+// ---------------------------------------------------------------------------
+await page.addInitScript(() => { window.__gisFailNext = true; });
+dialogs.length = 0;
+await page.reload({ waitUntil: "networkidle" });
+await page.click('.auth-tab[data-mode="signup"]');
+await page.fill("#auth-email", "gmail-auto2@example.com");
+await page.fill("#auth-password", "password123");
+await page.click("#auth-submit-btn");
+await page.waitForTimeout(900);
+if (!(await page.textContent("#gmail-import-btn")).includes("許可が必要")) {
+  throw new Error("the button should say permission is needed: " + (await page.textContent("#gmail-import-btn")));
+}
+if (dialogs.length) throw new Error("auto import must not pop up dialogs: " + dialogs.join(" / "));
+listResponses.push([]);
+await page.click("#gmail-import-btn"); // 押せば通常の手動読み込みになる
+await page.waitForTimeout(800);
+if (!(await page.textContent("#gmail-import-btn")).includes("メールから読み込み")) throw new Error("button should recover after a manual run");
+
 if (errors.filter((e) => !e.includes("access_denied")).length) {
   throw new Error("JS errors: " + errors.join("; "));
 }

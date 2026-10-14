@@ -5482,7 +5482,18 @@ async function importFromGmail(auto = false) {
   }
   try {
     if (!gmailAccessToken) {
-      await requestGmailAccessToken(auto);
+      try {
+        await requestGmailAccessToken(auto);
+      } catch (err) {
+        // 自動実行は同意画面を出せない(ユーザー操作なしのポップアップはブロックされる)。
+        // 黙ってやめず、ボタンで許可が要ることを知らせる。押せば手動の読み込みが始まる
+        if (auto) {
+          console.error(err);
+          el.gmailImportBtn.textContent = "メールの許可が必要です(押して許可)";
+          return;
+        }
+        throw err;
+      }
       try { localStorage.setItem(GMAIL_AUTO_KEY, "1"); } catch { /* 保存できなくても手動では使える */ }
     }
 
