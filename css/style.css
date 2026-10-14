@@ -1,0 +1,3949 @@
+/* ===========================================================================
+   家計簿 — デザインシステム
+
+   方針
+   - 紙の帳面のような落ち着いた下地 (--bg) に、白い面 (--surface) を重ねる。
+   - 色は「お金の種類」にだけ使う。収入=翡翠、支出=朱、貯蓄=藍紫、振替=灰。
+     操作 (ボタン) は墨色にして、数字の色とぶつからないようにする。
+   - 数字は Geist の等幅数字 (tabular-nums)。桁がそろうので一覧で比べやすい。
+   - 余白は 4px の倍数。角丸は 3 段階 (--r-sm / --r-md / --r-lg)。
+   - ダークモードは OS の設定に従う (トークンを入れ替えるだけ)。
+   =========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* 入力欄・ボタンの高さ。種類ごとに既定の高さが違って数pxずつずれるので、
+     ここで揃える。スマホでは指で押せる大きさ (iOSの目安44px) にする */
+  --control-height: 42px;
+
+  --font-sans: "Geist", "Zen Kaku Gothic New", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", "Noto Sans JP", Meiryo, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* 面 */
+  --bg: #f4f3ee;
+  --bg-tint: #ecebe4;
+  --surface: #ffffff;
+  /* セグメントで選ばれている札の面 */
+  --thumb: #ffffff;
+  --surface-2: #faf9f6;
+  --line: #e7e4db;
+  --line-strong: #d6d2c6;
+
+  /* 文字 */
+  --ink: #16171b;
+  --ink-2: #3a3c42;
+  --muted: #73716a;
+  --faint: #a29f97;
+
+  /* 操作 */
+  --accent: #16171b;
+  --accent-hover: #2c2e34;
+  --on-accent: #ffffff;
+  --focus: #4361ee;
+
+  /* お金の種類 */
+  --income: #0f9b6c;
+  --income-soft: #e2f4ec;
+  --expense: #e0482b;
+  --expense-soft: #fce9e4;
+  --save: #5b4fd6;
+  --save-soft: #ebe9fb;
+  --transfer: #6a6e78;
+  --transfer-soft: #eeede9;
+  --warn: #c7820a;
+  --warn-soft: #fbf0d9;
+
+  /* Need / Want / Save */
+  --need: #3d63dd;
+  --need-soft: #dfe6fa;
+  --want: #e2a516;
+  --want-soft: #faefd2;
+  --nws-save: #0f9b6c;
+  --nws-save-soft: #d9f0e6;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+
+  --shadow-sm: 0 1px 0 rgba(22, 23, 27, 0.03), 0 1px 2px rgba(22, 23, 27, 0.04);
+  --shadow-md: 0 1px 2px rgba(22, 23, 27, 0.04), 0 12px 32px -16px rgba(22, 23, 27, 0.14);
+  --shadow-lg: 0 24px 64px -24px rgba(22, 23, 27, 0.35);
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --header-blur: rgba(244, 243, 238, 0.82);
+  --sidebar-w: 248px;
+  --tabbar-h: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0e10;
+    --bg-tint: #22242a;
+    --surface: #17181c;
+    --thumb: #34363e;
+    --surface-2: #1c1d22;
+    --line: #26282e;
+    --line-strong: #34363d;
+
+    --ink: #f1f0eb;
+    --ink-2: #d4d3cd;
+    --muted: #9b9991;
+    --faint: #6c6b66;
+
+    --accent: #f1f0eb;
+    --accent-hover: #ffffff;
+    --on-accent: #111214;
+    --focus: #8ea2ff;
+
+    --income: #38d39a;
+    --income-soft: rgba(56, 211, 154, 0.13);
+    --expense: #ff7d5e;
+    --expense-soft: rgba(255, 125, 94, 0.13);
+    --save: #a79cff;
+    --save-soft: rgba(167, 156, 255, 0.14);
+    --transfer: #a3a6ae;
+    --transfer-soft: rgba(163, 166, 174, 0.13);
+    --warn: #f2b33d;
+    --warn-soft: rgba(242, 179, 61, 0.14);
+
+    --need: #7d9cff;
+    --need-soft: rgba(125, 156, 255, 0.18);
+    --want: #f2c14e;
+    --want-soft: rgba(242, 193, 78, 0.18);
+    --nws-save: #38d39a;
+    --nws-save-soft: rgba(56, 211, 154, 0.16);
+
+    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.02);
+    --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 16px 40px -20px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
+    --header-blur: rgba(13, 14, 16, 0.78);
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* scroll-behavior: smooth はページ全体には付けない。付けるとフォーカスの移動や
+   スクリプトからのスクロールまで全部ゆっくり動き、押そうとした場所が
+   動いている途中になる。滑らかに動かすのはサイドバーの移動だけ (JS で指定) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.65;
+  font-feature-settings: "palt" 1;
+  /* 日本語を文節の切れ目で折り返す (対応ブラウザのみ。非対応なら今まで通り) */
+  word-break: auto-phrase;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--focus) 22%, transparent);
+}
+
+.hidden {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Lucide のアイコン。大きさは文字に追従し、色は currentColor なので、
+   置いた場所の文字と同じ大きさ・同じ色で並ぶ。
+   線の太さは 24px 前提の 2 なので、小さく使うと相対的に太くなる。
+   文字と並べたときに浮かないよう少し細くしている。 */
+.icon {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+  stroke-width: 1.75;
+  vertical-align: -0.18em;
+}
+
+/* 数字は桁がそろう等幅数字にする */
+.hero-value,
+.card-value,
+.amount-cell,
+.book-value,
+.journal-amount,
+.budget-amount-text,
+.budget-percent-text,
+.plan-actual-value,
+.advance-row-amount,
+.payslip-modal-value,
+.current-month,
+.nws-legend-detail,
+.flow-legend,
+.budget-remaining-value,
+#entry-amount {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* 目では見えないが読み上げには届く。display:none と違い、
+   アクセシビリティツリーから外れない。
+   position: absolute なので、置き場所の祖先には position: relative を
+   付けること (付けないとページの幅を広げてしまうことがある。
+   .table-wrapper のコメント参照)。 */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ===========================================================================
+   ブランド
+   =========================================================================== */
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  flex-shrink: 0;
+}
+
+.brand-mark .icon {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+  vertical-align: 0;
+}
+
+/* ===========================================================================
+   全体のレイアウト (PC: サイドバー + 本文 / スマホ: 上のヘッダー + 下のタブ)
+   =========================================================================== */
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+  min-height: 100dvh;
+  /* 中身が1pxでも画面幅からはみ出すと、iOS Safari はページ全体を縮小して
+     表示するため「左に寄って右に余白ができる」見た目になる。はみ出しは
+     各所で防いでいるが、取りこぼしても画面が壊れないようここで断ち切る。
+     clip は hidden と違いスクロール領域を作らないので、中の
+     position: sticky (サイドバー・ヘッダー) はそのまま効く。
+     モーダルは .app-shell の外にあるので影響しない。 */
+  overflow-x: clip;
+}
+
+.app-sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 22px 16px 20px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  align-self: flex-start;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 8px 22px;
+}
+
+.sidebar-nav-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--faint);
+  letter-spacing: 0.08em;
+  padding: 16px 10px 6px;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+.sidebar-link .icon {
+  width: 18px;
+  height: 18px;
+  vertical-align: 0;
+}
+
+.sidebar-link:hover {
+  background: var(--bg-tint);
+  color: var(--ink);
+}
+
+.sidebar-link.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line);
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 16px 10px 0;
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--faint);
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* サイドバーのリンクで飛んだとき、sticky なヘッダーの裏に見出しが隠れないよう
+   ヘッダーの高さぶん余白を取る。JSでヘッダーの実寸を測って設定する
+   (--header-height)。読み込み前の初期値として72pxを置いておく。 */
+#summary-section,
+#budget-section,
+#plan-actual-section,
+#advance-section,
+#nws-section,
+#bookkeeping-section,
+#list-section,
+#entry-form-slot {
+  scroll-margin-top: calc(var(--header-height, 72px) + 16px);
+}
+
+/* ===========================================================================
+   ヘッダー
+   =========================================================================== */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 32px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  background: var(--header-blur);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+  backdrop-filter: saturate(1.4) blur(18px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s var(--ease);
+}
+
+.app-header.scrolled {
+  border-bottom-color: var(--line);
+}
+
+/* PCではブランドはサイドバーにあるので、ヘッダーには出さない */
+.app-brand {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.app-brand .brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.current-month {
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  min-width: 6.4em;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.nav-btn,
+.today-btn {
+  display: inline-grid;
+  place-items: center;
+  height: 36px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.nav-btn {
+  width: 36px;
+}
+
+.nav-btn .icon {
+  width: 18px;
+  height: 18px;
+  vertical-align: 0;
+}
+
+.today-btn {
+  padding: 0 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.nav-btn:hover,
+.today-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+.nav-btn:active,
+.today-btn:active {
+  transform: scale(0.95);
+}
+
+/* セグメント (月別 / 年間・帳簿のタブ・ログインのタブで共通の形) */
+.view-toggle,
+.auth-tabs {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--bg-tint);
+  border-radius: 999px;
+}
+
+.view-tab,
+.auth-tab {
+  border: none;
+  background: transparent;
+  padding: 0 14px;
+  height: 30px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--muted);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.view-tab.active,
+.auth-tab.active {
+  background: var(--thumb);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line);
+}
+
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-email {
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===========================================================================
+   本文
+   =========================================================================== */
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 8px 32px 48px;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.container > *,
+.workspace > * {
+  /* .workspace はPC以外では display: contents なので、中身が直接ここの
+     グリッドに並ぶ。中身にも全幅を指定しないと細い列に押し込まれる */
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* 広い画面では、高さの近いもの同士を横に並べて縦に長くなりすぎないようにする */
+@media (min-width: 1180px) {
+  #budget-section,
+  #plan-actual-section {
+    grid-column: span 7;
+  }
+  #nws-section,
+  #advance-section {
+    grid-column: span 5;
+  }
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  padding: 24px;
+  border: 1px solid var(--line);
+}
+
+@media (prefers-color-scheme: light) {
+  .card {
+    border-color: rgba(22, 23, 27, 0.04);
+  }
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.card h2,
+.card-head h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+.card > h2 {
+  margin-bottom: 16px;
+}
+
+.card-head-note {
+  font-size: 0.75rem;
+  color: var(--faint);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+h2:focus {
+  outline: none;
+}
+
+/* ===========================================================================
+   ヒーロー (この期間の収支と累計)
+   =========================================================================== */
+.hero-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "main"
+    "pace"
+    "stats";
+  align-items: center;
+  gap: 24px 48px;
+  padding: 30px 32px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 紙の質感をごく薄く出す (数字の読みやすさを邪魔しない濃さ) */
+.hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--income) 7%, transparent) 0%, transparent 46%),
+    radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--save) 6%, transparent) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.hero-card > * {
+  position: relative;
+}
+
+.hero-main { grid-area: main; min-width: 0; }
+.hero-card > .pace { grid-area: pace; }
+.hero-card > .summary-cards { grid-area: stats; }
+
+.hero-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.hero-value {
+  font-size: clamp(2.6rem, 5.4vw, 3.6rem);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  margin: 6px 0 20px;
+  white-space: nowrap;
+}
+
+.hero-value.positive {
+  color: var(--ink);
+}
+
+.hero-value.negative {
+  color: var(--expense);
+}
+
+/* 収入の内訳 (支出 / 貯蓄 / 手元に残る) を1本の帯で見せる */
+.flow-bar {
+  display: flex;
+  height: 10px;
+  gap: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-tint);
+}
+
+.flow-seg {
+  height: 100%;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: grow-x 0.9s var(--ease) both;
+}
+
+.flow-seg.expense { background: var(--expense); }
+.flow-seg.save { background: var(--save); }
+.flow-seg.left { background: var(--income); }
+.flow-seg.over {
+  background: repeating-linear-gradient(-45deg, var(--expense) 0 4px, color-mix(in srgb, var(--expense) 55%, transparent) 4px 8px);
+}
+
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.flow-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.flow-legend .expense i { background: var(--expense); }
+.flow-legend .save i { background: var(--save); }
+.flow-legend .left i { background: var(--income); }
+.flow-legend strong {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.flow-basis-note {
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: var(--faint);
+  line-height: 1.6;
+}
+
+.flow-empty {
+  font-size: 0.8rem;
+  color: var(--faint);
+  margin-top: 10px;
+}
+
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* 収入・支出・貯蓄は罫線で区切った3列。箱を並べるより静かに読める */
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: center;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.stat {
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--line);
+}
+
+.stat:first-child {
+  padding-left: 0;
+}
+
+.card-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.income-card .stat-dot { background: var(--income); }
+.expense-card .stat-dot { background: var(--expense); }
+.save-card .stat-dot { background: var(--save); }
+
+.card-value {
+  font-size: 1.3rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 累計は「これまでの全部」で、上の月の数字とは性格が違う。墨色の帯で分ける */
+.stat.cumulative-card {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "label value"
+    "change change";
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 14px 0;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cumulative-card .card-label {
+  grid-area: label;
+  color: color-mix(in srgb, var(--on-accent) 65%, transparent);
+}
+
+.cumulative-card .cumulative-value {
+  grid-area: value;
+  text-align: right;
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.cumulative-value.negative {
+  color: var(--expense);
+}
+
+.cumulative-change {
+  grid-area: change;
+  font-size: 0.74rem;
+  color: color-mix(in srgb, var(--on-accent) 65%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* summary-cards の下罫線の内側に帯を入れるので、帯の下の罫線は消す */
+.summary-cards:has(.cumulative-card) {
+  border-bottom: 0;
+}
+
+/* ===========================================================================
+   入力 (記録を追加)
+   入力欄の並びは、置き場所 (ページ / 編集ポップアップ) の幅で決める
+   (container query)。ポップアップに移しても崩れない。
+   =========================================================================== */
+#entry-form-slot,
+#entry-edit-body {
+  container-type: inline-size;
+  container-name: entry;
+}
+
+/* 狭いときは種別の見出しを目では出さない (4つの選択肢そのものが見出しになる)。
+   読み上げには legend が残る */
+@container entry (max-width: 759px) {
+  .type-fieldset legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* 広いときは「立替払い」のチェックと「追加」を同じ段に置き、縦の空きを詰める */
+@container entry (min-width: 760px) {
+  #entry-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 16px;
+  }
+  #entry-form > .entry-fields,
+  #entry-form > .payslip-section {
+    grid-column: 1 / -1;
+  }
+  #entry-form > .advance-toggle {
+    grid-column: 1;
+    margin: 0;
+  }
+  #entry-form > .form-actions {
+    grid-column: 2;
+  }
+}
+
+.entry-fields {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px 12px;
+  margin-bottom: 16px;
+}
+
+.type-fieldset { grid-column: 1 / -1; }
+.fg-amount { grid-column: 1 / -1; }
+.fg-category { grid-column: span 6; }
+.fg-date { grid-column: span 6; }
+/* カテゴリ / 日付 と同じ位置で区切る (列の縁がそろって見える) */
+.fg-memo { grid-column: span 6; }
+.fg-settlement { grid-column: span 6; }
+
+/* 画面がとても狭い (幅320pxの端末など) ときは、日付とメモを1段まるごと使う。
+   半分の幅だと日付が「10/02/20」のように途中で切れる */
+@container entry (max-width: 300px) {
+  .fg-category,
+  .fg-date,
+  .fg-memo,
+  .fg-settlement {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 振替は口座を選ばない (方向はカテゴリで決まる) ので、メモが行を使い切る */
+.entry-fields:has(.fg-settlement.hidden) .fg-memo {
+  grid-column: 1 / -1;
+}
+
+@container entry (min-width: 760px) {
+  .type-fieldset { grid-column: span 4; }
+  .fg-amount { grid-column: span 3; }
+  .fg-category { grid-column: span 3; }
+  .fg-date { grid-column: span 2; }
+  .fg-memo { grid-column: span 9; }
+  .fg-settlement { grid-column: span 3; }
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0; /* grid の既定 (auto) だと中身の最小幅より縮まずはみ出す */
+}
+
+.form-group-wide {
+  grid-column: 1 / -1;
+}
+
+.form-group label,
+.type-fieldset legend {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+
+/* 種別のラジオ群は <fieldset>/<legend> でグループ名を持たせている。
+   ブラウザ既定の枠線・余白を消して、他の .form-group と同じ見た目に揃える */
+.type-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0; /* fieldset の既定値だと grid 内で縮まない */
+}
+
+.type-fieldset legend {
+  padding: 0;
+  /* .form-group の gap と同じ間隔にする。これが無いと種別だけ上にずれる */
+  margin-bottom: 6px;
+}
+
+.form-group input,
+.form-group select,
+.filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background-color: var(--surface);
+  color: var(--ink);
+  /* input の既定幅は size=20 (約20文字ぶん) で、狭い画面では枠より広い。
+     日付入力は iOS だとさらに大きくなる。列幅に収まるよう明示的に縮める */
+  min-width: 0;
+  width: 100%;
+  /* 高さを明示しないと、日付39.2px・選択39px・数値37px とバラバラになり、
+     横に並べたときに下端が数pxずつずれる */
+  height: var(--control-height);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+/* iOS の日付入力は中身を中央寄せ・独自の高さにするので、ほかの欄と揃える */
+.form-group input[type="date"],
+.filter-select[type="date"] {
+  display: block;
+  line-height: calc(var(--control-height) - 2px);
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+.form-group select,
+select.filter-select {
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2373716a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  cursor: pointer;
+}
+
+.form-group input::placeholder {
+  color: var(--faint);
+}
+
+.form-group input:hover,
+.form-group select:hover,
+.filter-select:hover {
+  border-color: var(--line-strong);
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.filter-select:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+}
+
+/* 数値入力の上下ボタンは押し間違えやすく見た目も騒がしいので消す */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* 金額は入力の主役なので大きく。¥ を欄の中に置く */
+.amount-field {
+  position: relative;
+}
+
+.amount-prefix {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.form-group .amount-field input {
+  height: 60px;
+  padding-left: 40px;
+  font-size: 1.85rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+@container entry (min-width: 760px) {
+  .form-group .amount-field input {
+    height: var(--control-height);
+    font-size: 1.15rem;
+    padding-left: 32px;
+  }
+  .amount-prefix {
+    font-size: 1rem;
+    left: 13px;
+  }
+}
+
+/* 種別: 4つのセグメント。選んだものに色の付いた札が滑って移る */
+.type-toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 3px;
+  background: var(--bg-tint);
+  border-radius: var(--r-sm);
+  height: var(--control-height);
+}
+
+.type-toggle::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 4);
+  border-radius: 6px;
+  background: var(--thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 1px var(--line);
+  transition: transform 0.35s var(--ease);
+}
+
+.type-toggle:has(input[value="income"]:checked)::before { transform: translateX(100%); }
+.type-toggle:has(input[value="save"]:checked)::before { transform: translateX(200%); }
+.type-toggle:has(input[value="transfer"]:checked)::before { transform: translateX(300%); }
+
+.type-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* display:none だとアクセシビリティツリーとタブ順から完全に外れ、
+   キーボードだけでは種別を選べなくなる。見えないが操作できる形にする。 */
+.type-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.type-option span {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+  transition: color 0.2s var(--ease);
+}
+
+/* キーボードでフォーカスしている項目が分かるようにする */
+.type-option input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.type-option input[value="expense"]:checked + span { color: var(--expense); }
+.type-option input[value="income"]:checked + span { color: var(--income); }
+.type-option input[value="save"]:checked + span { color: var(--save); }
+/* 振替は収入でも支出でもないので、色を付けず落ち着いた灰色にする */
+.type-option input[value="transfer"]:checked + span { color: var(--ink-2); }
+
+/* 立替金 (仮払い) のチェック */
+.advance-toggle {
+  margin: -4px 0 16px;
+}
+
+.advance-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.advance-checkbox input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.advance-checkbox input::after {
+  content: "";
+  width: 10px;
+  height: 6px;
+  border: 2px solid var(--on-accent);
+  border-top: 0;
+  border-right: 0;
+  transform: translateY(-1px) rotate(-45deg) scale(0);
+  transition: transform 0.2s var(--ease);
+}
+
+.advance-checkbox input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.advance-checkbox input:checked::after {
+  transform: translateY(-1px) rotate(-45deg) scale(1);
+}
+
+/* 給与明細 */
+.payslip-section {
+  margin: -2px 0 18px;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px dashed var(--line-strong);
+}
+
+/* 「前回の明細を引き継ぐ」と「内訳を入力する」を横に並べ、狭ければ折り返す */
+.payslip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.payslip-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--faint);
+}
+
+/* 給与サイトから読み込んだときの検算結果。1行ずつ並べる */
+.import-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.import-check .icon {
+  margin-top: 0.25em;
+}
+
+.import-check.ok { color: var(--income); }
+.import-check.ng { color: var(--expense); }
+
+.setup-steps {
+  margin: 0 0 14px 1.2em;
+  font-size: 0.86rem;
+  line-height: 1.85;
+  color: var(--ink-2);
+}
+
+.setup-code {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-tint);
+  color: var(--muted);
+  resize: none;
+  margin-bottom: 10px;
+}
+
+.payslip-copy-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  line-height: 1.75;
+}
+
+.payslip-breakdown .form-row {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 128px), 1fr));
+}
+
+.payslip-breakdown {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.payslip-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+.payslip-net-preview {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  line-height: 1.9;
+}
+
+.payslip-net-preview strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 家賃の天引きがあるとき、金額欄が振込額と違う理由を添える */
+.payslip-housing-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* ===========================================================================
+   ボタン
+   =========================================================================== */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  min-height: var(--control-height);
+  padding: 0 22px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.3;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.btn .icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: 0;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+#submit-btn {
+  min-width: 160px;
+}
+
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--faint);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-tint);
+  color: var(--ink);
+}
+
+.btn-small {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 0.8rem;
+}
+
+/* 長い説明つきのボタンは折り返してよい */
+.payslip-actions .btn {
+  white-space: normal;
+  text-align: left;
+  padding-block: 7px;
+}
+
+/* ===========================================================================
+   記録一覧
+   =========================================================================== */
+.list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.csv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.list-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.filter-select {
+  width: auto;
+  max-width: 100%;
+  height: 36px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  background-color: var(--surface-2);
+}
+
+select.filter-select {
+  padding-right: 32px;
+}
+
+.list-pending-note {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  background: var(--transfer-soft);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  max-width: 100%;
+  /* 表の中の .visually-hidden (操作列の見出し) は position: absolute なので、
+     位置の基準になる祖先がないとページ全体を基準に置かれ、表の右端
+     (画面幅より外) までページを広げてしまう。そうなると iOS Safari は
+     ページ全体を縮小して表示するので、中身が左に寄って右に余白が出る。
+     ここを基準にして、表の横スクロール内に収める。 */
+  position: relative;
+}
+
+.entry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.entry-table th,
+.entry-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.entry-table tbody tr {
+  transition: background 0.15s var(--ease);
+}
+
+.entry-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.entry-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.entry-table td.memo-cell {
+  white-space: normal;
+  min-width: 10em;
+  color: var(--ink-2);
+}
+
+.entry-table th {
+  color: var(--faint);
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding-top: 6px;
+  padding-bottom: 8px;
+}
+
+.entry-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  padding: 0; /* 中のボタンが見出し全体を占めるようにする */
+}
+
+/* 見出しは <button> にして「押せる」ことが読み上げにも伝わるようにしている。
+   見た目は元の見出しのままにするため、ボタンの既定スタイルを打ち消す */
+.entry-table th.sortable .sort-btn {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+}
+
+.entry-table th.sortable .sort-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.entry-table th.sortable:hover,
+.entry-table th.sort-active {
+  color: var(--ink);
+}
+
+/* 並び替えの向き。矢印は updateSortIndicators() が icons.js から作って
+   見出しに入れる。CSSの背景画像にするとパスと色をここにも書くことになり、
+   icons.js と二重管理になるため。 */
+.entry-table th.sortable .sort-icon {
+  width: 0.9em;
+  height: 0.9em;
+  margin-left: 3px;
+  stroke-width: 2.5;
+  color: var(--ink);
+}
+
+/* 並び替えに使っていない列の矢印。場所だけ取って見えなくする */
+.entry-table th.sortable .sort-icon.inactive {
+  visibility: hidden;
+}
+
+.amount-col,
+.amount-cell {
+  text-align: right !important;
+}
+
+.amount-cell {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.amount-cell.income { color: var(--income); }
+.amount-cell.expense { color: var(--ink); }
+.amount-cell.save { color: var(--save); }
+.amount-cell.transfer { color: var(--muted); }
+
+.type-badge,
+.advance-badge,
+.pending-badge,
+.journal-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.type-badge.income { background: var(--income-soft); color: var(--income); }
+.type-badge.expense { background: var(--expense-soft); color: var(--expense); }
+.type-badge.save { background: var(--save-soft); color: var(--save); }
+.type-badge.transfer { background: var(--transfer-soft); color: var(--transfer); }
+
+.advance-badge {
+  margin-left: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.advance-badge.settled {
+  background: var(--income-soft);
+  color: var(--income);
+}
+
+/* メールの利用通知から取り込んだ、まだ確定していない記録の印。
+   立替のバッジと同じ形で、色だけ変えて並べても見分けが付くようにする */
+.pending-badge {
+  margin-left: 4px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+}
+
+.created-at-cell {
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0 10px;
+  min-height: 30px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--muted);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.icon-btn .icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: 0;
+}
+
+.icon-btn:hover {
+  background: var(--bg-tint);
+  color: var(--ink);
+}
+
+.icon-btn.delete:hover {
+  background: var(--expense-soft);
+  color: var(--expense);
+}
+
+/* 立替金の「精算」は押してほしい操作なので、枠を付けて目立たせる */
+.advance-row .icon-btn {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.empty-message {
+  color: var(--muted);
+  font-size: 0.88rem;
+  padding: 10px 0;
+}
+
+.table-wrapper .empty-message {
+  text-align: center;
+  padding: 36px 12px;
+}
+
+/* ===========================================================================
+   予算
+   =========================================================================== */
+.budget-overall {
+  margin-bottom: 20px;
+}
+
+.budget-overall:empty {
+  display: none;
+}
+
+.budget-remaining {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+}
+
+.budget-remaining-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.budget-remaining-value {
+  font-size: 1.9rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.budget-remaining-value.over {
+  color: var(--expense);
+}
+
+.budget-pace {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.budget-overall-text {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 12px 0 8px;
+}
+
+.budget-overall-text .budget-percent {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.budget-bar-track {
+  background: var(--bg-tint);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+/* 予算を設定していないカテゴリの支出 (上のバーには含まれない) */
+.budget-unbudgeted {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.budget-bar {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 2px;
+  background: var(--ink);
+  transition: width 0.6s var(--ease);
+}
+
+.budget-bar.warning { background: var(--warn); }
+.budget-bar.over { background: var(--expense); }
+
+/* 行ごとに別のグリッドにすると、割合の文字幅で行ごとにバーの長さが変わって
+   しまう。subgrid で列を全行共通にする */
+.category-breakdown {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.category-breakdown > .empty-message {
+  grid-column: 1 / -1;
+}
+
+/* 1行: [カテゴリ ... 割合] [バー] [使った額 / 予算] */
+.budget-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-template-areas:
+    "name amount"
+    "bar percent";
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 0.88rem;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.budget-row:last-child {
+  border-bottom: 0;
+}
+
+.budget-row > .category-label { grid-area: name; font-weight: 600; }
+.budget-row > .budget-percent-text { grid-area: percent; }
+.budget-row > .budget-row-track { grid-area: bar; }
+.budget-row > .budget-amount-text { grid-area: amount; text-align: right; }
+
+.budget-row-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-tint);
+  overflow: hidden;
+}
+
+.budget-row-track .budget-bar {
+  min-width: 0;
+}
+
+.budget-percent-text {
+  text-align: right;
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-width: 3.2em;
+}
+
+.budget-percent-text.warning { color: var(--warn); }
+.budget-percent-text.over { color: var(--expense); }
+
+.budget-amount-text {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.budget-amount-text.over {
+  color: var(--expense);
+  font-weight: 600;
+}
+
+/* 広い画面では1行にまとめる */
+@media (min-width: 700px) {
+  .category-breakdown {
+    grid-template-columns: minmax(7em, auto) minmax(0, 1fr) auto auto;
+  }
+  .budget-row {
+    grid-template-areas: "name bar percent amount";
+    gap: 14px;
+  }
+}
+
+/* カテゴリ名の色ドット (Need/Want) */
+.category-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.category-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ===========================================================================
+   予定と実績
+   =========================================================================== */
+.plan-actual-group {
+  margin-bottom: 22px;
+}
+
+.plan-actual-group:last-child {
+  margin-bottom: 0;
+}
+
+.plan-actual-group .list-header {
+  margin-bottom: 8px;
+}
+
+.plan-actual-heading {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+.plan-actual-group .list-header .plan-actual-heading {
+  margin-bottom: 0;
+}
+
+.plan-actual-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-actual-row {
+  display: grid;
+  grid-template-columns: 2.6em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+}
+
+.plan-actual-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.plan-actual-value {
+  text-align: right;
+  font-weight: 600;
+  min-width: 6.5em;
+}
+
+.plan-actual-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.7;
+}
+
+.budget-bar.plan { background: var(--line-strong); }
+.budget-bar.actual-income { background: var(--income); }
+.budget-bar.actual-expense { background: var(--expense); }
+
+/* 期首日は日付1つだけなので、横幅いっぱいに伸ばさない */
+#accounts-form > .form-row {
+  grid-template-columns: minmax(0, 260px);
+}
+
+.budget-form {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.budget-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.budget-inputs .form-group label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bonus-settings {
+  margin-bottom: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.bonus-settings-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.bonus-month-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.bonus-month-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  cursor: pointer;
+  background: var(--surface);
+}
+
+.bonus-month-checkbox:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--surface-2);
+}
+
+.bonus-month-checkbox input {
+  accent-color: var(--accent);
+}
+
+.bonus-multiplier-group {
+  max-width: 220px;
+}
+
+/* ===========================================================================
+   Need / Want / Save
+   =========================================================================== */
+.nws-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  /* 画面が狭いとグラフと凡例が2段に折り返す。そのときグラフだけが
+     左端に張り付いて右に大きな余白ができるので中央に置く。
+     PCでは凡例が flex:1 で余白を使い切るため、この指定は効かない
+     (=横並びのレイアウトは変わらない) */
+  justify-content: center;
+}
+
+.nws-chart {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.nws-center-value {
+  font-family: var(--font-sans);
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  fill: var(--ink);
+}
+
+.nws-center-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  fill: var(--muted);
+}
+
+.nws-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.nws-legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.nws-legend-item:last-of-type {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.nws-legend-main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: 0.86rem;
+}
+
+.nws-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.nws-legend-label {
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nws-legend-label .icon {
+  color: var(--muted);
+}
+
+.nws-legend-detail {
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+}
+
+.nws-legend-detail.over {
+  color: var(--expense);
+  font-weight: 700;
+}
+
+.nws-legend-categories {
+  font-size: 0.74rem;
+  color: var(--faint);
+  padding-left: 17px;
+  line-height: 1.6;
+}
+
+/* Need/Want/Save が何を基準に割合を出しているかの注記 */
+.nws-basis-note {
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.7;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+/* ===========================================================================
+   立替金
+   =========================================================================== */
+.advance-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.advance-total-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.advance-total strong {
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.advance-row {
+  display: grid;
+  grid-template-columns: 3.4em 6.5em minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.advance-row:last-child {
+  border-bottom: none;
+}
+
+.advance-row-date,
+.advance-row-memo {
+  color: var(--muted);
+}
+
+.advance-row-memo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advance-row-amount {
+  font-weight: 650;
+  text-align: right;
+}
+
+.advance-settle-summary {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+
+.advance-settle-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 12px 0 16px;
+}
+
+/* ===========================================================================
+   年間: 月ごとの収支
+   =========================================================================== */
+/* 月の名前はグラフの下 (枠の外) に出す。枠の中に置くと、棒の下端が
+   ¥0 の線より上に浮いて、左の金額の目盛りと合わなくなる */
+.monthly-chart-row {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 26px;
+}
+
+.monthly-bar-yaxis {
+  position: relative;
+  width: 64px;
+  flex-shrink: 0;
+  height: 200px;
+  margin-top: 12px;
+}
+
+.monthly-bar-yaxis-label {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 0.68rem;
+  color: var(--faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.monthly-bar-chart {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 200px;
+  margin-top: 12px;
+  border-bottom: 1px solid var(--line-strong);
+  overflow: visible;
+  background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+  background-size: 100% calc(100% / var(--grid-steps, 4));
+}
+
+.month-bar-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 30px;
+  height: 100%;
+}
+
+.month-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+}
+
+.month-bar {
+  width: 10px;
+  border-radius: 4px 4px 1px 1px;
+  transform-origin: bottom;
+  animation: grow-y 0.8s var(--ease) both;
+}
+
+@keyframes grow-y {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+.month-bar.income { background: var(--income); }
+.month-bar.expense { background: var(--expense); }
+
+.month-bar-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.month-bar-label.current {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.monthly-bar-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 0.05em;
+}
+
+.legend-dot.income { background: var(--income); }
+.legend-dot.expense { background: var(--expense); }
+
+/* ===========================================================================
+   帳簿 (貸借対照表・損益計算書・合計試算表・仕訳帳)
+   =========================================================================== */
+.book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: 3px;
+  gap: 2px;
+  background: var(--bg-tint);
+  border-radius: var(--r-sm);
+}
+
+.book-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0 12px;
+  height: 30px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+.book-tab:hover {
+  color: var(--ink);
+}
+
+.book-tab.active {
+  background: var(--thumb);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line);
+}
+
+.book-form-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.8;
+}
+
+.book-group-label {
+  margin: 18px 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.book-group-label:first-child {
+  margin-top: 0;
+}
+
+.book-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.book-row.muted {
+  color: var(--muted);
+}
+
+.book-row.total {
+  font-weight: 700;
+  border-bottom: 0;
+  border-top: 1px solid var(--ink);
+  margin-top: -1px;
+}
+
+.book-value {
+  white-space: nowrap;
+}
+
+/* 当期純利益などの結論。合計行 (.total) の罫線ではなく、面で区切る */
+.book-row.book-net {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 1rem;
+}
+
+.book-net.positive .book-value { color: var(--income); }
+.book-net.negative .book-value { color: var(--expense); }
+
+.book-table .amount-col {
+  text-align: right;
+}
+
+.book-total-row td {
+  font-weight: 700;
+  border-top: 1px solid var(--ink);
+}
+
+.book-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.book-check.ok { color: var(--income); }
+.book-check.ng { color: var(--expense); }
+
+.book-note {
+  margin: 18px 0 0;
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.8;
+}
+
+.book-note:empty {
+  display: none;
+}
+
+.journal-entry {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.journal-entry:first-child {
+  padding-top: 0;
+}
+
+.journal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.84rem;
+}
+
+.journal-date {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+}
+
+.journal-memo {
+  font-weight: 600;
+}
+
+.journal-tag {
+  background: var(--transfer-soft);
+  color: var(--transfer);
+  font-size: 0.68rem;
+}
+
+/* 借方 / 貸方を左右に並べる。科目と金額で1組なので4列。
+   境目は縦線ではなく、列の見出し (借方 / 貸方) と余白で示す */
+.journal-lines {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  font-size: 0.86rem;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.journal-column-label {
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding-bottom: 2px;
+}
+
+.journal-column-label.credit,
+.journal-account.credit {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.journal-amount {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.journal-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+/* ===========================================================================
+   モーダル
+   =========================================================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 13, 0.42);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+  animation: fade-in 0.2s var(--ease) both;
+}
+
+.modal-box {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  padding: 28px;
+  width: 100%;
+  max-width: 460px;
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line);
+  animation: modal-in 0.35s var(--ease) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* モーダルを開いているあいだ、裏のページをスクロールさせない。
+   iOS Safari は body の overflow:hidden を無視するため位置ごと固定する。
+   ずらす量 (top) と横位置の補正は JS 側で設定する。 */
+body.modal-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 入力フォームを収めるポップアップ */
+.modal-box-wide {
+  max-width: 560px;
+}
+
+.modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 18px;
+  padding-right: 32px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: var(--bg-tint);
+  border-radius: 999px;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.modal-close:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.payslip-modal-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin: 18px 0 6px;
+}
+
+.payslip-modal-group-label:first-child {
+  margin-top: 0;
+}
+
+.payslip-modal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.payslip-modal-row.total {
+  font-weight: 700;
+  border-bottom: 0;
+  border-top: 1px solid var(--ink);
+  margin-top: -1px;
+  padding-top: 9px;
+}
+
+.payslip-modal-row .payslip-modal-value {
+  white-space: nowrap;
+}
+
+/* ===========================================================================
+   フッター
+   =========================================================================== */
+.app-footer {
+  text-align: center;
+  padding: 0 24px 40px;
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
+/* ===========================================================================
+   起動・ログイン画面
+   =========================================================================== */
+.auth-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(60% 50% at 20% 0%, color-mix(in srgb, var(--income) 10%, transparent), transparent 70%),
+    radial-gradient(50% 50% at 100% 100%, color-mix(in srgb, var(--save) 10%, transparent), transparent 70%),
+    var(--bg);
+}
+
+.auth-card {
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line);
+  padding: 36px 32px 28px;
+  width: 100%;
+  max-width: 400px;
+  animation: modal-in 0.5s var(--ease) both;
+}
+
+.auth-card h1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+.auth-card h1 .icon {
+  color: var(--muted);
+}
+
+.auth-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.45);
+}
+
+.auth-mark .icon {
+  width: 26px;
+  height: 26px;
+  vertical-align: 0;
+}
+
+.auth-tagline {
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--ink-2) !important;
+  margin-bottom: 6px !important;
+}
+
+.auth-card p {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 12px;
+}
+
+.auth-sub {
+  text-align: center;
+  font-size: 0.8rem !important;
+  margin-bottom: 22px !important;
+}
+
+/* 起動失敗の考えられる原因リスト */
+.error-causes {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0 0 12px;
+  padding-left: 1.2em;
+  text-align: left;
+}
+
+.error-causes li {
+  margin-bottom: 4px;
+}
+
+.auth-card code {
+  font-family: var(--font-mono);
+  background: var(--bg-tint);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.82em;
+}
+
+.auth-tabs {
+  display: flex;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.auth-tab {
+  flex: 1;
+  height: 36px;
+}
+
+#auth-form .form-group {
+  margin-bottom: 14px;
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.auth-error {
+  background: var(--expense-soft);
+  color: var(--expense);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  margin-bottom: 14px;
+}
+
+.auth-forgot {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.auth-forgot:hover {
+  color: var(--ink);
+}
+
+.loading-screen {
+  flex-direction: column;
+  gap: 14px;
+}
+
+.loading-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.loading-mark .icon {
+  width: 26px;
+  height: 26px;
+  vertical-align: 0;
+}
+
+.loading-text {
+  font-size: 0.82rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.94); opacity: 0.7; }
+}
+
+
+/* ===========================================================================
+   支出のペース (ヒーローのグラフ)
+   =========================================================================== */
+.pace {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pace-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.pace-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.pace-status {
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-tint);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-note {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+.pace-status.under { background: var(--income-soft); color: var(--income); }
+.pace-status.over { background: var(--expense-soft); color: var(--expense); }
+
+.pace-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.pace-grid { stroke: var(--line); stroke-width: 1; }
+.pace-baseline { stroke: var(--line-strong); stroke-width: 1; }
+.pace-today { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 2 4; }
+
+.pace-axis {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  fill: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-budget {
+  stroke: var(--muted);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 5;
+  opacity: 0.8;
+}
+
+.pace-budget-label {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--muted);
+}
+
+.pace-line {
+  fill: none;
+  stroke: var(--expense);
+  stroke-width: 2.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw-line 1.2s var(--ease) 0.1s forwards;
+}
+
+.pace-area {
+  opacity: 0;
+  animation: fade-in 0.8s var(--ease) 0.6s forwards;
+}
+
+.pace-dot { fill: var(--expense); }
+.pace-dot-halo { fill: var(--expense); opacity: 0.16; }
+.pace-dot,
+.pace-dot-halo,
+.pace-value {
+  opacity: 0;
+  animation: fade-in 0.4s var(--ease) 1.1s forwards;
+}
+
+.pace-value {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 650;
+  fill: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace.no-anim .pace-line,
+.pace.no-anim .pace-area,
+.pace.no-anim .pace-dot,
+.pace.no-anim .pace-dot-halo,
+.pace.no-anim .pace-value {
+  animation: none;
+  opacity: 1;
+  stroke-dashoffset: 0;
+}
+
+.pace.no-anim .pace-dot-halo {
+  opacity: 0.16;
+}
+
+@keyframes draw-line {
+  to { stroke-dashoffset: 0; }
+}
+
+/* キーボードショートカットの表示 */
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  padding: 0 0.4em;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+.shortcut-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  color: var(--muted);
+}
+
+.shortcut-help span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-help kbd {
+  margin-right: 4px;
+}
+
+/* 指で操作する端末ではショートカットの案内やPC向けの手順を出さない */
+@media (hover: none), (max-width: 768px) {
+  .pc-only,
+  .form-shortcut,
+  .shortcut-help {
+    display: none !important;
+  }
+}
+
+/* ===========================================================================
+   記録一覧の細部 (曜日・日ごとのまとまり・件数と合計・編集中の行)
+   =========================================================================== */
+.list-summary {
+  margin: -4px 0 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.list-summary:empty {
+  display: none;
+}
+
+.date-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.dow {
+  margin-left: 5px;
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+.dow.sun { color: var(--expense); }
+.dow.sat { color: var(--need); }
+
+/* 同じ日の2行目以降は日付を消し、行の区切りも弱める (日ごとのまとまりが見える)。
+   スマホでは1件ずつのカードなので、日付を消すと何日の記録か分からなくなる。
+   表として並ぶ幅だけにする */
+@media (min-width: 769px) {
+  .entry-table tbody tr.same-day td.date-cell,
+  .entry-table tbody tr.same-day td.date-cell .dow {
+    color: transparent;
+  }
+
+  .entry-table tbody tr:has(+ tr.same-day) td {
+    border-bottom-color: color-mix(in srgb, var(--line) 45%, transparent);
+  }
+}
+
+.category-cell .category-dot {
+  display: inline-block;
+  margin-right: 9px;
+  vertical-align: 0.08em;
+}
+
+.category-dot.income { background: var(--income); }
+.category-dot.save { background: var(--save); }
+.category-dot.transfer { background: var(--transfer); }
+
+/* 行の操作はアイコンだけ (文字は読み上げ用に残す) */
+.entry-table .icon-btn {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.entry-table .icon-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.entry-table .icon-btn .btn-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* マウスのある画面では、行の操作は指した行だけはっきり出す */
+@media (hover: hover) and (min-width: 769px) {
+  .entry-table .row-actions {
+    opacity: 0.38;
+    transition: opacity 0.15s var(--ease);
+  }
+  .entry-table tbody tr:hover .row-actions,
+  .entry-table tbody tr:focus-within .row-actions,
+  .entry-table tbody tr.is-editing .row-actions {
+    opacity: 1;
+  }
+}
+
+/* PCの右側の入力欄で編集している行 */
+.entry-table tbody tr.is-editing,
+.entry-table tbody tr.is-editing:hover {
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+}
+
+.entry-table tbody tr.is-editing td:first-child {
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.entry-table tbody tr.is-editing td.date-cell,
+.entry-table tbody tr.is-editing td.date-cell .dow {
+  color: var(--ink);
+}
+
+/* 編集中の入力欄 */
+.form-card.is-editing {
+  border-color: color-mix(in srgb, var(--focus) 45%, transparent);
+  box-shadow: var(--shadow-md), 0 0 0 4px color-mix(in srgb, var(--focus) 10%, transparent);
+}
+
+.form-card.is-editing #form-title {
+  color: var(--focus);
+}
+
+.form-card.is-editing .form-shortcut {
+  display: none;
+}
+
+/* ===========================================================================
+   帳簿: 勘定式 (左右) の並び
+   =========================================================================== */
+#bookkeeping-section {
+  container-type: inline-size;
+  container-name: book;
+}
+
+.book-columns {
+  display: grid;
+  gap: 18px;
+}
+
+@container book (min-width: 720px) {
+  .book-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 0;
+  }
+  .book-side.debit {
+    order: -1;
+    padding-right: 28px;
+  }
+  .book-side.credit {
+    padding-left: 28px;
+    border-left: 1px solid var(--line);
+  }
+}
+
+/* ===========================================================================
+   PC (広い画面)
+   =========================================================================== */
+.workspace {
+  display: contents;
+}
+
+/* サイドバーはアイコンだけにたたむ (1440px 未満)。項目名はマウスを乗せると出る */
+@media (min-width: 769px) and (max-width: 1439px) {
+  :root {
+    --sidebar-w: 76px;
+  }
+
+  .app-sidebar {
+    padding: 22px 12px 18px;
+    align-items: center;
+    overflow: visible;
+  }
+
+  .sidebar-brand {
+    padding: 2px 0 18px;
+  }
+
+  .sidebar-nav-label {
+    width: 28px;
+    height: 1px;
+    padding: 0;
+    margin: 12px 0;
+    font-size: 0;
+    background: var(--line);
+  }
+
+  .sidebar-link {
+    position: relative;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .sidebar-link .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .sidebar-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .sidebar-link:hover .sidebar-text,
+  .sidebar-link:focus-visible .sidebar-text {
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    z-index: 40;
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+  }
+
+  .sidebar-foot {
+    display: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1440px;
+    gap: 22px;
+  }
+
+  /* ヘッダーの中身を本文の幅にそろえる */
+  .app-header {
+    padding-inline: max(32px, calc((100% - 1440px) / 2 + 32px));
+  }
+
+  /* ヒーロー: 左に収支、右に支出のペース、下に4つの数字 */
+  .hero-card {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-areas:
+      "main pace"
+      "stats stats";
+    align-items: stretch;
+    gap: 22px 56px;
+    padding: 32px 36px 22px;
+  }
+
+  .hero-card:has(> .pace.hidden) {
+    grid-template-areas:
+      "main main"
+      "stats stats";
+  }
+
+  .hero-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .hero-value {
+    font-size: 4rem;
+  }
+
+  .summary-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.25fr);
+    border-bottom: 0;
+    align-items: center;
+  }
+
+  .stat.cumulative-card {
+    grid-column: auto;
+    margin: 12px 0 12px 14px;
+  }
+
+  /* 作業台: 一覧 (左) と入力欄 (右)。入力欄はスクロールしても画面に残る */
+  .workspace {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-areas: "list form";
+    align-items: start;
+    gap: 22px;
+  }
+
+  .workspace > #list-section {
+    grid-area: list;
+  }
+
+  .workspace > #entry-form-slot {
+    grid-area: form;
+    position: sticky;
+    top: calc(var(--header-height, 72px) + 12px);
+    max-height: calc(100vh - var(--header-height, 72px) - 28px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  /* 一覧の見出しは、スクロールしてもヘッダーの下に残す。
+     横は clip (はみ出した分を切る) にする。visible だと、幅の広い行が右の
+     入力欄の上にはみ出して重なる。auto (スクロール) にすると、見出しの
+     sticky が表の枠の中でしか効かなくなる */
+  #list-section .table-wrapper {
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  /* キーボードで行を移ったときなどに、行がヘッダーと表の見出し (どちらも
+     画面に固定) の裏に隠れないようにする */
+  html {
+    scroll-padding-top: calc(var(--header-height, 72px) + 16px);
+  }
+
+  #summary-section,
+  #budget-section,
+  #plan-actual-section,
+  #advance-section,
+  #nws-section,
+  #bookkeeping-section,
+  #list-section,
+  #entry-form-slot {
+    scroll-margin-top: 0;
+  }
+
+  #list-section tbody :is(tr, td, button) {
+    scroll-margin-top: 44px;
+  }
+
+  /* 表は列の幅に必ず収める (右の入力欄があるので横に広げられない)。
+     列の幅を決めておき (table-layout: fixed)、長いカテゴリ名とメモは「…」で
+     切る。中身しだいで幅が変わると、操作ボタンが枠の外に押し出される */
+  #list-section .entry-table {
+    table-layout: fixed;
+  }
+
+  /* 幅1200px前後でもメモが読める幅 (90px以上) を残す。操作の列は
+     ボタン3つ (内訳・編集・削除) が入る幅にする */
+  #list-section .entry-table th:nth-child(1) { width: 72px; }
+  #list-section .entry-table th:nth-child(2) { width: 84px; }
+  #list-section .entry-table th:nth-child(3) { width: 18%; }
+  #list-section .entry-table th:nth-child(4) { width: 108px; }
+  #list-section .entry-table th:nth-child(6) { width: 56px; }
+  #list-section .entry-table th:nth-child(7) { width: 112px; }
+
+  #list-section .entry-table td:last-child {
+    padding-inline: 4px;
+  }
+
+  #list-section .entry-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #list-section .entry-table td.memo-cell {
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  /* 種別の欄は印 (立替・仮) が増えると折り返す */
+  #list-section .entry-table td:nth-child(2) {
+    white-space: normal;
+    line-height: 2;
+  }
+
+  #list-section .entry-table td:last-child {
+    overflow: visible;
+  }
+
+  #list-section .entry-table thead th {
+    position: sticky;
+    top: var(--header-height, 72px);
+    z-index: 2;
+    background: var(--surface);
+    box-shadow: inset 0 -1px 0 var(--line);
+    border-bottom: 0;
+  }
+
+  #list-section .entry-table thead th:first-child {
+    border-top-left-radius: 8px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+}
+
+/* とても広い画面: 作業台の入力欄を少し広げる */
+@media (min-width: 1680px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+}
+
+/* ===========================================================================
+   スマホの下部タブ (PCでは出さない)
+   =========================================================================== */
+.tab-bar {
+  display: none;
+}
+
+/* ===========================================================================
+   中くらいの画面
+   =========================================================================== */
+@media (max-width: 1100px) {
+  .app-header {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .container {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .user-email {
+    display: none;
+  }
+}
+
+
+
+/* PCとスマホの間 (タブレット): ログアウトはアイコンだけにしてヘッダーを1段に収める */
+@media (max-width: 1100px) {
+  .logout-btn.btn-small {
+    width: 36px;
+    padding: 0;
+  }
+  .logout-btn .logout-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ===========================================================================
+   スマホ
+   =========================================================================== */
+@media (max-width: 768px) {
+  /* 指で押せる大きさにする (iOSの目安は44px) */
+  :root {
+    --control-height: 44px;
+  }
+
+  body {
+    font-size: 15px;
+  }
+
+  /* 下のタブは画面に固定されて中身の上に重なる。フォーカスの移動や
+     scrollIntoView で見せる位置が、タブの裏に隠れないようにする */
+  html {
+    scroll-padding-bottom: calc(var(--tabbar-h) + 24px + env(safe-area-inset-bottom));
+  }
+
+  .app-sidebar {
+    display: none;
+  }
+
+  /* ヘッダーは2段: 1段目にブランドと表示切替・ログアウト、2段目に月の移動 */
+  .app-header {
+    flex-wrap: wrap;
+    gap: 8px 8px;
+    padding: 10px 16px 10px;
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .app-brand {
+    display: flex;
+    order: 1;
+    margin-right: auto;
+  }
+
+  .view-toggle {
+    order: 2;
+  }
+
+  .view-tab {
+    height: 38px;
+    min-height: 38px;
+    padding: 0 14px;
+  }
+
+  .user-bar {
+    order: 3;
+  }
+
+  /* メールアドレスは1段目に入りきらない。どのアカウントかはPC表示で確認できる */
+  .user-email {
+    display: none;
+  }
+
+  .logout-btn.btn-small {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border-color: transparent;
+  }
+
+  .logout-btn .logout-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .logout-btn .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* 月の表示を左に大きく、移動ボタンを右手の届く右側にまとめる */
+  .month-nav {
+    order: 4;
+    flex-basis: 100%;
+    margin: 0;
+    gap: 6px;
+  }
+
+  .current-month {
+    order: -1;
+    flex: 1;
+    /* PC用の最小幅 (6.4em) のままだと、幅の狭い端末で「今月」が画面の外に押し出される */
+    min-width: 0;
+    font-size: clamp(1.25rem, 6.4vw, 1.6rem);
+    text-align: left;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .nav-btn,
+  .today-btn,
+  .view-tab,
+  .auth-tab {
+    min-height: 44px;
+  }
+
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .today-btn {
+    height: 44px;
+    margin-left: 0;
+  }
+
+  /* 一覧の操作や編集ボタンまで44pxにすると縦に伸びすぎるので、
+     押せる下限として40pxにとどめる */
+  .btn-small,
+  .icon-btn {
+    min-height: 40px;
+  }
+
+  .advance-checkbox {
+    min-height: 44px;
+  }
+
+  .container {
+    padding: 4px 16px calc(var(--tabbar-h) + 28px + env(safe-area-inset-bottom));
+    gap: 14px;
+  }
+
+  .card {
+    padding: 20px 18px;
+    border-radius: var(--r-lg);
+  }
+
+  /* 「追加」は一番よく押すボタン。横幅いっぱいにする
+     (編集中は「キャンセル」と半分ずつになる) */
+  .form-actions .btn {
+    min-height: 48px;
+    flex: 1;
+  }
+
+  #submit-btn {
+    min-width: 0;
+  }
+
+  /* --- 画面の切り替え (下部タブ) --- */
+  #app-root[data-tab="home"] [data-panel]:not([data-panel="home"]),
+  #app-root[data-tab="budget"] [data-panel]:not([data-panel="budget"]),
+  #app-root[data-tab="book"] [data-panel]:not([data-panel="book"]) {
+    display: none;
+  }
+
+  /* 「予算・分析」タブでは Need/Want/Save を一番上に出す。月全体の使い方
+     (必要・欲しい・残せた) をまず見てから、カテゴリ別の予算に降りる順にする */
+  #nws-section {
+    order: -1;
+  }
+
+  .tab-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 64px;
+    align-items: center;
+    position: fixed;
+    z-index: 30;
+    left: 12px;
+    right: 12px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    height: var(--tabbar-h);
+    padding: 6px;
+    border-radius: 22px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    -webkit-backdrop-filter: saturate(1.6) blur(22px);
+    backdrop-filter: saturate(1.6) blur(22px);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .tab-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 100%;
+    border: none;
+    background: transparent;
+    border-radius: 16px;
+    color: var(--faint);
+    font-family: inherit;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: color 0.2s var(--ease), background 0.2s var(--ease);
+  }
+
+  .tab-btn .icon {
+    width: 22px;
+    height: 22px;
+    vertical-align: 0;
+    transition: transform 0.3s var(--ease);
+  }
+
+  .tab-btn.active {
+    color: var(--ink);
+    background: var(--bg-tint);
+  }
+
+  .tab-btn.active .icon {
+    transform: translateY(-1px);
+  }
+
+  .tab-add {
+    justify-self: end;
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 17px;
+    background: var(--accent);
+    color: var(--on-accent);
+    cursor: pointer;
+    box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.5);
+    transition: transform 0.2s var(--ease);
+  }
+
+  /* 文字を入力しているあいだは下のタブを隠す。キーボードの上に浮いて
+     入力欄を覆ってしまう (Android は画面が縮むので特に) */
+  #app-root:has(.app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea):focus) .tab-bar {
+    display: none;
+  }
+
+  .tab-add:active {
+    transform: scale(0.92);
+  }
+
+  .tab-add .icon {
+    width: 24px;
+    height: 24px;
+    stroke-width: 2.2;
+    vertical-align: 0;
+  }
+
+  /* --- ヒーロー --- */
+  /* 支出のペースのグラフは、スマホのホームでは場所を取りすぎるので出さない */
+  .hero-card > .pace {
+    display: none;
+  }
+
+  .hero-card {
+    padding: 22px 18px 18px;
+    gap: 18px;
+  }
+
+  .hero-value {
+    font-size: 2.6rem;
+    margin: 2px 0 16px;
+  }
+
+  .stat {
+    padding: 12px 10px;
+  }
+
+  .stat:first-child {
+    padding-left: 0;
+  }
+
+  .card-value {
+    font-size: 1.02rem;
+    /* 金額は「…」で切らない (¥150,… では読めない) */
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .stat.cumulative-card {
+    margin: 12px 0 0;
+    padding: 12px 14px;
+  }
+
+  .cumulative-card .cumulative-value {
+    font-size: 1.2rem;
+  }
+
+  .flow-legend {
+    font-size: 0.74rem;
+    gap: 4px 12px;
+  }
+
+  /* --- 金額の桁が多い・画面が狭いとき: 収入・支出・貯蓄を3列に詰めず、1行ずつ並べる --- */
+  @media (max-width: 400px) {
+    .summary-cards {
+      grid-template-columns: 1fr;
+    }
+    .stat {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 9px 0;
+    }
+    .stat + .stat {
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+    .stat .card-value {
+      margin-top: 0;
+    }
+    .stat.cumulative-card {
+      display: grid;
+      padding: 12px 14px;
+    }
+  }
+
+  /* --- 記録一覧: 表をカードの並びに組み替える ---
+     DOM は表のまま (並び替え・テストの都合) で、見た目だけ1件1枚にする。
+     [カテゴリ ............ 金額]
+     [日付 種別 メモ ....... 操作] */
+  .list-header {
+    align-items: flex-start;
+  }
+
+  .csv-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin: 0 -18px;
+    padding: 2px 18px 4px;
+    width: calc(100% + 36px);
+    scrollbar-width: none;
+  }
+
+  .csv-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .csv-actions .btn {
+    flex-shrink: 0;
+  }
+
+  .list-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .filter-select {
+    width: 100%;
+    height: 40px;
+  }
+
+  #filter-date-clear {
+    grid-column: 1 / -1;
+  }
+
+  #list-section .table-wrapper {
+    overflow: visible;
+  }
+
+  #list-section .entry-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  #list-section .entry-table,
+  #list-section .entry-table tbody {
+    display: block;
+  }
+
+  #list-section .entry-table tbody tr {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "cat cat cat amount"
+      "date type memo actions";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 0;
+    padding: 12px 0 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  #list-section .entry-table tbody tr:hover {
+    background: transparent;
+  }
+
+  #list-section .entry-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  #list-section .entry-table td {
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  #list-section .entry-table td:nth-child(1) {
+    grid-area: date;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  #list-section .entry-table td:nth-child(2) {
+    grid-area: type;
+    display: flex;
+    gap: 2px;
+  }
+
+  #list-section .entry-table td:nth-child(2) .type-badge,
+  #list-section .entry-table td:nth-child(2) .advance-badge,
+  #list-section .entry-table td:nth-child(2) .pending-badge {
+    font-size: 0.66rem;
+    padding: 0 7px;
+    margin-left: 0;
+  }
+
+  #list-section .entry-table td:nth-child(3) {
+    grid-area: cat;
+    font-weight: 600;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #list-section .entry-table td.amount-cell {
+    grid-area: amount;
+    font-size: 1rem;
+  }
+
+  #list-section .entry-table td.memo-cell {
+    grid-area: memo;
+    min-width: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #list-section .entry-table td.created-at-cell {
+    display: none;
+  }
+
+  #list-section .entry-table td:last-child {
+    grid-area: actions;
+  }
+
+  .row-actions {
+    gap: 0;
+    margin-right: -8px;
+  }
+
+  /* 行の操作はアイコンだけ見せる (文字は読み上げ用に残す) */
+  #list-section .entry-table .icon-btn {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  #list-section .entry-table .icon-btn .icon {
+    width: 17px;
+    height: 17px;
+  }
+
+  #list-section .entry-table .icon-btn .btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* --- 予算・立替・帳簿 --- */
+  .advance-row {
+    grid-template-columns: 3.4em minmax(0, 1fr) auto auto;
+  }
+
+  .advance-row-memo {
+    display: none;
+  }
+
+  /* 見出しの右に「口座を設定」、その下の段に表の切り替え */
+  .book-actions {
+    display: contents;
+  }
+
+  .book-tabs {
+    order: 3;
+  }
+
+  .book-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .book-tab {
+    padding: 0 4px;
+    height: 36px;
+    font-size: 0.74rem;
+  }
+
+  #edit-accounts-btn {
+    order: 2;
+  }
+
+  .nws-legend {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  /* 年間の棒グラフ: 12か月を画面の幅に収める (はみ出すとカードの外に棒が出る) */
+  .monthly-bar-yaxis {
+    width: 40px;
+  }
+
+  .monthly-bar-chart {
+    gap: 2px;
+  }
+
+  .month-bar-group {
+    min-width: 0;
+  }
+
+  .month-bars {
+    gap: 2px;
+  }
+
+  .month-bar {
+    width: min(7px, 30%);
+  }
+
+  .month-bar-label {
+    font-size: 0.64rem;
+  }
+
+  .month-bar-label .month-suffix {
+    display: none;
+  }
+
+  /* --- ポップアップは画面下から出るシートにする (片手で届く) --- */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-box {
+    max-width: none;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    padding: 24px 18px calc(20px + env(safe-area-inset-bottom));
+    max-height: 92vh;
+    max-height: 92dvh;
+    animation: sheet-in 0.4s var(--ease) both;
+  }
+
+  .modal-box::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+    margin: -12px auto 14px;
+  }
+
+  .modal-close {
+    top: 14px;
+    right: 14px;
+  }
+
+  @keyframes sheet-in {
+    from { transform: translateY(40px); opacity: 0.4; }
+    to { transform: none; opacity: 1; }
+  }
+
+  .app-footer {
+    display: none;
+  }
+}
+
+/* 動きを減らす設定のときは、飾りの動きを止める */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

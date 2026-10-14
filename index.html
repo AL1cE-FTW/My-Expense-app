@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>家計簿</title>
+  <!-- Lucide の notebook-pen。data URI に入れるため " と # をエスケープしている -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4'/%3E%3Cpath d='M2 6h4'/%3E%3Cpath d='M2 10h4'/%3E%3Cpath d='M2 14h4'/%3E%3Cpath d='M2 18h4'/%3E%3Cpath d='M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z'/%3E%3C/svg%3E">
+  <!-- 数字と英字は Geist、和文は Zen Kaku Gothic New。読めなくても system フォントで崩れずに出る -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 読み込み中 -->
+  <div id="loading-screen" class="auth-screen loading-screen">
+    <div class="loading-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></div>
+    <p class="loading-text">読み込み中...</p>
+  </div>
+
+  <!-- Firebase SDK 自体の読み込みに失敗した場合 (ネットワーク不調・広告ブロッカーなど) -->
+  <div id="sdk-error-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <h1><span data-icon="wifi-off"></span>読み込みエラー</h1>
+      <p>
+        アプリの起動に失敗しました。次のいずれかが原因の可能性があります。
+      </p>
+      <ul class="error-causes" id="sdk-error-causes">
+        <li>インターネットに接続できていない</li>
+        <li>広告ブロッカーなどの拡張機能が Firebase の読み込みを止めている</li>
+        <li><code>js/firebase-config.js</code> の設定値が正しくない</li>
+      </ul>
+      <p>
+        接続と拡張機能を確認してページを再読み込みしても直らない場合は、
+        ブラウザの開発者ツールのコンソールに詳しい原因が出ています。
+      </p>
+    </div>
+  </div>
+
+  <!-- 未セットアップ (firebase-config.js が無い場合) -->
+  <div id="setup-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <h1><span data-icon="settings"></span>セットアップが必要です</h1>
+      <p>
+        Firebaseの設定ファイルが見つかりません。<br>
+        <code>js/firebase-config.example.js</code> をコピーして
+        <code>js/firebase-config.js</code> を作成し、あなたの Firebase
+        プロジェクトの設定値を入力してください。
+      </p>
+      <p>手順は README.md の「Firebaseのセットアップ」をご覧ください。</p>
+    </div>
+  </div>
+
+  <!-- ログイン / 新規登録 -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="auth-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></div>
+      <h1>家計簿</h1>
+      <p class="auth-tagline">毎日の記録から、帳簿まで。</p>
+      <p class="auth-sub">スマホとPCでデータを同期するには、ログインしてください。</p>
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-mode="login" aria-pressed="true">ログイン</button>
+        <button type="button" class="auth-tab" data-mode="signup" aria-pressed="false">新規登録</button>
+      </div>
+      <form id="auth-form">
+        <div class="form-group">
+          <label for="auth-email">メールアドレス</label>
+          <input type="email" id="auth-email" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">パスワード (6文字以上)</label>
+          <input type="password" id="auth-password" required minlength="6" autocomplete="current-password">
+        </div>
+        <p id="auth-error" class="auth-error hidden"></p>
+        <button type="submit" class="btn btn-primary auth-submit" id="auth-submit-btn">ログイン</button>
+        <button type="button" class="auth-forgot" id="auth-forgot-btn">パスワードをお忘れですか?</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- アプリ本体 -->
+  <div id="app-root" class="hidden" data-tab="home">
+   <div class="app-shell">
+    <nav class="app-sidebar" aria-label="セクション">
+      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span><span class="sidebar-text">家計簿</span></div>
+      <div class="sidebar-nav-label">毎日</div>
+      <a class="sidebar-link" href="#summary-section"><span data-icon="house"></span><span class="sidebar-text">概要</span></a>
+      <a class="sidebar-link" href="#list-section"><span data-icon="receipt"></span><span class="sidebar-text">記録一覧</span></a>
+      <div class="sidebar-nav-label">予算と分析</div>
+      <a class="sidebar-link" href="#budget-section"><span data-icon="wallet"></span><span class="sidebar-text">予算</span></a>
+      <a class="sidebar-link" href="#nws-section"><span data-icon="chart-pie"></span><span class="sidebar-text">Need / Want / Save</span></a>
+      <a class="sidebar-link" href="#plan-actual-section"><span data-icon="chart-column"></span><span class="sidebar-text">予定と実績</span></a>
+      <div class="sidebar-nav-label">帳簿</div>
+      <a class="sidebar-link" href="#advance-section"><span data-icon="hand-coins"></span><span class="sidebar-text">立替金</span></a>
+      <a class="sidebar-link" href="#bookkeeping-section"><span data-icon="book-open"></span><span class="sidebar-text">帳簿 (簿記)</span></a>
+      <div class="sidebar-foot">
+        <p class="shortcut-help sidebar-text" aria-label="キーボードショートカット">
+          <span><kbd>N</kbd>記録を追加</span>
+          <span><kbd>←</kbd><kbd>→</kbd>前後の月</span>
+          <span><kbd>T</kbd>今月へ</span>
+        </p>
+        <p class="sidebar-text">記録はアカウントに保存され、スマホとPCで同期されます。</p>
+      </div>
+    </nav>
+    <div class="app-content">
+    <header class="app-header">
+      <h1 class="app-brand"><span class="brand-mark" aria-hidden="true"><span data-icon="notebook-pen"></span></span>家計簿</h1>
+      <div class="month-nav">
+        <button id="prev-month" class="nav-btn" aria-label="前へ"><span data-icon="chevron-left"></span></button>
+        <span id="current-month" class="current-month" aria-live="polite"></span>
+        <button id="next-month" class="nav-btn" aria-label="次へ"><span data-icon="chevron-right"></span></button>
+        <button id="today-btn" class="today-btn">今月</button>
+      </div>
+      <div class="view-toggle">
+        <button type="button" class="view-tab active" data-view="month" aria-pressed="true">月別</button>
+        <button type="button" class="view-tab" data-view="year" aria-pressed="false">年間</button>
+      </div>
+      <div class="user-bar">
+        <span id="user-email" class="user-email"></span>
+        <button id="logout-btn" class="btn btn-ghost btn-small logout-btn" aria-label="ログアウト"><span data-icon="log-out"></span><span class="logout-text">ログアウト</span></button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- 収支 (この期間) と累計。一番大事な数字を一番大きく出す -->
+      <section class="card hero-card" id="summary-section" data-panel="home">
+        <div class="hero-main">
+          <div class="hero-label" id="hero-label">今月の収支</div>
+          <div class="hero-value" id="balance">¥0</div>
+          <div class="flow" id="summary-flow"></div>
+        </div>
+        <!-- 今月の支出の進み方 (予算のペースとの比較)。月別のときだけ出す -->
+        <figure class="pace" id="spending-pace"></figure>
+        <div class="summary-cards">
+          <div class="stat income-card">
+            <div class="card-label"><span class="stat-dot"></span>収入</div>
+            <div class="card-value" id="total-income">¥0</div>
+          </div>
+          <div class="stat expense-card">
+            <div class="card-label"><span class="stat-dot"></span>支出</div>
+            <div class="card-value" id="total-expense">¥0</div>
+          </div>
+          <div class="stat save-card">
+            <div class="card-label"><span class="stat-dot"></span>貯蓄・投資</div>
+            <div class="card-value" id="total-save">¥0</div>
+          </div>
+          <div class="stat cumulative-card">
+            <div class="card-label cumulative-label">累計貯金額</div>
+            <div class="card-value cumulative-value" id="cumulative-savings">¥0</div>
+            <div class="cumulative-change" id="cumulative-change"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 年間表示のみ: 月ごとの収入・支出の推移 -->
+      <section class="card hidden" id="yearly-chart-section" data-panel="home">
+        <div class="card-head"><h2>月別の収支推移</h2></div>
+        <div class="monthly-chart-row">
+          <div id="monthly-bar-yaxis" class="monthly-bar-yaxis"></div>
+          <div id="monthly-bar-chart" class="monthly-bar-chart"></div>
+        </div>
+        <div class="monthly-bar-legend">
+          <span><span class="legend-dot income"></span>収入</span>
+          <span><span class="legend-dot expense"></span>支出</span>
+        </div>
+      </section>
+
+      <!-- PCでは、記録一覧 (左) と入力欄 (右、スクロールしても残る) を横に並べる作業台。
+           スマホ・タブレットでは中身をそのまま縦に並べる (display: contents) -->
+      <div class="workspace">
+      <!-- 入力フォーム -->
+      <!-- 編集のときは、このフォーム要素をそのまま下のポップアップへ移動する
+           (記録一覧はページ最下部にあるため、編集のたびに上まで戻るのを避ける) -->
+      <section class="card form-card" id="entry-form-slot" data-panel="home">
+        <div class="card-head">
+          <h2 id="form-title">記録を追加</h2>
+          <span class="card-head-note form-shortcut" aria-hidden="true"><kbd>N</kbd></span>
+        </div>
+        <form id="entry-form">
+          <input type="hidden" id="entry-id">
+          <div class="entry-fields">
+            <fieldset class="form-group type-fieldset">
+              <legend>種別</legend>
+              <div class="type-toggle">
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="expense" checked>
+                  <span>支出</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="income">
+                  <span>収入</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="save">
+                  <span>貯蓄</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="entry-type" value="transfer">
+                  <span>振替</span>
+                </label>
+              </div>
+            </fieldset>
+            <div class="form-group fg-amount">
+              <label for="entry-amount">金額</label>
+              <div class="amount-field">
+                <span class="amount-prefix" aria-hidden="true">¥</span>
+                <input type="number" id="entry-amount" min="1" step="1" inputmode="numeric" placeholder="0" required>
+              </div>
+            </div>
+            <div class="form-group fg-category">
+              <label for="entry-category">カテゴリ</label>
+              <select id="entry-category" required></select>
+            </div>
+            <div class="form-group fg-date">
+              <label for="entry-date">日付</label>
+              <input type="date" id="entry-date" required>
+            </div>
+            <div class="form-group fg-memo">
+              <label for="entry-memo">メモ</label>
+              <input type="text" id="entry-memo" placeholder="スーパーで買い物 など" maxlength="100">
+            </div>
+            <div class="form-group fg-settlement" id="entry-settlement-group">
+              <label for="entry-settlement">口座</label>
+              <select id="entry-settlement">
+                <option value="cash">現金</option>
+                <option value="bank">銀行口座</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="advance-toggle hidden" id="advance-toggle">
+            <label class="advance-checkbox">
+              <input type="checkbox" id="entry-advance">
+              <span>立替払い(あとで会社などから返金される)</span>
+            </label>
+          </div>
+
+          <div class="payslip-section hidden" id="payslip-section">
+            <div class="payslip-actions">
+              <!-- 前回の明細があるときだけ出す。ほとんどの欄は毎月同じなので、
+                   引き継いでから変わった欄だけ直すのが一番早い -->
+              <button type="button" class="btn btn-primary btn-small hidden" id="payslip-copy-prev-btn"></button>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">給与明細の内訳を入力</button>
+              <button type="button" class="btn btn-ghost btn-small" id="payslip-link-btn">給与サイトから読み込む (設定)</button>
+            </div>
+            <p class="payslip-hint">内訳を入れると、支給と控除から手取り (振込額) を自動で計算します。</p>
+            <p id="payslip-copy-note" class="payslip-copy-note hidden" role="status"></p>
+            <div class="payslip-breakdown hidden" id="payslip-breakdown">
+              <div id="payslip-salary-fields">
+                <p class="payslip-group-label">支給</p>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="payslip-base-salary">本給</label>
+                    <input type="number" id="payslip-base-salary" min="0" step="1" placeholder="250000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-location-allowance">勤務地手当</label>
+                    <input type="number" id="payslip-location-allowance" min="0" step="1" placeholder="10000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-commute">通勤手当</label>
+                    <input type="number" id="payslip-commute" min="0" step="1" placeholder="15000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-overtime-pay">時間外勤務手当</label>
+                    <input type="number" id="payslip-overtime-pay" min="0" step="1" placeholder="8000">
+                  </div>
+                  <div class="form-group">
+                    <!-- 遡及差額などで マイナスになることがあるので min を付けない -->
+                    <label for="payslip-salary-adjustment">給与調整</label>
+                    <input type="number" id="payslip-salary-adjustment" step="1" placeholder="0">
+                  </div>
+                </div>
+
+                <p class="payslip-group-label">控除</p>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="payslip-housing">寮社宅費 (家賃の天引き)</label>
+                    <input type="number" id="payslip-housing" min="0" step="1" placeholder="15000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-health-insurance">健康保険</label>
+                    <input type="number" id="payslip-health-insurance" step="1" placeholder="12000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-nursing-insurance">介護保険</label>
+                    <input type="number" id="payslip-nursing-insurance" step="1" placeholder="0">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-child-support">子ども支援金</label>
+                    <input type="number" id="payslip-child-support" step="1" placeholder="300">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-pension-insurance">厚生年金</label>
+                    <input type="number" id="payslip-pension-insurance" step="1" placeholder="25000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-employment-insurance">雇用保険料</label>
+                    <input type="number" id="payslip-employment-insurance" step="1" placeholder="1500">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-income-tax">所得税 (年末調整の還付はマイナス)</label>
+                    <input type="number" id="payslip-income-tax" step="1" placeholder="6000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-resident-tax">住民税</label>
+                    <input type="number" id="payslip-resident-tax" step="1" placeholder="10000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-other-deductions">その他控除(慶弔掛金・福祉会費・寮社宅関係など)</label>
+                    <input type="number" id="payslip-other-deductions" step="1" placeholder="3000">
+                  </div>
+                </div>
+              </div>
+
+              <div id="payslip-bonus-fields" class="hidden">
+                <p class="payslip-group-label">支給</p>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="payslip-bonus-amount">賞与額</label>
+                    <input type="number" id="payslip-bonus-amount" min="0" step="1" placeholder="300000">
+                  </div>
+                </div>
+
+                <p class="payslip-group-label">控除</p>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="payslip-bonus-health-insurance">健康保険</label>
+                    <input type="number" id="payslip-bonus-health-insurance" step="1" placeholder="15000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-bonus-nursing-insurance">介護保険</label>
+                    <input type="number" id="payslip-bonus-nursing-insurance" step="1" placeholder="0">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-bonus-child-support">子ども支援金</label>
+                    <input type="number" id="payslip-bonus-child-support" step="1" placeholder="300">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-bonus-pension-insurance">厚生年金</label>
+                    <input type="number" id="payslip-bonus-pension-insurance" step="1" placeholder="27000">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-bonus-employment-insurance">雇用保険料</label>
+                    <input type="number" id="payslip-bonus-employment-insurance" step="1" placeholder="1800">
+                  </div>
+                  <div class="form-group">
+                    <label for="payslip-bonus-income-tax">所得税</label>
+                    <input type="number" id="payslip-bonus-income-tax" step="1" placeholder="12000">
+                  </div>
+                </div>
+              </div>
+
+              <p class="payslip-net-preview">
+                支給合計 <strong id="payslip-gross-value">¥0</strong> − 控除合計 <strong id="payslip-deduction-value">¥0</strong>
+                = 差引支給額(振込額): <strong id="payslip-net-value">¥0</strong>
+                <span id="payslip-housing-note" class="payslip-housing-note hidden"></span>
+              </p>
+              <button type="button" class="btn btn-secondary btn-small" id="payslip-clear-btn">内訳をクリアする</button>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="submit-btn">追加</button>
+            <button type="button" class="btn btn-secondary hidden" id="cancel-edit-btn">キャンセル</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 記録一覧 -->
+      <section class="card" id="list-section" data-panel="home">
+        <div class="list-header card-head">
+          <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
+          <div class="csv-actions" role="group" aria-label="取り込みと書き出し">
+            <button class="btn btn-ghost btn-small" id="gmail-import-btn"><span data-icon="mail"></span>メールから読み込み</button>
+            <!-- ファイル入力自体は display:none でフォーカスできないため、
+                 ボタンから開く (label だけだとキーボードで到達できない) -->
+            <button class="btn btn-ghost btn-small" id="import-csv-btn"><span data-icon="upload"></span>CSVインポート</button>
+            <input type="file" id="import-csv-input" accept=".csv,text/csv" class="hidden" tabindex="-1" aria-hidden="true">
+            <button class="btn btn-ghost btn-small" id="export-csv-btn"><span data-icon="download"></span>CSVエクスポート</button>
+            <button class="btn btn-ghost btn-small" id="export-analysis-btn"
+                    title="予算・収入目標・給与明細の内訳まで含めて書き出します。AIに読ませて分析してもらう用"><span data-icon="sparkles"></span>分析用に書き出す</button>
+          </div>
+        </div>
+        <p id="list-summary" class="list-summary" aria-live="polite"></p>
+        <p id="list-pending-note" class="list-pending-note hidden"></p>
+        <div class="list-filters">
+          <select id="filter-type" class="filter-select" aria-label="種別で絞り込み">
+            <option value="all">すべての種別</option>
+            <option value="expense">支出</option>
+            <option value="income">収入</option>
+            <option value="save">貯蓄</option>
+            <option value="transfer">振替</option>
+          </select>
+          <select id="filter-category" class="filter-select" aria-label="カテゴリで絞り込み">
+            <option value="all">すべてのカテゴリ</option>
+          </select>
+          <input type="date" id="filter-date" class="filter-select" aria-label="この日だけ表示">
+          <button type="button" class="btn btn-secondary btn-small hidden" id="filter-date-clear">
+            日付の絞り込みを解除
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="entry-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="date" aria-sort="none"><button type="button" class="sort-btn">日付</button></th>
+                <th class="sortable" data-sort="type" aria-sort="none"><button type="button" class="sort-btn">種別</button></th>
+                <th class="sortable" data-sort="category" aria-sort="none"><button type="button" class="sort-btn">カテゴリ</button></th>
+                <th class="sortable amount-col" data-sort="amount" aria-sort="none"><button type="button" class="sort-btn">金額</button></th>
+                <th>メモ</th>
+                <th class="sortable" data-sort="createdAt" aria-sort="none"><button type="button" class="sort-btn">登録日</button></th>
+                <th><span class="visually-hidden">操作</span></th>
+              </tr>
+            </thead>
+            <tbody id="entry-list"></tbody>
+          </table>
+          <p class="empty-message hidden" id="list-empty-message">今月の記録はまだありません。上のフォームから追加してください。</p>
+        </div>
+      </section>
+
+      </div>
+
+      <!-- 予算 -->
+      <section class="card" id="budget-section" data-panel="budget">
+        <div class="list-header card-head">
+          <h2 id="budget-section-title">今月の予算</h2>
+          <button type="button" class="btn btn-ghost btn-small" id="edit-budget-btn"><span data-icon="pencil"></span>予算を編集</button>
+        </div>
+
+        <div id="budget-overall" class="budget-overall"></div>
+
+        <div id="budget-breakdown" class="category-breakdown">
+          <p class="empty-message">予算が設定されていません</p>
+        </div>
+
+        <form id="budget-form" class="budget-form hidden">
+          <div id="budget-inputs" class="budget-inputs"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn btn-secondary" id="cancel-budget-btn">キャンセル</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Need / Want / Save -->
+      <section class="card" id="nws-section" data-panel="budget">
+        <div class="card-head">
+          <h2>Need / Want / Save</h2>
+          <span class="card-head-note">目安 50 : 30 : 20</span>
+        </div>
+        <div class="nws-wrapper">
+          <svg id="nws-chart" class="nws-chart" viewBox="0 0 200 200" width="184" height="184"
+               role="img" aria-label="Need / Want / Save の達成状況。詳しい金額は下の一覧に表示されます"></svg>
+          <div id="nws-legend" class="nws-legend"></div>
+        </div>
+      </section>
+
+      <!-- 予定と実績 -->
+      <section class="card" id="plan-actual-section" data-panel="budget">
+        <div class="card-head"><h2 id="plan-actual-section-title">今月の予定と実績</h2></div>
+
+        <div class="plan-actual-group">
+          <h3 class="plan-actual-heading">支出</h3>
+          <div id="expense-plan-actual" class="plan-actual-chart"></div>
+        </div>
+
+        <div class="plan-actual-group">
+          <div class="list-header">
+            <h3 class="plan-actual-heading">収入</h3>
+            <button type="button" class="btn btn-ghost btn-small" id="edit-income-budget-btn"><span data-icon="pencil"></span>収入目標を編集</button>
+          </div>
+          <div id="income-plan-actual" class="plan-actual-chart"></div>
+
+          <form id="income-budget-form" class="budget-form hidden">
+            <div id="income-budget-inputs" class="budget-inputs"></div>
+
+            <div class="bonus-settings">
+              <p class="bonus-settings-label">賞与(ボーナス)の設定</p>
+              <div id="bonus-month-grid" class="bonus-month-grid"></div>
+              <div class="form-group bonus-multiplier-group">
+                <label for="bonus-multiplier-input">給与の何か月分か</label>
+                <input type="number" id="bonus-multiplier-input" min="0" step="0.5" placeholder="2">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">保存</button>
+              <button type="button" class="btn btn-secondary" id="cancel-income-budget-btn">キャンセル</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- 立替金 (仮払い) -->
+      <section class="card" id="advance-section" data-panel="book">
+        <div class="card-head"><h2>立替金 (未回収)</h2></div>
+        <div class="advance-total">
+          <span class="advance-total-label">未回収合計</span>
+          <strong id="advance-outstanding-total">¥0</strong>
+        </div>
+        <div id="advance-list"></div>
+      </section>
+
+      <!-- 帳簿 (簿記の見方) -->
+      <section class="card" id="bookkeeping-section" data-panel="book">
+        <div class="list-header card-head">
+          <h2 id="bookkeeping-section-title">今月の帳簿</h2>
+          <div class="book-actions">
+            <div class="book-tabs" role="tablist" aria-label="帳簿の表示">
+              <button type="button" class="book-tab active" data-book="bs"
+                      role="tab" aria-selected="true">貸借対照表</button>
+              <button type="button" class="book-tab" data-book="pl"
+                      role="tab" aria-selected="false">損益計算書</button>
+              <button type="button" class="book-tab" data-book="trial"
+                      role="tab" aria-selected="false">合計試算表</button>
+              <button type="button" class="book-tab" data-book="journal"
+                      role="tab" aria-selected="false">仕訳帳</button>
+            </div>
+            <button type="button" class="btn btn-ghost btn-small" id="edit-accounts-btn"><span data-icon="settings"></span>口座を設定</button>
+          </div>
+        </div>
+
+        <form id="accounts-form" class="budget-form hidden">
+          <p class="book-form-note">
+            貸借対照表は「期首の残高 + そのあとの増減」で計算します。期首日と、その日の
+            残高を1回だけ入れてください。以降は記録から自動で計算されます。
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="accounts-opening-date">期首日 (この日の残高から始める)</label>
+              <input type="date" id="accounts-opening-date">
+            </div>
+          </div>
+          <p class="book-form-note">
+            期首日はカードの締め日の翌日 (末日締めなら1日) にしておくと、期首の未払金が
+            次の引き落とし1回でちょうど精算されるので、口座の残高がずれません。
+            締め日の途中にすると、その時点までの利用分は1か月後の引き落としになるため、
+            最初の月だけ口座と未払金が実際とずれます。
+          </p>
+          <p class="payslip-group-label">期首残高</p>
+          <div id="accounts-inputs" class="budget-inputs"></div>
+
+          <p class="payslip-group-label">クレジットカードの締め日・支払日</p>
+          <p class="book-form-note">
+            カード利用は現金がすぐ出ていかないので「未払金」として負債に立ち、
+            支払日が来ると銀行口座から引き落とされたものとして扱います。
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="card-closing-day">締め日</label>
+              <select id="card-closing-day"></select>
+            </div>
+            <div class="form-group">
+              <label for="card-payment-months">支払いは</label>
+              <select id="card-payment-months">
+                <option value="1">翌月</option>
+                <option value="2">翌々月</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="card-payment-day">支払日</label>
+              <select id="card-payment-day"></select>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn btn-secondary" id="cancel-accounts-btn">キャンセル</button>
+          </div>
+        </form>
+
+        <div id="bookkeeping-body"></div>
+        <p class="book-note" id="bookkeeping-note"></p>
+      </section>
+
+    </main>
+
+    <footer class="app-footer">
+      <p>データは Firebase (Firestore) に保存され、同じアカウントでログインしたスマホ・PC間で同期されます。</p>
+    </footer>
+    </div>
+   </div>
+
+   <!-- スマホ: 画面の切り替え。PCではすべて1ページに並ぶので出さない -->
+   <nav class="tab-bar" aria-label="画面の切り替え">
+     <button type="button" class="tab-btn active" data-tab="home" aria-current="page"><span data-icon="house"></span><span class="tab-label">ホーム</span></button>
+     <button type="button" class="tab-btn" data-tab="budget"><span data-icon="chart-pie"></span><span class="tab-label">予算・分析</span></button>
+     <button type="button" class="tab-btn" data-tab="book"><span data-icon="book-open"></span><span class="tab-label">帳簿</span></button>
+     <button type="button" class="tab-add" id="tab-add-btn" aria-label="記録を追加"><span data-icon="plus"></span></button>
+   </nav>
+  </div>
+
+  <!-- 記録の編集ポップアップ (入力フォームをここへ移動して使う) -->
+  <div class="modal-overlay hidden" id="entry-edit-modal">
+    <div class="modal-box modal-box-wide" role="dialog" aria-modal="true" aria-labelledby="entry-edit-title">
+      <button type="button" class="modal-close" id="entry-edit-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="entry-edit-title">記録を編集</h3>
+      <div id="entry-edit-body"></div>
+    </div>
+  </div>
+
+  <!-- 給与明細の内訳ポップアップ -->
+  <div class="modal-overlay hidden" id="payslip-detail-modal">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="payslip-detail-title">
+      <button type="button" class="modal-close" id="payslip-detail-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="payslip-detail-title">給与明細の内訳</h3>
+      <div id="payslip-detail-content"></div>
+    </div>
+  </div>
+
+  <!-- 給与サイトから読み込むためのブックマークレットの設定 -->
+  <div class="modal-overlay hidden" id="payslip-link-modal">
+    <div class="modal-box modal-box-wide" role="dialog" aria-modal="true" aria-labelledby="payslip-link-title">
+      <button type="button" class="modal-close" id="payslip-link-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="payslip-link-title">給与サイトから読み込む</h3>
+      <p class="book-form-note">
+        給与サイトで明細の画面を開いた状態でブックマークを押すと、明細の数字を拾って
+        この家計簿のフォームに入れます。保存はされないので、確認してから「追加」を押してください。
+        給与サイトにはいつもどおりログインして使うので、パスワードを家計簿に預ける必要はありません。
+      </p>
+      <p class="payslip-group-label">最初に1回だけ: ブックマークに登録する</p>
+      <ol class="setup-steps">
+        <li>下の「コードをコピー」を押す</li>
+        <li>このページをブックマークに追加する</li>
+        <li>追加したブックマークを編集し、名前を「家計簿に取り込む」に、URLをコピーしたコードに置き換える</li>
+      </ol>
+      <textarea id="payslip-link-code" class="setup-code" readonly rows="3" aria-label="ブックマークに登録するコード"></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="payslip-link-copy">コードをコピー</button>
+      </div>
+      <p class="payslip-group-label">毎月: 明細の画面で押す</p>
+      <ul class="setup-steps">
+        <li>iPhone の Safari: ブックマーク一覧から「家計簿に取り込む」を選ぶ</li>
+        <li>iPhone の Chrome: アドレスバーに「家計簿に取り込む」と入力し、候補に出たブックマークを選ぶ (動かない場合は Safari で)</li>
+        <li class="pc-only">PC: このリンクをブックマークバーにドラッグして登録し、明細の画面で押す → <a id="payslip-link-drag" href="#">家計簿に取り込む</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 立替金の精算ポップアップ -->
+  <div class="modal-overlay hidden" id="advance-settle-modal">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="advance-settle-title">
+      <button type="button" class="modal-close" id="advance-settle-close" aria-label="閉じる">×</button>
+      <h3 class="modal-title" id="advance-settle-title">立替金を精算する</h3>
+      <div id="advance-settle-summary" class="advance-settle-summary"></div>
+      <div class="form-group">
+        <label for="advance-settle-date">返金された日</label>
+        <input type="date" id="advance-settle-date">
+      </div>
+      <p class="advance-settle-note">
+        同額の収入(カテゴリ「立替金返金」)を自動で記録し、この立替金を精算済みにします。
+      </p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="advance-settle-confirm">精算する</button>
+        <button type="button" class="btn btn-secondary" id="advance-settle-cancel">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script type="module" src="js/app.js"></script>
+  <script>
+    // js/app.js (と、そこから import しているファイル) が読めないと、
+    // モジュールの評価ごと止まる。main() も、その .catch() も動かないので、
+    // 「読み込み中...」のまま何も起きない画面になってしまう。
+    // 起動したかどうかだけを見て、動いていなければ案内を出す。
+    // 通信の遅さでは誤検知しない (app.js の評価は Firebase の取得より前)。
+    setTimeout(function () {
+      if (window.__appScriptLoaded) return;
+      var causes = document.getElementById("sdk-error-causes");
+      if (causes) {
+        var li = document.createElement("li");
+        li.textContent =
+          "アプリ本体 (js/app.js・js/icons.js) を読み込めていない " +
+          "(ファイルの配置漏れ、またはキャッシュの不整合)";
+        causes.appendChild(li);
+      }
+      document.getElementById("loading-screen").classList.add("hidden");
+      document.getElementById("sdk-error-screen").classList.remove("hidden");
+    }, 8000);
+  </script>
+</body>
+</html>
