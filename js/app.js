@@ -4796,9 +4796,9 @@ function dedupeKey(e) {
   return JSON.stringify([e.date, e.type, e.category, e.amount, normalizeMemo(e.memo)]);
 }
 
-function dedupeAgainstExisting(imported) {
+function dedupeAgainstExisting(imported, pool = entries) {
   const existingCounts = new Map();
-  for (const e of entries) {
+  for (const e of pool) {
     const key = dedupeKey(e);
     existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
   }
@@ -4942,7 +4942,7 @@ function reconcileCardStatement(imported) {
     (e) => isPendingEntry(e) && !used.has(e.id) && e.date > to
   );
 
-  return { updates, alreadyImported, additions: unmatchedRows, unmatchedPending, laterPending, from, to };
+  return { updates, alreadyImported, additions: unmatchedRows, used, unmatchedPending, laterPending, from, to };
 }
 
 /**
@@ -5057,7 +5057,12 @@ function importCsv(file) {
     // 突き合わせのあとにもう一度、既存の記録との重複を見る。
     // 同じCSVを2回読み込んだ場合と、source を持たない古いメール由来の記録
     // (この仕組みを入れる前に取り込んだもの) はここで弾かれる。
-    const dedupeResult = dedupeAgainstExisting(toAdd);
+    // 突き合わせで相手が決まった記録は数えない。数えると、同じ店で同額の買い物を
+    // 同じ日に2回したとき、2回目が「登録済み」として黙って捨てられる。
+    const dedupeResult = dedupeAgainstExisting(
+      toAdd,
+      reconciliation ? entries.filter((e) => !reconciliation.used.has(e.id)) : entries
+    );
     const deduped = dedupeResult.deduped;
     // 確定済みの記録と一致した行も「既に登録済み」として数える
     const skippedCount =
@@ -5301,11 +5306,12 @@ function parseVpassEmails(text) {
     // \s* だと改行にマッチし、利用先が空のとき次の行(◇利用金額…)を
     // 店名として取り込んでしまうため、行内の空白だけに限定する
     const merchantMatch = block.match(/◇利用先[:：][^\S\r\n]*(.+)/);
-    const amountMatch = block.match(/◇利用金額[:：]\s*([\d,]+)円/);
+    // 全角の数字・カンマ、「円」の前の空白も許す(解析できないメールは取り込み済みになり二度と読まれない)
+    const amountMatch = block.match(/◇利用金額[:：]\s*([\d０-９,，]+)\s*円/);
     if (!dateMatch || !merchantMatch || !amountMatch) continue;
 
     const [, y, mo, d] = dateMatch;
-    const amount = Number(amountMatch[1].replace(/,/g, ""));
+    const amount = Number(toHalfWidthAscii(amountMatch[1]).replace(/,/g, ""));
     if (!Number.isFinite(amount) || amount <= 0) continue;
     const merchant = merchantMatch[1].trim();
     if (!merchant) continue;
@@ -5476,10 +5482,9 @@ async function importFromGmail(auto = false) {
     return;
   }
 
-  if (!auto) {
-    el.gmailImportBtn.disabled = true;
-    el.gmailImportBtn.textContent = "接続中...";
-  }
+  // 自動実行中もボタンを止める(同じメールを手動の読み込みが同時に取り込んで二重登録になるのを防ぐ)
+  el.gmailImportBtn.disabled = true;
+  if (!auto) el.gmailImportBtn.textContent = "接続中...";
   try {
     if (!gmailAccessToken) {
       try {
@@ -5577,10 +5582,8 @@ async function importFromGmail(auto = false) {
     console.error(err);
     say("メールの読み込みに失敗しました: " + err.message);
   } finally {
-    if (!auto) {
-      el.gmailImportBtn.disabled = false;
-      el.gmailImportBtn.textContent = "メールから読み込み";
-    }
+    el.gmailImportBtn.disabled = false;
+    if (!auto) el.gmailImportBtn.textContent = "メールから読み込み";
   }
 }
 

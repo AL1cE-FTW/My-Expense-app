@@ -455,6 +455,30 @@ if (!offlineImport.confirmed || !offlineImport.added) {
 }
 if (!doneMsg) throw new Error("オフラインでも取り込みの完了を伝えるはず: " + dialogs.join(" / "));
 
+// ---------------------------------------------------------------------------
+// 10. 同じ店・同じ額の買い物を同じ日に2回しても、2回目は捨てられない
+// ---------------------------------------------------------------------------
+// 仮の記録が1件ある状態で、明細に同じ行が2つ。1件は確定に更新、もう1件は新規追加になる。
+// (確定に使った記録まで「既存」として数えると、2回目が「登録済み」として消えていた)
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/twice-pending", {
+    date, type: "expense", category: "その他支出", amount: 500, memo: "二度買いの店",
+    source: "gmail", createdAt: Date.now(),
+  });
+}, `${CUR_Y}-${MM}-26`);
+await page.waitForTimeout(300);
+const twicePath = path.join(scratch, "reconcile-twice.csv");
+fs.writeFileSync(twicePath, [
+  "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
+  `${CUR_Y}/${MM}/26,二度買いの店,500,１,１,500,`,
+  `${CUR_Y}/${MM}/26,二度買いの店,500,１,１,500,`,
+  ",,,,,1000,",
+].join("\n"), "utf-8");
+await page.setInputFiles("#import-csv-input", twicePath);
+await page.waitForTimeout(900);
+const twiceRows = await page.locator("#entry-list tr", { hasText: "二度買いの店" }).count();
+if (twiceRows !== 2) throw new Error("同日同額の2回目の買い物が捨てられている。rows=" + twiceRows);
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");
