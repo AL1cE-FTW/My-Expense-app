@@ -226,6 +226,9 @@ let googleClientId = null;
 let googleTokenClient = null;
 let gmailAccessToken = null;
 let googleTokenGranted = false;
+// 画面を開いたとき、前回までに許可済みなら自動でメールを読み込む。ログインごとに1回だけ
+const GMAIL_AUTO_KEY = "gmailAutoImport";
+let gmailAutoTried = false;
 
 // ---------------------------------------------------------------------------
 // ユーティリティ
@@ -488,6 +491,7 @@ function showAuthScreen() {
   incomeBudgets = {};
   accountSettings = {};
   currentUid = null;
+  gmailAutoTried = false;
   el.authForm.reset();
   el.authError.classList.add("hidden");
   showOnly("auth");
@@ -516,6 +520,10 @@ function entriesCollection(uid) {
   return firestoreApi.collection(db, `users/${uid}/entries`);
 }
 
+function localStorageHas(key) {
+  try { return localStorage.getItem(key) !== null; } catch { return false; }
+}
+
 function subscribeEntries(uid) {
   if (unsubscribeEntries) unsubscribeEntries();
   const q = firestoreApi.query(entriesCollection(uid), firestoreApi.orderBy("date", "desc"));
@@ -535,6 +543,11 @@ function subscribeEntries(uid) {
         return;
       }
       render();
+      // 重複防止の本体は取り込み済みメールID(サーバーから取得)。一覧が端末の保存分でも安全網として働く
+      if (!gmailAutoTried && localStorageHas(GMAIL_AUTO_KEY)) {
+        gmailAutoTried = true;
+        importFromGmail(true);
+      }
     },
     (error) => {
       console.error(error);
@@ -5414,7 +5427,7 @@ function settleGmailTokenRequest(fn, value) {
   if (pending) pending[fn](value);
 }
 
-function requestGmailAccessToken() {
+function requestGmailAccessToken(silent = false) {
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts?.oauth2) {
       reject(new Error("Googleの認証ライブラリを読み込めませんでした。"));
@@ -5443,12 +5456,17 @@ function requestGmailAccessToken() {
       });
     }
     // 一度許可済みなら再同意を求めない(期限切れの取り直しを静かに行うため)
-    googleTokenClient.requestAccessToken({ prompt: googleTokenGranted ? "" : "consent" });
+    // silent: 自動読み込みでは同意画面を出さない(出せなければ失敗として静かに諦める)
+    googleTokenClient.requestAccessToken({ prompt: silent || googleTokenGranted ? "" : "consent" });
   });
 }
 
-async function importFromGmail() {
-  stopRailEditBeforeImport();
+// auto=true: 画面を開いたときの自動実行。確認ダイアログも失敗の警告も出さず、
+// 取り込めた分だけ「仮」で入れて知らせる(手動のときと同じ重複チェックを通す)
+async function importFromGmail(auto = false) {
+  if (auto && (el.gmailImportBtn.disabled || !googleClientId)) return;
+  const say = (m) => { if (!auto) alert(m); };
+  if (!auto) stopRailEditBeforeImport();
   if (!googleClientId) {
     alert(
       "メールからの読み込み機能を使うには設定が必要です。\n\n" +
@@ -5458,25 +5476,39 @@ async function importFromGmail() {
     return;
   }
 
-  el.gmailImportBtn.disabled = true;
-  el.gmailImportBtn.textContent = "接続中...";
+  if (!auto) {
+    el.gmailImportBtn.disabled = true;
+    el.gmailImportBtn.textContent = "接続中...";
+  }
   try {
     if (!gmailAccessToken) {
-      await requestGmailAccessToken();
+      try {
+        await requestGmailAccessToken(auto);
+      } catch (err) {
+        // 自動実行は同意画面を出せない(ユーザー操作なしのポップアップはブロックされる)。
+        // 黙ってやめず、ボタンで許可が要ることを知らせる。押せば手動の読み込みが始まる
+        if (auto) {
+          console.error(err);
+          el.gmailImportBtn.textContent = "メールの許可が必要です(押して許可)";
+          return;
+        }
+        throw err;
+      }
+      try { localStorage.setItem(GMAIL_AUTO_KEY, "1"); } catch { /* 保存できなくても手動では使える */ }
     }
 
-    el.gmailImportBtn.textContent = "検索中...";
+    if (!auto) el.gmailImportBtn.textContent = "検索中...";
     const importedIds = new Set(await getImportedGmailIds());
 
     const messages = await gmailListAllMessages(GMAIL_QUERY);
     const newMessages = messages.filter((m) => !importedIds.has(m.id));
 
     if (newMessages.length === 0) {
-      alert("新しい利用通知メールは見つかりませんでした。");
+      say("新しい利用通知メールは見つかりませんでした。");
       return;
     }
 
-    el.gmailImportBtn.textContent = "解析中...";
+    if (!auto) el.gmailImportBtn.textContent = "解析中...";
     const imported = [];
     const newIds = [];
     for (const m of newMessages) {
@@ -5489,7 +5521,7 @@ async function importFromGmail() {
 
     if (imported.length === 0) {
       await markGmailIdsImported(newIds);
-      alert("新しい利用通知メールは見つかりましたが、内容を解析できませんでした。");
+      say("新しい利用通知メールは見つかりましたが、内容を解析できませんでした。");
       return;
     }
 
@@ -5503,7 +5535,7 @@ async function importFromGmail() {
 
     if (deduped.length === 0) {
       await markGmailIdsImported(newIds);
-      alert(`すべて(${totalSkipped}件)既に登録済みのため、新しく追加する記録はありませんでした。`);
+      say(`すべて(${totalSkipped}件)既に登録済みのため、新しく追加する記録はありませんでした。`);
       return;
     }
 
@@ -5526,7 +5558,7 @@ async function importFromGmail() {
     message +=
       "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。" +
       "\n取り込んだ記録は「仮」として入ります。カード利用履歴CSVを取り込むと確定します。";
-    if (!confirm(message)) return;
+    if (!auto && !confirm(message)) return;
 
     // 記録も「取り込み済みのメール」の記録も、サーバーに届くのは待たない
     // (電波が途切れても、書き込みは端末に保管されて、あとで同期される)
@@ -5535,18 +5567,20 @@ async function importFromGmail() {
     // (次回また同じメールを拾っても、上の重複チェックで弾かれる)
     markGmailIdsImported(newIds).catch((err) => {
       console.error(err);
-      alert(
+      say(
         "取り込み済みメールの記録に失敗しました。次回同じメールが再度見つかりますが、" +
           "重複チェックで自動的にスキップされます。"
       );
     });
-    alert(`${deduped.length}件をインポートしました。`);
+    alert(`${auto ? "メールから" : ""}${deduped.length}件をインポートしました。${auto ? "「仮」の記録として入っています。" : ""}`);
   } catch (err) {
     console.error(err);
-    alert("メールの読み込みに失敗しました: " + err.message);
+    say("メールの読み込みに失敗しました: " + err.message);
   } finally {
-    el.gmailImportBtn.disabled = false;
-    el.gmailImportBtn.textContent = "メールから読み込み";
+    if (!auto) {
+      el.gmailImportBtn.disabled = false;
+      el.gmailImportBtn.textContent = "メールから読み込み";
+    }
   }
 }
 
@@ -5610,6 +5644,7 @@ function setupAuthForm() {
     // アクセストークンを捨てる
     gmailAccessToken = null;
     googleTokenGranted = false;
+    try { localStorage.removeItem(GMAIL_AUTO_KEY); } catch { /* 無ければ何もしない */ }
     authApi.signOut(auth);
   });
 }
@@ -5739,7 +5774,7 @@ function setupAppEventListeners() {
     el.importCsvInput.value = "";
   });
 
-  el.gmailImportBtn.addEventListener("click", importFromGmail);
+  el.gmailImportBtn.addEventListener("click", () => importFromGmail());
 
   // 見出しの中は <button> なので、Enter/Space はブラウザが click に変換してくれる
   document.querySelectorAll(".entry-table th.sortable").forEach((th) => {
