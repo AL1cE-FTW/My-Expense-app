@@ -204,6 +204,30 @@ await page.locator("#logout-btn").dispatchEvent("click");
 await page.waitForTimeout(500);
 if (!(await page.locator("#auth-screen").isVisible())) throw new Error("should return to the login screen");
 
+if (await page.evaluate(() => localStorage.getItem("gmailAutoImport") !== null)) {
+  throw new Error("logout must forget the auto-import consent");
+}
+
+// ---------------------------------------------------------------------------
+// 7. 自動読み込み: 許可済みなら画面を開くだけで、確認なしに「仮」で入る
+// ---------------------------------------------------------------------------
+await page.evaluate(() => localStorage.setItem("gmailAutoImport", "1"));
+dialogs.length = 0;
+listResponses.push([{ id: "msg1" }]);
+await page.reload({ waitUntil: "networkidle" });
+await page.click('.auth-tab[data-mode="signup"]');
+await page.fill("#auth-email", "gmail-auto@example.com");
+await page.fill("#auth-password", "password123");
+await page.click("#auth-submit-btn");
+await page.waitForTimeout(900);
+if (dialogs.some((m) => m.includes("取り込みますか"))) throw new Error("auto import must not ask for confirmation");
+if (!dialogs.some((m) => m.includes("メールから1件をインポートしました"))) {
+  throw new Error("auto import should report what it imported: " + dialogs.join(" / "));
+}
+await page.click("#today-btn");
+await page.waitForTimeout(400);
+if (!(await page.textContent("#entry-list")).includes("モバイルＳｕｉｃａ")) throw new Error("auto-imported entry missing");
+
 if (errors.filter((e) => !e.includes("access_denied")).length) {
   throw new Error("JS errors: " + errors.join("; "));
 }
