@@ -378,7 +378,7 @@
         <div class="list-header card-head">
           <h2 id="list-section-title" tabindex="-1">今月の記録</h2>
           <div class="csv-actions" role="group" aria-label="取り込みと書き出し">
-            <button class="btn btn-ghost btn-small" id="gmail-import-btn"><span data-icon="mail"></span>メールから読み込み</button>
+            <button class="btn btn-ghost btn-small" id="gmail-import-btn"><span data-icon="mail"></span><span class="btn-label">メールから読み込み</span></button>
             <!-- ファイル入力自体は display:none でフォーカスできないため、
                  ボタンから開く (label だけだとキーボードで到達できない) -->
             <button class="btn btn-ghost btn-small" id="import-csv-btn"><span data-icon="upload"></span>CSVインポート</button>
@@ -678,7 +678,7 @@
       if (causes) {
         var li = document.createElement("li");
         li.textContent =
-          "アプリ本体 (js/app.js・js/icons.js) を読み込めていない " +
+          "アプリ本体 (js/app.js・js/icons.js・js/vpass-mail.js など) を読み込めていない " +
           "(ファイルの配置漏れ、またはキャッシュの不整合)";
         causes.appendChild(li);
       }
