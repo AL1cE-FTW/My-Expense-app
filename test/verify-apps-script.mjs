@@ -131,14 +131,17 @@ function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails
     UrlFetchApp,
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null }) },
     GmailApp: {
-      search: (query) => {
+      // 本物と同じく、start から max 件ずつ返す (ページ送り)
+      search: (query, start = 0, max = 500) => {
         assert(query === appModule.GMAIL_QUERY, "検索条件はアプリと同じはず: " + query);
-        return mails.map((thread) => ({
+        return mails.slice(start, start + max).map((thread) => ({
           getMessages: () =>
             thread.map((m) => ({
               getId: () => m.id,
               getFrom: () => m.from ?? "三井住友カード <statement@vpass.ne.jp>",
               getPlainBody: () => m.body,
+              // 受信日時。指定が無ければ「さっき届いた」
+              getDate: () => new Date(Date.now() - (m.daysAgo ?? 0) * 86400000),
             })),
         }));
       },
@@ -287,6 +290,41 @@ assert(env.plain(docs.get(IMPORT_DOC)).importedIds.includes("m4"), "飛ばした
   e.context.setup();
   assert(e.triggers.length === 1 && e.triggers[0].n === 15 && e.triggers[0].fn === "importNewCardMails",
     "15分ごとの実行が1つだけ登録されるはず: " + JSON.stringify(e.triggers));
+}
+
+// ---------------------------------------------------------------------------
+// 6. 同じ件名のメールが1つの会話 (スレッド) にまとまっていても、
+//    検索の範囲 (直近60日) より古いメールは取り込まない
+// ---------------------------------------------------------------------------
+{
+  const d = new Map();
+  const oldMail = mail(["◇利用日：2025/12/01 10:00", "◇利用先：去年の店", "◇利用金額：700円"]);
+  const e = makeEnv({
+    props: PROPS,
+    docs: d,
+    mails: [[{ id: "old-in-thread", daysAgo: 300, body: oldMail }, { id: "new-in-thread", daysAgo: 1, body: MAIL_CONFIRMED }]],
+  });
+  const r = e.context.importNewCardMails();
+  const memos = [...d.entries()].filter(([n]) => n.includes("/entries/")).map(([, f]) => e.plain(f).memo);
+  if (r.mails !== 1 || memos.includes("去年の店") || !memos.includes("ユニクロ")) {
+    throw new Error("会話の中の古いメールまで取り込んではいけない: " + JSON.stringify({ r, memos }));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. 検索で100件より多く見つかっても、取りこぼさない (アプリと同じく最大300件)
+// ---------------------------------------------------------------------------
+{
+  const d = new Map();
+  const lots = Array.from({ length: 150 }, (_, i) => [{
+    id: `bulk${i}`,
+    body: mail([`◇利用日：2026/09/${String((i % 28) + 1).padStart(2, "0")} 10:00`, `◇利用先：店${i}`, `◇利用金額：${100 + i}円`]),
+  }]);
+  const e = makeEnv({ props: PROPS, docs: d, mails: lots });
+  const r = e.context.importNewCardMails();
+  if (r.mails !== 150 || r.added !== 150) {
+    throw new Error("100件を超えても全部読むはず: " + JSON.stringify(r));
+  }
 }
 
 console.log("ALL APPS SCRIPT CHECKS PASSED");

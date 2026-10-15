@@ -203,12 +203,9 @@ function runImport_() {
 
   // 新しいメールを集める (検索条件はアプリと同じ: 直近60日)
   const newMessages = [];
-  for (const thread of GmailApp.search(GMAIL_QUERY, 0, 100)) {
-    for (const message of thread.getMessages()) {
-      if (!String(message.getFrom()).includes(VPASS_SENDER)) continue;
-      if (imported.has(message.getId())) continue;
-      newMessages.push(message);
-    }
+  for (const message of searchVpassMessages_()) {
+    if (imported.has(message.getId())) continue;
+    newMessages.push(message);
   }
   if (newMessages.length === 0) return { mails: 0, added: 0 };
 
@@ -243,6 +240,33 @@ function runImport_() {
   firestore_(cfg, auth, "post", `${base}:commit`, { writes });
 
   return { mails: newMessages.length, added: toAdd.length, skipped };
+}
+
+// 検索に当たったメールを集める。
+// - Gmail は同じ件名のメールを1つの会話 (スレッド) にまとめる。検索は「直近60日に
+//   当たるメールを含む会話」を返すので、会話の中の古いメールまで読むと、何か月も
+//   前の利用まで取り込んでしまう。アプリ (Gmail API の検索) はメール単位なので、
+//   それに合わせて受信日で絞る
+// - 100件ずつページを送り、アプリと同じく最大300件まで読む
+const SEARCH_DAYS = 60;
+const SEARCH_PAGE = 100;
+const SEARCH_LIMIT = 300;
+
+function searchVpassMessages_() {
+  const since = Date.now() - SEARCH_DAYS * 86400000;
+  const messages = [];
+  for (let start = 0; messages.length < SEARCH_LIMIT; start += SEARCH_PAGE) {
+    const threads = GmailApp.search(GMAIL_QUERY, start, SEARCH_PAGE);
+    for (const thread of threads) {
+      for (const message of thread.getMessages()) {
+        if (!String(message.getFrom()).includes(VPASS_SENDER)) continue;
+        if (message.getDate().getTime() < since) continue;
+        messages.push(message);
+      }
+    }
+    if (threads.length < SEARCH_PAGE) break;
+  }
+  return messages.slice(0, SEARCH_LIMIT);
 }
 
 // --- 設定とログイン ---------------------------------------------------------
