@@ -204,49 +204,45 @@ await page.locator("#logout-btn").dispatchEvent("click");
 await page.waitForTimeout(500);
 if (!(await page.locator("#auth-screen").isVisible())) throw new Error("should return to the login screen");
 
+// 以前の「画面を開いたら自動で読み込む」の印は、ログアウトで消す
 if (await page.evaluate(() => localStorage.getItem("gmailAutoImport") !== null)) {
-  throw new Error("logout must forget the auto-import consent");
+  throw new Error("logout must forget the old auto-import flag");
 }
 
 // ---------------------------------------------------------------------------
-// 7. 自動読み込み: 許可済みなら画面を開くだけで、確認なしに「仮」で入る
+// 7. 画面を開いただけでは読み込まない (ブラウザは操作なしに許可画面を出せない。
+//    自動の取り込みは Apps Script が受け持つ)。読み込んだあともボタンの封筒の
+//    アイコンが消えない
 // ---------------------------------------------------------------------------
 await page.evaluate(() => localStorage.setItem("gmailAutoImport", "1"));
 dialogs.length = 0;
-listResponses.push([{ id: "msg1" }]);
+listResponses.length = 0;
+listResponses.push([{ id: "msg-open" }]);
 await page.reload({ waitUntil: "networkidle" });
 await page.click('.auth-tab[data-mode="signup"]');
-await page.fill("#auth-email", "gmail-auto@example.com");
+await page.fill("#auth-email", "gmail-open@example.com");
 await page.fill("#auth-password", "password123");
 await page.click("#auth-submit-btn");
 await page.waitForTimeout(900);
-if (dialogs.some((m) => m.includes("取り込みますか"))) throw new Error("auto import must not ask for confirmation");
-if (!dialogs.some((m) => m.includes("メールから1件をインポートしました"))) {
-  throw new Error("auto import should report what it imported: " + dialogs.join(" / "));
+if (dialogs.length) throw new Error("開いただけで読み込みが始まってはいけない: " + dialogs.join(" / "));
+const gmailBtn = await page.evaluate(() => {
+  const b = document.getElementById("gmail-import-btn");
+  return { text: b.textContent.trim(), icon: !!b.querySelector("svg.icon"), disabled: b.disabled };
+});
+if (gmailBtn.text !== "メールから読み込み" || !gmailBtn.icon || gmailBtn.disabled) {
+  throw new Error("ボタンはいつもの表示のままのはず: " + JSON.stringify(gmailBtn));
 }
-await page.click("#today-btn");
-await page.waitForTimeout(400);
-if (!(await page.textContent("#entry-list")).includes("モバイルＳｕｉｃａ")) throw new Error("auto-imported entry missing");
-
-// ---------------------------------------------------------------------------
-// 8. 自動読み込みで許可が取れないときは、黙らずボタンで知らせる
-// ---------------------------------------------------------------------------
-await page.addInitScript(() => { window.__gisFailNext = true; });
-dialogs.length = 0;
-await page.reload({ waitUntil: "networkidle" });
-await page.click('.auth-tab[data-mode="signup"]');
-await page.fill("#auth-email", "gmail-auto2@example.com");
-await page.fill("#auth-password", "password123");
-await page.click("#auth-submit-btn");
-await page.waitForTimeout(900);
-if (!(await page.textContent("#gmail-import-btn")).includes("許可が必要")) {
-  throw new Error("the button should say permission is needed: " + (await page.textContent("#gmail-import-btn")));
-}
-if (dialogs.length) throw new Error("auto import must not pop up dialogs: " + dialogs.join(" / "));
+listResponses.length = 0;
 listResponses.push([]);
-await page.click("#gmail-import-btn"); // 押せば通常の手動読み込みになる
+await page.click("#gmail-import-btn");
 await page.waitForTimeout(800);
-if (!(await page.textContent("#gmail-import-btn")).includes("メールから読み込み")) throw new Error("button should recover after a manual run");
+const afterRun = await page.evaluate(() => {
+  const b = document.getElementById("gmail-import-btn");
+  return { text: b.textContent.trim(), icon: !!b.querySelector("svg.icon") };
+});
+if (afterRun.text !== "メールから読み込み" || !afterRun.icon) {
+  throw new Error("読み込んだあともボタンの文字とアイコンが残るはず: " + JSON.stringify(afterRun));
+}
 
 if (errors.filter((e) => !e.includes("access_denied")).length) {
   throw new Error("JS errors: " + errors.join("; "));
