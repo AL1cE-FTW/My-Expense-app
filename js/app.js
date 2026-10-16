@@ -1901,14 +1901,25 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
 // 予算の使用率通知
 // ---------------------------------------------------------------------------
 
-// 高い段階から並べる。100% を超えたら 80% の通知はもう要らない
-const BUDGET_ALERT_LEVELS = [1, 0.8];
+// 高い段階から並べる。100% を超えたら 80%・50% の通知はもう要らない
+const BUDGET_ALERT_LEVELS = [1, 0.8, 0.5];
 const BUDGET_ALERT_KEY = "budgetAlertsSent";
 
 /** 通知に対応していて、まだ許可を聞いていないときだけボタンを出す */
 function updateBudgetAlertButton() {
   const canAsk = "Notification" in window && Notification.permission === "default";
   el.budgetAlertBtn.classList.toggle("hidden", !canAsk);
+}
+
+/**
+ * スマホでも通知を出すため Service Worker 経由で出す
+ * (Android の Chrome は new Notification が使えない。iPhone はホーム画面に追加したときだけ通知できる)。
+ * Service Worker がまだ動いていなければ new Notification で出す。
+ */
+async function showAppNotification(title, options) {
+  const registration = await navigator.serviceWorker?.getRegistration();
+  if (registration?.active) return registration.showNotification(title, options);
+  new Notification(title, options);
 }
 
 async function enableBudgetAlerts() {
@@ -1918,7 +1929,7 @@ async function enableBudgetAlerts() {
 }
 
 /**
- * 実際の今月 (見ている月ではなく) の使用率が 80% / 100% を超えたカテゴリと全体を通知する。
+ * 実際の今月 (見ている月ではなく) の使用率が 50% / 80% / 100% を超えたカテゴリと全体を通知する。
  * 同じ月・カテゴリ・段階は一度だけ。
  * shortcut: 送信済みはこの端末の localStorage に持つので端末ごとに1回ずつ通知される。
  * 端末をまたいで1回にしたくなったら Firestore に移す。
@@ -1960,12 +1971,8 @@ function checkBudgetAlerts() {
       actual >= budget
         ? `${formatYen(actual - budget)} オーバーしています (${formatYen(actual)} / ${formatYen(budget)})`
         : `残り ${formatYen(budget - actual)} です (${formatYen(actual)} / ${formatYen(budget)})`;
-    try {
-      new Notification(`${name}の予算を${percent}%使いました`, { body, tag: `budget-${name}` });
-    } catch {
-      // Android の Chrome は Service Worker 経由でないと通知を出せず、ここで投げる。画面描画は止めない
-      return;
-    }
+    showAppNotification(`${name}の予算を${percent}%使いました`, { body, tag: `budget-${name}` })
+      .catch(() => { /* 通知を出せない環境でも画面描画は止めない */ });
   }
   if (changed) {
     try { localStorage.setItem(storageKey, JSON.stringify(sent)); } catch { /* 保存できなくても通知は出せている */ }
@@ -5692,6 +5699,7 @@ function setupAppEventListeners() {
     else closeBudgetForm();
   });
   el.budgetAlertBtn.addEventListener("click", enableBudgetAlerts);
+  navigator.serviceWorker?.register("sw.js").catch(() => { /* 無くても PC では通知できる */ });
   updateBudgetAlertButton();
   el.cancelBudgetBtn.addEventListener("click", closeBudgetForm);
   el.budgetForm.addEventListener("submit", handleBudgetSubmit);

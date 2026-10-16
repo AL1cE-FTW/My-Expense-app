@@ -1,4 +1,4 @@
-// 予算の使用率通知: 80% / 100% を超えたときに一度だけ通知が出ることを確認する。
+// 予算の使用率通知: 50% / 80% / 100% を超えたときに一度だけ通知が出ることを確認する。
 import { chromium } from "playwright";
 import http from "http";
 import fs from "fs";
@@ -27,14 +27,23 @@ const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 
-// 本物の通知の代わりに、出した通知を記録するだけの Notification を置く
+// 本物の通知の代わりに、出した通知を記録するだけの Notification と Service Worker を置く。
+// スマホと同じく Service Worker 経由 (showNotification) で出ることを確かめるため、
+// new Notification は失敗させる (Android の Chrome と同じ)
 await page.addInitScript(() => {
   window.__notes = [];
   window.Notification = class {
     static permission = "default";
     static async requestPermission() { this.permission = "granted"; return "granted"; }
-    constructor(title, opts) { window.__notes.push(title + " | " + opts.body); }
+    constructor() { throw new TypeError("Illegal constructor"); }
   };
+  const registration = {
+    active: {},
+    async showNotification(title, opts) { window.__notes.push(title + " | " + opts.body); },
+  };
+  Object.defineProperty(navigator, "serviceWorker", {
+    value: { register: async () => registration, getRegistration: async () => registration },
+  });
 });
 await page.route("https://www.gstatic.com/firebasejs/**/*.js", async (route) => {
   const url = new URL(route.request().url());
@@ -72,28 +81,32 @@ async function addExpense(amount) {
 const notes = () => page.evaluate(() => window.__notes);
 
 // 許可前は通知しない
-await addExpense(8500);
+await addExpense(5500);
 if ((await notes()).length !== 0) throw new Error("notified before permission");
 if (!(await page.locator("#budget-alert-btn").isVisible())) throw new Error("alert button should show");
 
-// 許可すると、すでに超えている 80% をその場で通知する
+// 許可すると、すでに超えている 50% をその場で通知する
 await page.click("#budget-alert-btn");
 await page.waitForTimeout(300);
 if (await page.locator("#budget-alert-btn").isVisible()) throw new Error("alert button should hide after grant");
 let n = await notes();
-if (n.length !== 1 || !n[0].startsWith("食費の予算を85%使いました") || !n[0].includes("残り ¥1,500")) {
-  throw new Error("80% alert wrong: " + JSON.stringify(n));
+if (n.length !== 1 || !n[0].startsWith("食費の予算を55%使いました") || !n[0].includes("残り ¥4,500")) {
+  throw new Error("50% alert wrong: " + JSON.stringify(n));
 }
 
-// 同じ段階では再通知しない
+// 80% を超えたら通知、同じ段階では再通知しない
+await addExpense(3000);
 await addExpense(100);
-if ((await notes()).length !== 1) throw new Error("80% alert repeated: " + JSON.stringify(await notes()));
+n = await notes();
+if (n.length !== 2 || !n[1].startsWith("食費の予算を85%使いました") || !n[1].includes("残り ¥1,500")) {
+  throw new Error("80% alert wrong: " + JSON.stringify(n));
+}
 
 // 100% を超えたら一度だけ通知
 await addExpense(2000);
 await addExpense(100);
 n = await notes();
-if (n.length !== 2 || !n[1].startsWith("食費の予算を106%使いました") || !n[1].includes("¥600 オーバー")) {
+if (n.length !== 3 || !n[2].startsWith("食費の予算を106%使いました") || !n[2].includes("¥600 オーバー")) {
   throw new Error("100% alert wrong: " + JSON.stringify(n));
 }
 

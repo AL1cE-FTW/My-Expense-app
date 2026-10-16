@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#f4f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>家計簿</title>
   <!-- Lucide の notebook-pen。data URI に入れるため " と # をエスケープしている -->
@@ -433,7 +434,7 @@
           <h2 id="budget-section-title">今月の予算</h2>
           <div class="card-head-actions">
             <button type="button" class="btn btn-ghost btn-small hidden" id="budget-alert-btn"
-                    title="予算の使用率が80%・100%を超えたら通知します"><span data-icon="bell"></span>使用率を通知</button>
+                    title="予算の使用率が50%・80%・100%を超えたら通知します"><span data-icon="bell"></span>使用率を通知</button>
             <button type="button" class="btn btn-ghost btn-small" id="edit-budget-btn"><span data-icon="pencil"></span>予算を編集</button>
           </div>
         </div>
