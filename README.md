@@ -111,15 +111,55 @@ Netlify や Vercel など、他の静的ホスティングサービスでも同�
 
 ## 予算の使用率通知
 
-「予算・分析」の予算カードにある「使用率を通知」を押して通知を許可すると、今月の予算の使用率が
-50%・80%・100% を超えたときに通知が出ます (カテゴリごとと予算全体、それぞれの段階で月に1回)。
+今月の予算の使用率が **50%・80%・100%** を超えたら、スマホや PC にプッシュ通知が届きます。
+カテゴリごとと予算全体それぞれ、各段階で月に1回です。**アプリを閉じていても届きます。**
 
-- **Android**: Chrome で開いてそのまま許可すれば通知されます
-- **iPhone**: Safari の共有ボタン →「ホーム画面に追加」で追加し、ホーム画面のアイコンから開いて許可します
-  (Safari のままでは通知できません。iOS 16.4 以降)
-- 通知はアプリを開いたとき・開いている間に判定します。アプリを閉じている間に
-  (メールの自動取り込みなどで) 超えても、次に開いたときに通知されます
-- どの通知を出したかは端末ごとに覚えるので、スマホと PC の両方で許可するとそれぞれに1回ずつ出ます
+しくみ: 下の「メールの自動取り込み (Google Apps Script)」のスクリプトが、15分ごとの取り込みのついでに
+今月の使用率を計算し、超えていたら Firebase Cloud Messaging (FCM、Google の無料の通知配送) で
+通知を許可した端末に送ります。
+
+- 通知が届くのは、超えてから**最大15分後**です
+- 手入力した支出も対象です (スクリプトは Firestore の記録全体で計算します)
+- 計算はアプリの予算バーと同じです (立替・返金の扱いも同じ。`js/budget-usage.js` を共有)
+- どの段階を通知したかは Firestore (`settings/budgetAlerts`) に残すので、端末が何台あっても各段階1回です
+- 1台にも届かなかった段階は、次の実行で送り直します。アプリを消すなどして届かなくなった端末は、宛先から自動で外します
+
+### 設定 (最初に1回)
+
+先に「メールの自動取り込み (Google Apps Script)」の設定を済ませておきます。
+
+1. **通知の公開鍵をアプリに入れる**
+   - Firebase コンソール → 歯車「プロジェクトの設定」→「Cloud Messaging」タブ →
+     「ウェブプッシュ証明書」で「鍵ペアを生成」
+   - 出てきた鍵 (長い文字列) を、`js/firebase-config.js` の一番下の行のコメントを外して入れる:
+     `export const fcmVapidKey = "ここに鍵";` (公開前提の値なので、コミットして構いません)
+   - GitHub に push して公開ページを更新する
+2. **送るための鍵を Apps Script に入れる**
+   - Firebase コンソール →「プロジェクトの設定」→「サービス アカウント」タブ →「新しい秘密鍵を生成」。
+     JSON ファイルがダウンロードされます
+   - Apps Script の「プロジェクトの設定」→「スクリプト プロパティ」に `FCM_SERVICE_ACCOUNT` を追加し、
+     値にその JSON ファイルの中身を**全部そのまま**貼る
+   - **この鍵は Firebase プロジェクトを管理できる強い鍵です。** リポジトリに入れたり、人に渡したりしないでください。
+     貼り終えたらダウンロードしたファイルは消して構いません
+3. **Apps Script を更新する**
+   - `apps-script/vpass-import.gs` の中身を Apps Script に貼り直して保存する
+   - 「プロジェクトの設定」の「タイムゾーン」が `(GMT+09:00) 東京` になっていることを確かめる (「今月」の判定に使います)
+4. **通知を受け取る端末で許可する** (端末ごとに1回)
+   - 「予算・分析」の予算カードの「使用率を通知」を押して、通知を許可します
+   - **Android / PC**: Chrome で開いて許可します
+   - **iPhone**: Safari の共有ボタン →「ホーム画面に追加」で追加し、**ホーム画面のアイコンから開いて**許可します
+     (Safari のままではボタンが出ません。iOS 16.4 以降)
+
+### 知っておくこと
+
+- 「使用率を通知」のボタンが出ないとき: 公開鍵 (手順1) が入っていない、すでに許可または拒否している、
+  または通知に対応していないブラウザです。拒否してしまったら、ブラウザのサイト設定で通知を許可に戻してください
+- 実行ログの `alerts` に結果が出ます。`"off"` は `FCM_SERVICE_ACCOUNT` が未設定、`"no devices"` は
+  通知を許可した端末がまだ無い、という意味です
+- 「FCM_SERVICE_ACCOUNT の鍵でのログインに失敗しました」と出たら、鍵の JSON が途中で切れていないか確かめます。
+  送信で 403 が出る場合は、Google Cloud Console の「API とサービス」で「Firebase Cloud Messaging API」を有効にします
+- 返金がどの支出を取り消すかは、スクリプトでは先月の初めからの記録で探します (毎回全件を読むと Firestore の
+  無料枠を使い切るため)。それより前の支出の返金があると、画面の数字と少しずれることがあります
 
 ## スプレッドシートからの移行 (CSV インポート)
 
@@ -585,7 +625,7 @@ cp js/google-config.example.js js/google-config.js
 1. [Google Apps Script](https://script.google.com/) を開き、「新しいプロジェクト」を作る
    (名前は「家計簿 メール取り込み」など)
 2. 最初からある `コード.gs` の中身を全部消して、`apps-script/vpass-import.gs` の中身を貼り付けて保存する
-3. 左の歯車「プロジェクトの設定」→ 下の「スクリプト プロパティ」に、次の4つを追加する
+3. 左の歯車「プロジェクトの設定」→ 下の「スクリプト プロパティ」に、次の4つ (通知も使うなら5つ) を追加する
 
    | プロパティ | 値 |
    |---|---|
@@ -593,6 +633,7 @@ cp js/google-config.example.js js/google-config.js
    | `FIREBASE_PROJECT_ID` | `js/firebase-config.js` の `projectId` |
    | `KAKEIBO_EMAIL` | 家計簿にログインするメールアドレス |
    | `KAKEIBO_PASSWORD` | 家計簿にログインするパスワード |
+   | `FCM_SERVICE_ACCOUNT` | (任意) 予算の使用率通知を使うときだけ。「予算の使用率通知」の手順2を参照 |
 
 4. エディタに戻り、上の関数の選択で **`setup`** を選んで「実行」を押す
    - 初回は権限の確認が出ます (Gmail を読む・外部に接続する・定期実行する)。
@@ -612,7 +653,7 @@ cp js/google-config.example.js js/google-config.js
 - Firebase の API キーに「HTTPリファラー」の制限を付けている場合、スクリプトからのログインが拒否されます。
   そのときは Google Cloud Console の「認証情報」で、このキーの制限を見直してください
 - **止めたいとき**は、Apps Script の左の時計アイコン「トリガー」から `importNewCardMails` を削除します
-- `apps-script/vpass-import.gs` の読み取り部分は `js/vpass-mail.js` の書き写しです。片方を直したら
+- `apps-script/vpass-import.gs` の読み取り部分は `js/vpass-mail.js`、集計と使用率通知の判定は `js/budget-usage.js` の書き写しです。片方を直したら
   もう片方も直してください (食い違うと `test/verify-apps-script.mjs` が落ちます)。直したら、
   Apps Script 側にも貼り直します
 
@@ -656,7 +697,10 @@ js/app.js                        … ロジック (認証・Firestore同期・�
 js/icons.js                      … Lucide アイコン (使う分のパスだけを直接持つ)
 js/payslip-import.js             … 給与サイトからの取り込み (ブックマークレットと読み取りの判断)
 js/vpass-mail.js                 … カードの利用通知メールの読み取りと、店名からのカテゴリ推測
-apps-script/vpass-import.gs      … メールの自動取り込み (Google Apps Script に貼って使う)
+js/budget-usage.js               … 集計に使う「自分のお金の出入り」と、予算の使用率通知の判定 (Apps Script と共有)
+apps-script/vpass-import.gs      … メールの自動取り込みと使用率通知の送信 (Google Apps Script に貼って使う)
+sw.js                            … プッシュ通知を受け取って出す Service Worker
+manifest.json                    … ホーム画面に追加するための設定 (iPhone の通知に必要)
 js/firebase-config.example.js    … Firebase設定のテンプレート
 js/firebase-config.js            … Firebase設定 (公開前提の値、コミット済み)
 js/google-config.example.js      … Google OAuth設定のテンプレート (メール読み込み用)
