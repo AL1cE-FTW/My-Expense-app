@@ -431,7 +431,11 @@
       <section class="card" id="budget-section" data-panel="budget">
         <div class="list-header card-head">
           <h2 id="budget-section-title">今月の予算</h2>
-          <button type="button" class="btn btn-ghost btn-small" id="edit-budget-btn"><span data-icon="pencil"></span>予算を編集</button>
+          <div class="card-head-actions">
+            <button type="button" class="btn btn-ghost btn-small hidden" id="budget-alert-btn"
+                    title="予算の使用率が80%・100%を超えたら通知します"><span data-icon="bell"></span>使用率を通知</button>
+            <button type="button" class="btn btn-ghost btn-small" id="edit-budget-btn"><span data-icon="pencil"></span>予算を編集</button>
+          </div>
         </div>
 
         <div id="budget-overall" class="budget-overall"></div>

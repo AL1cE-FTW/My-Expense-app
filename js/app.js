@@ -429,6 +429,7 @@ const el = {
   budgetOverall: document.getElementById("budget-overall"),
   budgetBreakdown: document.getElementById("budget-breakdown"),
   editBudgetBtn: document.getElementById("edit-budget-btn"),
+  budgetAlertBtn: document.getElementById("budget-alert-btn"),
   budgetForm: document.getElementById("budget-form"),
   budgetInputs: document.getElementById("budget-inputs"),
   cancelBudgetBtn: document.getElementById("cancel-budget-btn"),
@@ -721,6 +722,7 @@ function render() {
   renderBookkeeping(entriesInPeriod);
   updatePayslipCopyButton();
   renderList(entriesInPeriod);
+  checkBudgetAlerts();
 }
 
 // ---------------------------------------------------------------------------
@@ -1893,6 +1895,81 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
   }
 
   return { totalActual, totalBudget, unbudgetedActual };
+}
+
+// ---------------------------------------------------------------------------
+// 予算の使用率通知
+// ---------------------------------------------------------------------------
+
+// 高い段階から並べる。100% を超えたら 80% の通知はもう要らない
+const BUDGET_ALERT_LEVELS = [1, 0.8];
+const BUDGET_ALERT_KEY = "budgetAlertsSent";
+
+/** 通知に対応していて、まだ許可を聞いていないときだけボタンを出す */
+function updateBudgetAlertButton() {
+  const canAsk = "Notification" in window && Notification.permission === "default";
+  el.budgetAlertBtn.classList.toggle("hidden", !canAsk);
+}
+
+async function enableBudgetAlerts() {
+  await Notification.requestPermission();
+  updateBudgetAlertButton();
+  checkBudgetAlerts();
+}
+
+/**
+ * 実際の今月 (見ている月ではなく) の使用率が 80% / 100% を超えたカテゴリと全体を通知する。
+ * 同じ月・カテゴリ・段階は一度だけ。
+ * shortcut: 送信済みはこの端末の localStorage に持つので端末ごとに1回ずつ通知される。
+ * 端末をまたいで1回にしたくなったら Firestore に移す。
+ */
+function checkBudgetAlerts() {
+  if (!("Notification" in window) || Notification.permission !== "granted" || !currentUid) return;
+
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const storageKey = `${BUDGET_ALERT_KEY}:${currentUid}`;
+  let sent = null;
+  try { sent = JSON.parse(localStorage.getItem(storageKey)); } catch { /* 壊れていたら作り直す */ }
+  if (!sent || sent.month !== month) sent = { month, keys: [] };
+
+  const actuals = new Map();
+  for (const e of ownFlows(entriesForMonth(startOfMonth(now)))) {
+    if (e.type === "expense") actuals.set(e.category, (actuals.get(e.category) || 0) + e.amount);
+  }
+  const targets = Object.keys(budgets)
+    .filter((c) => budgets[c] > 0)
+    .map((c) => ({ name: c, budget: budgets[c], actual: actuals.get(c) || 0 }));
+  // 全体は renderBudget と同じく予算を設定したカテゴリだけで数える
+  if (targets.length > 1) {
+    targets.unshift({
+      name: "予算全体",
+      budget: targets.reduce((sum, t) => sum + t.budget, 0),
+      actual: targets.reduce((sum, t) => sum + t.actual, 0),
+    });
+  }
+
+  let changed = false;
+  for (const { name, budget, actual } of targets) {
+    const reached = BUDGET_ALERT_LEVELS.filter((level) => actual / budget >= level);
+    if (reached.length === 0 || sent.keys.includes(`${name}:${reached[0]}`)) continue;
+    sent.keys.push(...reached.map((level) => `${name}:${level}`));
+    changed = true;
+    const percent = Math.round((actual / budget) * 100);
+    const body =
+      actual >= budget
+        ? `${formatYen(actual - budget)} オーバーしています (${formatYen(actual)} / ${formatYen(budget)})`
+        : `残り ${formatYen(budget - actual)} です (${formatYen(actual)} / ${formatYen(budget)})`;
+    try {
+      new Notification(`${name}の予算を${percent}%使いました`, { body, tag: `budget-${name}` });
+    } catch {
+      // Android の Chrome は Service Worker 経由でないと通知を出せず、ここで投げる。画面描画は止めない
+      return;
+    }
+  }
+  if (changed) {
+    try { localStorage.setItem(storageKey, JSON.stringify(sent)); } catch { /* 保存できなくても通知は出せている */ }
+  }
 }
 
 /**
@@ -5614,6 +5691,8 @@ function setupAppEventListeners() {
     if (el.budgetForm.classList.contains("hidden")) openBudgetForm();
     else closeBudgetForm();
   });
+  el.budgetAlertBtn.addEventListener("click", enableBudgetAlerts);
+  updateBudgetAlertButton();
   el.cancelBudgetBtn.addEventListener("click", closeBudgetForm);
   el.budgetForm.addEventListener("submit", handleBudgetSubmit);
 
