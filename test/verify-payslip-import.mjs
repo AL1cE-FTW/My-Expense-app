@@ -48,14 +48,17 @@ const assert = (cond, message) => { if (!cond) throw new Error(message); };
   assert(byNet.fields.otherDeductions === 1000, "差引支給額から逆算するはず: " + JSON.stringify(byNet));
   assert(!byNet.checks.some((c) => c.text.includes("一致")), "逆算に使った値で一致を名乗らない");
 
-  // 支給の下に知らない項目 → 入れる欄が無いと名前つきで知らせる
+  // 支給の下に知らない項目 → 給与調整に入れて、名前つきで知らせる
+  // (捨てると支給の合計が足りず、手取りもその他控除の逆算もずれる)
   const unknownEarning = interpretPayslipImport({
     pairs: [["本給", "200,000", "支給"], ["資格手当", "5,000", "支給"], ["差引支給額", "205,000", "記事"]],
   });
   assert(
-    unknownEarning.checks.some((c) => !c.ok && c.text.includes("資格手当")),
+    unknownEarning.checks.some((c) => c.text.includes("資格手当") && c.text.includes("給与調整")),
     "知らない支給項目を黙って捨てない: " + JSON.stringify(unknownEarning.checks)
   );
+  assert(unknownEarning.fields.salaryAdjustment === 5000, "給与調整に入るはず");
+  assert(unknownEarning.checks.some((c) => c.ok && c.text.includes("一致")), "手取りが一致するはず");
 
   // 賞与明細
   const bonus = interpretPayslipImport({
@@ -91,6 +94,30 @@ const assert = (cond, message) => { if (!cond) throw new Error(message); };
   });
   assert(netOf(withSubtotals) === 220000, "合計・小計を控除に足してはいけない: " + JSON.stringify(withSubtotals));
   assert(withSubtotals.fields.otherDeductions === undefined, "その他控除は無いはず");
+
+  // 控除の区切りの下に、累計や口座番号のような控除ではない数字があっても拾わない
+  // (拾うと何百万円もの「その他控除」が入る)
+  const withJunk = interpretPayslipImport({
+    pairs: [
+      ["本給", "250,000", "支給"], ["通勤手当", "10,000", "支給"],
+      ["健康保険", "12,000", "控除"], ["所得税", "6,000", "控除"], ["組合費", "2,000", "控除"],
+      ["課税支給累計額", "1,850,000", "控除"], ["口座番号", "1234567", "控除"], ["振込先", "9,876,543", "控除"],
+      ["控除合計", "20,000", "控除"], ["差引支給額", "240,000", "控除"],
+    ],
+  });
+  assert(withJunk.fields.otherDeductions === 2000, "控除ではない数字を拾わない: " + JSON.stringify(withJunk.fields));
+  assert(netOf(withJunk) === 240000, "手取りが合うはず");
+
+  // 名前で見分けられない数字を拾って合計と合わないときは、合計から逆算した額を使う
+  const mismatch = interpretPayslipImport({
+    pairs: [
+      ["本給", "250,000", "支給"],
+      ["健康保険", "12,000", "控除"], ["組合費", "2,000", "控除"], ["謎の数字", "50,000", "控除"],
+      ["控除合計", "14,000", "控除"],
+    ],
+  });
+  assert(mismatch.fields.otherDeductions === 2000, "合計から逆算するはず: " + JSON.stringify(mismatch.fields));
+  assert(mismatch.checks.some((c) => !c.ok && c.text.includes("逆算")), "合わなかったことを知らせる");
 
   // ▲ (マイナス) の給与調整を読み捨てない
   const negative = interpretPayslipImport({
@@ -233,6 +260,28 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
   const list = (await page.textContent("#entry-list")).replace(/\s+/g, " ");
   assert(list.includes("¥232,000"), `${fixture}: 保存された金額: ${list}`);
   assert(list.includes("給与天引き"), `${fixture}: 寮社宅費の住居の支出も立つ`);
+  await page.close();
+}
+
+// 控除が10列×2段、知らない支給 (支度料等)、記事欄に振込金額・課税対象額、
+// 右下に差引支給額がある形。見本の金額: 支給 290,000 (うち支度料等 8,000) /
+// 控除 76,000 (うち寮社宅費 20,000、名前の分からない控除 11,200) → 差引支給額 214,000
+{
+  const url = await runBookmarklet("payslip-wide.html");
+  const page = await openAppWith(url, "import-wide@example.com");
+  const got = await page.evaluate(() => ({
+    adjustment: document.querySelector("#payslip-salary-adjustment").value,
+    other: document.querySelector("#payslip-other-deductions").value,
+    amount: document.querySelector("#entry-amount").value,
+    date: document.querySelector("#entry-date").value,
+    note: document.querySelector("#payslip-copy-note").textContent,
+  }));
+  console.log("payslip-wide.html", JSON.stringify(got));
+  assert(got.adjustment === "8000", "支度料等は給与調整へ: " + got.adjustment);
+  assert(got.other === "11200", "課税対象額などを拾わず、名前の分からない控除だけ: " + got.other);
+  assert(got.amount === "234000", "金額は 振込額+寮社宅費: " + got.amount);
+  assert(got.date === "2026-07-27", "支給日: " + got.date);
+  assert(got.note.includes("一致"), "差引支給額で検算が合うはず: " + got.note);
   await page.close();
 }
 
