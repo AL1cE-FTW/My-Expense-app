@@ -92,6 +92,30 @@ const assert = (cond, message) => { if (!cond) throw new Error(message); };
   assert(netOf(withSubtotals) === 220000, "合計・小計を控除に足してはいけない: " + JSON.stringify(withSubtotals));
   assert(withSubtotals.fields.otherDeductions === undefined, "その他控除は無いはず");
 
+  // 控除の区切りの下に、累計や口座番号のような控除ではない数字があっても拾わない
+  // (拾うと何百万円もの「その他控除」が入る)
+  const withJunk = interpretPayslipImport({
+    pairs: [
+      ["本給", "250,000", "支給"], ["通勤手当", "10,000", "支給"],
+      ["健康保険", "12,000", "控除"], ["所得税", "6,000", "控除"], ["組合費", "2,000", "控除"],
+      ["課税支給累計額", "1,850,000", "控除"], ["口座番号", "1234567", "控除"], ["振込先", "9,876,543", "控除"],
+      ["控除合計", "20,000", "控除"], ["差引支給額", "240,000", "控除"],
+    ],
+  });
+  assert(withJunk.fields.otherDeductions === 2000, "控除ではない数字を拾わない: " + JSON.stringify(withJunk.fields));
+  assert(netOf(withJunk) === 240000, "手取りが合うはず");
+
+  // 名前で見分けられない数字を拾って合計と合わないときは、合計から逆算した額を使う
+  const mismatch = interpretPayslipImport({
+    pairs: [
+      ["本給", "250,000", "支給"],
+      ["健康保険", "12,000", "控除"], ["組合費", "2,000", "控除"], ["謎の数字", "50,000", "控除"],
+      ["控除合計", "14,000", "控除"],
+    ],
+  });
+  assert(mismatch.fields.otherDeductions === 2000, "合計から逆算するはず: " + JSON.stringify(mismatch.fields));
+  assert(mismatch.checks.some((c) => !c.ok && c.text.includes("逆算")), "合わなかったことを知らせる");
+
   // ▲ (マイナス) の給与調整を読み捨てない
   const negative = interpretPayslipImport({
     pairs: [["本給", "250,000", "支給"], ["給与調整", "▲5,000", "支給"], ["健康保険", "12,000", "控除"], ["差引支給額", "233,000", "記事"]],

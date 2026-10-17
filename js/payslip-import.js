@@ -258,47 +258,58 @@ export function interpretPayslipImport(payload) {
 
   let deductions = sum(deductionFields);
   let otherFromNet = false;
-  const unknownDeductions = unknownUnder(DEDUCTION_SECTIONS);
-  if (unknownDeductions.length > 0) {
+  // 控除の区切りの下には、累計・口座番号・課税対象額のような「控除ではない数字」も
+  // 並ぶことがある。名前で分かるものは除き、支給より大きい額も控除ではないので除く
+  const NOT_DEDUCTION = /(累計|口座|番号|コード|対象|日数|時間|回数|残高|率|単価|前月|年間|年度|支給)/;
+  const unknownDeductions = unknownUnder(DEDUCTION_SECTIONS).filter(
+    ([label, value]) => !NOT_DEDUCTION.test(normalizeLabel(label)) && Math.abs(parseAmount(value)) <= gross
+  );
+  // 明細の合計から逆算した、名前の分からない控除の額。合計が無ければ null
+  let fromTotals = null;
+  if (totals.deductions !== undefined) {
+    fromTotals = { rest: totals.deductions - deductions, fromNet: false };
+  } else if (totals.net !== undefined) {
+    fromTotals = { rest: gross - deductions - totals.net, fromNet: true };
+  }
+  const names = unknownDeductions.map(([l]) => `「${l}」`).join("・");
+  if (bonus) {
+    if (unknownDeductions.length > 0) {
+      checks.push({ ok: false, text: `控除の ${names} は賞与の欄にありません` });
+    }
+  } else if (unknownDeductions.length > 0 &&
+             (!fromTotals || fromTotals.rest === unknownDeductions.reduce((s, [, v]) => s + parseAmount(v), 0))) {
+    // 名前つきで拾えて、合計とも合う (か、検算する合計が無い)
     const rest = unknownDeductions.reduce((s, [, v]) => s + parseAmount(v), 0);
-    if (bonus) {
-      checks.push({
-        ok: false,
-        text: `控除の ${unknownDeductions.map(([l]) => `「${l}」`).join("・")} は賞与の欄にありません`,
-      });
-    } else {
-      fields.otherDeductions = rest;
-      deductions += rest;
-      checks.push({
-        ok: true,
-        text:
-          unknownDeductions.map(([l]) => l).join("・") +
-          ` (計 ${yen(rest)}) を「その他控除」に入れました`,
-      });
-    }
-  } else if (!bonus && !hasSections) {
-    // 区切りが読めないときは合計から逆算する
-    let rest = null;
-    if (totals.deductions !== undefined) {
-      rest = totals.deductions - deductions;
-    } else if (totals.net !== undefined) {
-      rest = gross - deductions - totals.net;
-      otherFromNet = true;
-    }
-    if (rest !== null && rest > 0) {
-      fields.otherDeductions = rest;
-      deductions += rest;
-      checks.push({
-        ok: true,
-        text: `名前の分からない控除 ${yen(rest)}を「その他控除」に入れました (合計からの逆算)`,
-      });
-    } else if (rest !== null && rest < 0) {
-      otherFromNet = false;
-      checks.push({
-        ok: false,
-        text: "控除が明細の合計より多くなっています。控除の欄を確認してください",
-      });
-    }
+    fields.otherDeductions = rest;
+    deductions += rest;
+    checks.push({
+      ok: true,
+      text: unknownDeductions.map(([l]) => l).join("・") + ` (計 ${yen(rest)}) を「その他控除」に入れました`,
+    });
+  } else if (fromTotals && fromTotals.rest > 0) {
+    // 名前の分からない控除は合計から逆算する。拾った項目が合計と合わないときも
+    // こちらを信じる (控除ではない数字を拾っていることがある)
+    fields.otherDeductions = fromTotals.rest;
+    deductions += fromTotals.rest;
+    otherFromNet = fromTotals.fromNet;
+    checks.push(
+      unknownDeductions.length > 0
+        ? {
+            ok: false,
+            text:
+              `控除の ${names} が明細の合計と合わないため、合計から逆算した ${yen(fromTotals.rest)}を` +
+              "「その他控除」に入れました。内訳を確認してください",
+          }
+        : {
+            ok: true,
+            text: `名前の分からない控除 ${yen(fromTotals.rest)}を「その他控除」に入れました (合計からの逆算)`,
+          }
+    );
+  } else if (fromTotals && fromTotals.rest < 0) {
+    checks.push({
+      ok: false,
+      text: "控除が明細の合計より多くなっています。控除の欄を確認してください",
+    });
   }
 
   if (totals.gross !== undefined) {
