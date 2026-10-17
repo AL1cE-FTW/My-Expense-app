@@ -368,6 +368,27 @@ export function interpretPayslipImport(payload) {
 }
 
 /**
+ * 読み取れなかったときに、何を受け取ったかを短く書き出す。金額は出さない。
+ * 給与サイトの画面の形が変わったときに、どこで食い違ったかを知る手がかりにする。
+ */
+export function describePayslipPayload(payload) {
+  if (!payload || payload.invalid) {
+    const size = payload && payload.length ? ` (${payload.length}文字)` : "";
+    return `受け取った内容が途中で切れているか、壊れていました${size}`;
+  }
+  const pairs = Array.isArray(payload.pairs) ? payload.pairs.filter(Array.isArray) : [];
+  const sections = [...new Set(pairs.map((p) => String(p[2] || "")).filter(Boolean))];
+  const labels = pairs.map(
+    (p) => String(p[0]).slice(0, 20) + (parseAmount(p[1]) === null ? " (数字なし)" : "")
+  );
+  return [
+    `受け取った項目: ${pairs.length}個`,
+    `区切り: ${sections.join("・") || "なし"}`,
+    `項目名: ${labels.slice(0, 40).join("、") || "なし"}${labels.length > 40 ? " ほか" : ""}`,
+  ].join("\n");
+}
+
+/**
  * 給与サイトの明細ページの上で動くコード。ブックマークレットにして使う。
  * ページから「項目名」と、その右 (または下) にある値の組を拾い、家計簿を開いて渡す。
  *
