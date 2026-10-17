@@ -223,7 +223,7 @@ export function interpretPayslipImport(payload) {
   }
 
   const sum = (list) => list.reduce((s, f) => s + (fields[f] || 0), 0);
-  const gross = sum(earningFields);
+  let gross = sum(earningFields);
 
   // 慶弔掛金・福祉会費のような個別の控除は、項目名が会社ごとにばらばら。
   // 明細の区切り (支給/控除) が分かれば、控除の下にある「知らない名前」の
@@ -243,26 +243,34 @@ export function interpretPayslipImport(payload) {
     });
   };
 
-  // 支給の下にある知らない項目は入れる欄が無い。黙って捨てると手取りが
-  // 合わなくなるので、名前を出して知らせる
-  const unknownEarnings = unknownUnder(EARNING_SECTIONS);
+  // 累計・口座番号・課税対象額のような、明細の項目ではない数字を見分ける
+  const NOT_ITEM = /(累計|口座|番号|コード|対象|日数|時間|回数|残高|率|単価|前月|年間|年度)/;
+
+  // 支給の下にある知らない項目 (支度料など) は入れる欄が無い。捨てると支給の合計と
+  // 手取りが合わなくなり、その他控除の逆算までずれるので、給与調整に入れる
+  const unknownEarnings = unknownUnder(EARNING_SECTIONS).filter(
+    ([label]) => !NOT_ITEM.test(normalizeLabel(label))
+  );
   if (unknownEarnings.length > 0) {
-    checks.push({
-      ok: false,
-      text:
-        "支給の " +
-        unknownEarnings.map(([l, v]) => `「${l}」${yen(parseAmount(v))}`).join("・") +
-        " は入れる欄がありません。金額が合わないので、給与調整に足すなどして直してください",
-    });
+    const list = unknownEarnings.map(([l, v]) => `「${l}」${yen(parseAmount(v))}`).join("・");
+    if (bonus) {
+      checks.push({ ok: false, text: `支給の ${list} は賞与の欄にありません` });
+    } else {
+      const extra = unknownEarnings.reduce((s, [, v]) => s + parseAmount(v), 0);
+      fields.salaryAdjustment = (fields.salaryAdjustment || 0) + extra;
+      gross += extra;
+      checks.push({ ok: true, text: `支給の ${list} は入れる欄が無いので、給与調整に入れました` });
+    }
   }
 
   let deductions = sum(deductionFields);
   let otherFromNet = false;
-  // 控除の区切りの下には、累計・口座番号・課税対象額のような「控除ではない数字」も
-  // 並ぶことがある。名前で分かるものは除き、支給より大きい額も控除ではないので除く
-  const NOT_DEDUCTION = /(累計|口座|番号|コード|対象|日数|時間|回数|残高|率|単価|前月|年間|年度|支給)/;
+  // 控除の区切りの下には、累計・口座番号のような「控除ではない数字」も並ぶことが
+  // ある。名前で分かるものは除き、支給より大きい額も控除ではないので除く
   const unknownDeductions = unknownUnder(DEDUCTION_SECTIONS).filter(
-    ([label, value]) => !NOT_DEDUCTION.test(normalizeLabel(label)) && Math.abs(parseAmount(value)) <= gross
+    ([label, value]) =>
+      !NOT_ITEM.test(normalizeLabel(label)) && !normalizeLabel(label).includes("支給") &&
+      Math.abs(parseAmount(value)) <= gross
   );
   // 明細の合計から逆算した、名前の分からない控除の額。合計が無ければ null
   let fromTotals = null;
