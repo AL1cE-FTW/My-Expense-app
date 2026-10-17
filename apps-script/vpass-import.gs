@@ -21,6 +21,38 @@
  */
 
 // ===========================================================================
+// 実行する関数 (エディタの「実行」の横で選ぶ。最初に1回 setup を実行する)
+//
+// エディタの関数の選択は、ファイルの一番上の関数が最初に選ばれている。
+// 引数が要る関数 (下の toFullWidthKana など) を誤って実行するとエラーになるので、
+// 実行してよい関数をいちばん上に置く
+// ===========================================================================
+
+/** 最初に1回だけ実行する: 15分ごとに importNewCardMails を動かす */
+function setup() {
+  config_(); // 設定漏れがあればここで知らせる
+  for (const trigger of ScriptApp.getProjectTriggers()) {
+    if (trigger.getHandlerFunction() === "importNewCardMails") ScriptApp.deleteTrigger(trigger);
+  }
+  ScriptApp.newTrigger("importNewCardMails").timeBased().everyMinutes(15).create();
+  importNewCardMails();
+}
+
+/** 15分ごとに呼ばれる本体。手動で実行しても良い */
+function importNewCardMails() {
+  // 前回の実行が長引いているあいだに次が始まると、同じメールを二重に取り込む
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    const result = runImport_();
+    console.log(JSON.stringify(result));
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ===========================================================================
 // 読み取りとカテゴリ推測 (js/vpass-mail.js と同じ内容)
 // ===========================================================================
 
@@ -166,30 +198,6 @@ function parseVpassEmails(text) {
 // 取り込み済みメールIDの上限 (アプリの IMPORTED_GMAIL_ID_LIMIT と同じ)
 const IMPORTED_GMAIL_ID_LIMIT = 2000;
 const VPASS_SENDER = "statement@vpass.ne.jp";
-
-/** 最初に1回だけ実行する: 15分ごとに importNewCardMails を動かす */
-function setup() {
-  config_(); // 設定漏れがあればここで知らせる
-  for (const trigger of ScriptApp.getProjectTriggers()) {
-    if (trigger.getHandlerFunction() === "importNewCardMails") ScriptApp.deleteTrigger(trigger);
-  }
-  ScriptApp.newTrigger("importNewCardMails").timeBased().everyMinutes(15).create();
-  importNewCardMails();
-}
-
-/** 15分ごとに呼ばれる本体。手動で実行しても良い */
-function importNewCardMails() {
-  // 前回の実行が長引いているあいだに次が始まると、同じメールを二重に取り込む
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return;
-  try {
-    const result = runImport_();
-    console.log(JSON.stringify(result));
-    return result;
-  } finally {
-    lock.releaseLock();
-  }
-}
 
 function runImport_() {
   const cfg = config_();
