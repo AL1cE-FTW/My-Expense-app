@@ -8,7 +8,7 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { buildBookmarklet, interpretPayslipImport } from "../js/payslip-import.js";
+import { buildBookmarklet, describePayslipPayload, interpretPayslipImport } from "../js/payslip-import.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -283,6 +283,40 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
   assert(got.date === "2026-07-27", "支給日: " + got.date);
   assert(got.note.includes("一致"), "差引支給額で検算が合うはず: " + got.note);
   await page.close();
+}
+
+// 読み取れなかったときは、受け取った項目名と区切りを出す (金額は出さない)
+{
+  const payload = {
+    v: 1,
+    pairs: [["2026年7月度給与", "支給日：2026年07月27日", ""], ["出勤", "21", "勤怠"], ["基本手当", "123,456", "支給"]],
+  };
+  const text = describePayslipPayload(payload);
+  assert(text.includes("3個") && text.includes("勤怠・支給") && text.includes("基本手当"), "受け取った中身を書き出す: " + text);
+  assert(!text.includes("123,456") && !text.includes("123456"), "金額は出さない: " + text);
+  assert(describePayslipPayload({ invalid: true, length: 50 }).includes("壊れて"), "壊れた内容と伝える");
+
+  // openAppWith は dialog の文面を見ないので、ここでは自分で開いて確かめる
+  const page2 = await browser.newPage();
+  const messages = [];
+  page2.on("dialog", (d) => { messages.push(d.message()); d.accept(); });
+  await page2.route("https://www.gstatic.com/firebasejs/**/*.js", async (route) => {
+    const u = new URL(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "text/javascript",
+      body: fs.readFileSync(path.join(stubRoot, u.pathname.split("/").pop()), "utf-8"),
+    });
+  });
+  await page2.goto(APP + "#payslip-import=" + encodeURIComponent(JSON.stringify(payload)), { waitUntil: "networkidle" });
+  await page2.click('.auth-tab[data-mode="signup"]');
+  await page2.fill("#auth-email", "unreadable2@example.com");
+  await page2.fill("#auth-password", "password123");
+  await page2.click("#auth-submit-btn");
+  await page2.waitForTimeout(500);
+  const alertText = messages.find((m) => m.includes("読み取れませんでした")) || "";
+  assert(alertText.includes("基本手当") && !alertText.includes("123,456"), "画面にも手がかりを出す: " + alertText);
+  await page2.close();
 }
 
 // ---------------------------------------------------------------------------

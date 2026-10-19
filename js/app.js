@@ -8,6 +8,7 @@ import {
 import {
   PAYSLIP_IMPORT_HASH,
   buildBookmarklet,
+  describePayslipPayload,
   interpretPayslipImport,
 } from "./payslip-import.js";
 
@@ -27,7 +28,7 @@ function takePayslipImportFromUrl() {
   try {
     return JSON.parse(decodeURIComponent(raw));
   } catch {
-    return { invalid: true };
+    return { invalid: true, length: raw.length };
   }
 }
 
@@ -3724,7 +3725,9 @@ function applyPendingPayslipImport() {
       "給与サイトから受け取った内容を、給与明細として読み取れませんでした。\n\n" +
         "まだ明細が出ていない月 (今月分など) のタブを開いていませんか。" +
         "金額が載っている月の明細を開いた状態で、もう一度ブックマークを押してください。\n\n" +
-        "それでも読み取れないときは、内訳を手で入力してください。"
+        "それでも読み取れないときは、内訳を手で入力してください。\n\n" +
+        "読み取りを直す手がかり (金額は含みません):\n" +
+        describePayslipPayload(payload)
     );
     return;
   }
