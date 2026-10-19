@@ -223,7 +223,7 @@ export function interpretPayslipImport(payload) {
   }
 
   const sum = (list) => list.reduce((s, f) => s + (fields[f] || 0), 0);
-  const gross = sum(earningFields);
+  let gross = sum(earningFields);
 
   // 慶弔掛金・福祉会費のような個別の控除は、項目名が会社ごとにばらばら。
   // 明細の区切り (支給/控除) が分かれば、控除の下にある「知らない名前」の
@@ -243,62 +243,81 @@ export function interpretPayslipImport(payload) {
     });
   };
 
-  // 支給の下にある知らない項目は入れる欄が無い。黙って捨てると手取りが
-  // 合わなくなるので、名前を出して知らせる
-  const unknownEarnings = unknownUnder(EARNING_SECTIONS);
+  // 累計・口座番号・課税対象額のような、明細の項目ではない数字を見分ける
+  const NOT_ITEM = /(累計|口座|番号|コード|対象|日数|時間|回数|残高|率|単価|前月|年間|年度)/;
+
+  // 支給の下にある知らない項目 (支度料など) は入れる欄が無い。捨てると支給の合計と
+  // 手取りが合わなくなり、その他控除の逆算までずれるので、給与調整に入れる
+  const unknownEarnings = unknownUnder(EARNING_SECTIONS).filter(
+    ([label]) => !NOT_ITEM.test(normalizeLabel(label))
+  );
   if (unknownEarnings.length > 0) {
-    checks.push({
-      ok: false,
-      text:
-        "支給の " +
-        unknownEarnings.map(([l, v]) => `「${l}」${yen(parseAmount(v))}`).join("・") +
-        " は入れる欄がありません。金額が合わないので、給与調整に足すなどして直してください",
-    });
+    const list = unknownEarnings.map(([l, v]) => `「${l}」${yen(parseAmount(v))}`).join("・");
+    if (bonus) {
+      checks.push({ ok: false, text: `支給の ${list} は賞与の欄にありません` });
+    } else {
+      const extra = unknownEarnings.reduce((s, [, v]) => s + parseAmount(v), 0);
+      fields.salaryAdjustment = (fields.salaryAdjustment || 0) + extra;
+      gross += extra;
+      checks.push({ ok: true, text: `支給の ${list} は入れる欄が無いので、給与調整に入れました` });
+    }
   }
 
   let deductions = sum(deductionFields);
   let otherFromNet = false;
-  const unknownDeductions = unknownUnder(DEDUCTION_SECTIONS);
-  if (unknownDeductions.length > 0) {
+  // 控除の区切りの下には、累計・口座番号のような「控除ではない数字」も並ぶことが
+  // ある。名前で分かるものは除き、支給より大きい額も控除ではないので除く
+  const unknownDeductions = unknownUnder(DEDUCTION_SECTIONS).filter(
+    ([label, value]) =>
+      !NOT_ITEM.test(normalizeLabel(label)) && !normalizeLabel(label).includes("支給") &&
+      Math.abs(parseAmount(value)) <= gross
+  );
+  // 明細の合計から逆算した、名前の分からない控除の額。合計が無ければ null
+  let fromTotals = null;
+  if (totals.deductions !== undefined) {
+    fromTotals = { rest: totals.deductions - deductions, fromNet: false };
+  } else if (totals.net !== undefined) {
+    fromTotals = { rest: gross - deductions - totals.net, fromNet: true };
+  }
+  const names = unknownDeductions.map(([l]) => `「${l}」`).join("・");
+  if (bonus) {
+    if (unknownDeductions.length > 0) {
+      checks.push({ ok: false, text: `控除の ${names} は賞与の欄にありません` });
+    }
+  } else if (unknownDeductions.length > 0 &&
+             (!fromTotals || fromTotals.rest === unknownDeductions.reduce((s, [, v]) => s + parseAmount(v), 0))) {
+    // 名前つきで拾えて、合計とも合う (か、検算する合計が無い)
     const rest = unknownDeductions.reduce((s, [, v]) => s + parseAmount(v), 0);
-    if (bonus) {
-      checks.push({
-        ok: false,
-        text: `控除の ${unknownDeductions.map(([l]) => `「${l}」`).join("・")} は賞与の欄にありません`,
-      });
-    } else {
-      fields.otherDeductions = rest;
-      deductions += rest;
-      checks.push({
-        ok: true,
-        text:
-          unknownDeductions.map(([l]) => l).join("・") +
-          ` (計 ${yen(rest)}) を「その他控除」に入れました`,
-      });
-    }
-  } else if (!bonus && !hasSections) {
-    // 区切りが読めないときは合計から逆算する
-    let rest = null;
-    if (totals.deductions !== undefined) {
-      rest = totals.deductions - deductions;
-    } else if (totals.net !== undefined) {
-      rest = gross - deductions - totals.net;
-      otherFromNet = true;
-    }
-    if (rest !== null && rest > 0) {
-      fields.otherDeductions = rest;
-      deductions += rest;
-      checks.push({
-        ok: true,
-        text: `名前の分からない控除 ${yen(rest)}を「その他控除」に入れました (合計からの逆算)`,
-      });
-    } else if (rest !== null && rest < 0) {
-      otherFromNet = false;
-      checks.push({
-        ok: false,
-        text: "控除が明細の合計より多くなっています。控除の欄を確認してください",
-      });
-    }
+    fields.otherDeductions = rest;
+    deductions += rest;
+    checks.push({
+      ok: true,
+      text: unknownDeductions.map(([l]) => l).join("・") + ` (計 ${yen(rest)}) を「その他控除」に入れました`,
+    });
+  } else if (fromTotals && fromTotals.rest > 0) {
+    // 名前の分からない控除は合計から逆算する。拾った項目が合計と合わないときも
+    // こちらを信じる (控除ではない数字を拾っていることがある)
+    fields.otherDeductions = fromTotals.rest;
+    deductions += fromTotals.rest;
+    otherFromNet = fromTotals.fromNet;
+    checks.push(
+      unknownDeductions.length > 0
+        ? {
+            ok: false,
+            text:
+              `控除の ${names} が明細の合計と合わないため、合計から逆算した ${yen(fromTotals.rest)}を` +
+              "「その他控除」に入れました。内訳を確認してください",
+          }
+        : {
+            ok: true,
+            text: `名前の分からない控除 ${yen(fromTotals.rest)}を「その他控除」に入れました (合計からの逆算)`,
+          }
+    );
+  } else if (fromTotals && fromTotals.rest < 0) {
+    checks.push({
+      ok: false,
+      text: "控除が明細の合計より多くなっています。控除の欄を確認してください",
+    });
   }
 
   if (totals.gross !== undefined) {
@@ -346,6 +365,27 @@ export function interpretPayslipImport(payload) {
   if (period) memo = `${Number(period[2])}月度${bonus ? "賞与" : "給与"}`;
 
   return { kind, fields, date, memo, checks, recognized };
+}
+
+/**
+ * 読み取れなかったときに、何を受け取ったかを短く書き出す。金額は出さない。
+ * 給与サイトの画面の形が変わったときに、どこで食い違ったかを知る手がかりにする。
+ */
+export function describePayslipPayload(payload) {
+  if (!payload || payload.invalid) {
+    const size = payload && payload.length ? ` (${payload.length}文字)` : "";
+    return `受け取った内容が途中で切れているか、壊れていました${size}`;
+  }
+  const pairs = Array.isArray(payload.pairs) ? payload.pairs.filter(Array.isArray) : [];
+  const sections = [...new Set(pairs.map((p) => String(p[2] || "")).filter(Boolean))];
+  const labels = pairs.map(
+    (p) => String(p[0]).slice(0, 20) + (parseAmount(p[1]) === null ? " (数字なし)" : "")
+  );
+  return [
+    `受け取った項目: ${pairs.length}個`,
+    `区切り: ${sections.join("・") || "なし"}`,
+    `項目名: ${labels.slice(0, 40).join("、") || "なし"}${labels.length > 40 ? " ほか" : ""}`,
+  ].join("\n");
 }
 
 /**
