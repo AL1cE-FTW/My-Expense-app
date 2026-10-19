@@ -15,8 +15,13 @@
  * 使い方: 上の4つを入れたら、関数 setup を1回実行する (15分ごとの実行が登録される)。
  * 手順の詳細は README.md の「メールの自動取り込み (Google Apps Script)」を参照。
  *
- * ※ 下の「読み取りとカテゴリ推測」は js/vpass-mail.js の書き写し。
- *    片方だけ直すと食い違うので、直すときは両方を直す
+ * 予算の使用率通知: スクリプト プロパティに FCM_SERVICE_ACCOUNT (Firebase の
+ * サービスアカウントの鍵の JSON) を入れると、取り込みのたびに今月の予算の使用率を
+ * 調べ、50%・80%・100% を超えたらアプリで通知を許可した端末にプッシュ通知を送る。
+ * 手順は README.md の「予算の使用率通知」を参照。
+ *
+ * ※ 下の「読み取りとカテゴリ推測」は js/vpass-mail.js、「集計と使用率通知の判定」は
+ *    js/budget-usage.js の書き写し。片方だけ直すと食い違うので、直すときは両方を直す
  *    (食い違いは test/verify-apps-script.mjs が見つける)。
  */
 
@@ -44,7 +49,11 @@ function importNewCardMails() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return;
   try {
-    const result = runImport_();
+    const cfg = config_();
+    const auth = signIn_(cfg);
+    const result = runImport_(cfg, auth);
+    // 取り込みが無くても調べる (アプリで手入力した支出も通知の対象にする)
+    result.alerts = runBudgetAlerts_(cfg, auth);
     console.log(JSON.stringify(result));
     return result;
   } finally {
@@ -199,9 +208,7 @@ function parseVpassEmails(text) {
 const IMPORTED_GMAIL_ID_LIMIT = 2000;
 const VPASS_SENDER = "statement@vpass.ne.jp";
 
-function runImport_() {
-  const cfg = config_();
-  const auth = signIn_(cfg);
+function runImport_(cfg, auth) {
   const base = `projects/${cfg.projectId}/databases/(default)/documents`;
   const userPath = `${base}/users/${auth.uid}`;
   const importDocName = `${userPath}/settings/gmailImport`;
@@ -275,6 +282,298 @@ function searchVpassMessages_() {
     if (threads.length < SEARCH_PAGE) break;
   }
   return messages.slice(0, SEARCH_LIMIT);
+}
+
+// ===========================================================================
+// 予算の使用率通知
+// ===========================================================================
+
+const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+
+/**
+ * 今月の予算の使用率を調べ、まだ通知していない段階を、アプリで通知を許可した
+ * 端末 (settings/pushTokens) に送る。通知済みの段階は settings/budgetAlerts に残す
+ * (端末をまたいで1回ずつ)。FCM_SERVICE_ACCOUNT が無ければ何もしない。
+ */
+function runBudgetAlerts_(cfg, auth) {
+  const serviceAccountJson = PropertiesService.getScriptProperties().getProperty("FCM_SERVICE_ACCOUNT");
+  if (!serviceAccountJson) return "off";
+
+  const base = `projects/${cfg.projectId}/databases/(default)/documents`;
+  const userPath = `${base}/users/${auth.uid}`;
+  const tokensDocName = `${userPath}/settings/pushTokens`;
+  const alertsDocName = `${userPath}/settings/budgetAlerts`;
+
+  const tokens = docFields_(firestore_(cfg, auth, "get", tokensDocName)).tokens || [];
+  if (tokens.length === 0) return "no devices";
+
+  const month = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM");
+  const sentDoc = docFields_(firestore_(cfg, auth, "get", alertsDocName));
+  const sentKeys = sentDoc.month === month ? sentDoc.keys || [] : [];
+  const budgets = docFields_(firestore_(cfg, auth, "get", `${userPath}/settings/budget`));
+  // shortcut: 返金がどの支出を取り消すかを探す範囲を先月の初めからに絞る (毎回全件を読むと
+  // Firestore の無料枠を使い切るため)。先々月より前の支出の返金は、アプリと違って
+  // 収入のまま数える。ずれが問題になったら範囲を広げる
+  const entries = queryEntriesSince_(cfg, auth, userPath, `${previousMonth_(month)}-01`);
+  const alerts = budgetAlertsToSend(entries, budgets, month, sentKeys);
+  if (alerts.length === 0) return { alerts: 0 };
+
+  const accessToken = fcmAccessToken_(serviceAccountJson);
+  const goneTokens = new Set();
+  const delivered = [];
+  for (const alert of alerts) {
+    let ok = false;
+    for (const token of tokens) {
+      if (goneTokens.has(token)) continue;
+      const status = sendPush_(cfg, accessToken, token, alert);
+      if (status === "ok") ok = true;
+      if (status === "gone") goneTokens.add(token);
+    }
+    // 1台にも届かなかった段階は通知済みにしない (次の実行で送り直す)
+    if (ok) delivered.push(...alert.keys);
+  }
+
+  const writes = [];
+  if (delivered.length > 0) {
+    writes.push({
+      update: { name: alertsDocName, fields: toFields_({ month, keys: [...sentKeys, ...delivered] }) },
+    });
+  }
+  if (goneTokens.size > 0) {
+    writes.push({
+      update: { name: tokensDocName, fields: toFields_({ tokens: tokens.filter((t) => !goneTokens.has(t)) }) },
+      updateMask: { fieldPaths: ["tokens"] },
+    });
+  }
+  if (writes.length > 0) firestore_(cfg, auth, "post", `${base}:commit`, { writes });
+  return { alerts: alerts.length, delivered: delivered.length, removedDevices: goneTokens.size };
+}
+
+function docFields_(doc) {
+  return doc && doc.fields ? fromFields_(doc.fields) : {};
+}
+
+function previousMonth_(month) {
+  const [y, m] = month.split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+}
+
+// サービスアカウントの鍵で署名して、FCM に送るための鍵 (アクセストークン) を得る
+function fcmAccessToken_(serviceAccountJson) {
+  let account;
+  try {
+    account = JSON.parse(serviceAccountJson);
+  } catch (err) {
+    throw new Error("FCM_SERVICE_ACCOUNT が JSON として読めません。鍵のファイルの中身をそのまま貼ってください");
+  }
+  const encode = (text) => Utilities.base64EncodeWebSafe(text).replace(/=+$/, "");
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned =
+    encode(JSON.stringify({ alg: "RS256", typ: "JWT" })) +
+    "." +
+    encode(
+      JSON.stringify({
+        iss: account.client_email,
+        scope: FCM_SCOPE,
+        aud: "https://oauth2.googleapis.com/token",
+        iat: now,
+        exp: now + 3600,
+      })
+    );
+  const signature = encode(Utilities.computeRsaSha256Signature(unsigned, account.private_key));
+  const res = UrlFetchApp.fetch("https://oauth2.googleapis.com/token", {
+    method: "post",
+    payload: { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${unsigned}.${signature}` },
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) {
+    throw new Error("FCM_SERVICE_ACCOUNT の鍵でのログインに失敗しました: " + res.getContentText());
+  }
+  return JSON.parse(res.getContentText()).access_token;
+}
+
+// 1台に送る。"ok" / "gone" (アプリを消した等で、もう届かない宛先) / "error" (次の実行で送り直す)
+function sendPush_(cfg, accessToken, token, alert) {
+  const res = UrlFetchApp.fetch(`https://fcm.googleapis.com/v1/projects/${cfg.projectId}/messages:send`, {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    payload: JSON.stringify({
+      message: {
+        token,
+        data: { title: alert.title, body: alert.body, tag: alert.tag },
+        webpush: { headers: { Urgency: "high" } },
+      },
+    }),
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  if (code === 200) return "ok";
+  if (code === 404) return "gone";
+  console.log(`通知の送信に失敗しました (${code}): ${res.getContentText()}`);
+  return "error";
+}
+
+// ===========================================================================
+// 集計と使用率通知の判定 (js/budget-usage.js と同じ内容)
+// ===========================================================================
+
+const CARD_REFUND_CATEGORY = "カード返金";
+
+function normalizeMemo(memo) {
+  return toHalfWidthAscii(String(memo || ""))
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
+// --- 立替を自分のお金の出入りに数えない -------------------------------------
+//
+// 立て替えたお金は「あとで返ってくる権利」(簿記でいう立替金＝資産) で、
+// 使ったお金ではない。返金も稼いだお金ではなく、その権利が現金に戻っただけ。
+// 両方を支出・収入に数えると、立て替えた月は赤字、返ってきた月は黒字に見える
+// (2か月通せば相殺されるが、月ごとの数字が歪む)。
+//
+// そこで次の記録は、収入・支出・収支・予算・Need/Want/Save・累計貯金額の
+// どれにも数えない:
+//   - まだ返ってきていない立替 (返ってくる前提で、資産として持っている)
+//   - 立替と、それを同じ金額で精算した返金の組
+// 精算額が立替額と違う組 (一部しか返ってこなかった等) は、差額が自分の負担・
+// 得になるので、両方とも普通の支出・収入として数える (合計では差額だけ残る)。
+// 立替の印を付けずに記録した支出を、手で入れた「立替金返金」で相殺している
+// 場合もあるので、立替と結びついていない返金は今までどおり収入に数える。
+
+function refundsByAdvanceId(entries) {
+  const map = new Map();
+  for (const e of entries) {
+    if (e.advanceRefundFor) map.set(e.advanceRefundFor, e);
+  }
+  return map;
+}
+
+function computeAdvanceFlowIds(entries) {
+  const refunds = refundsByAdvanceId(entries);
+  const ids = new Set();
+  for (const e of entries) {
+    if (e.type !== "expense" || e.advance !== true) continue;
+    const refund = refunds.get(e.id);
+    if (!refund) {
+      ids.add(e.id);
+    } else if (refund.amount === e.amount) {
+      ids.add(e.id);
+      ids.add(refund.id);
+    }
+  }
+  return ids;
+}
+
+// --- 返金は「支出の取り消し」として数える ----------------------------------
+//
+// カードの返金 (返品・キャンセル) は稼いだお金ではなく、払ったお金が戻っただけ。
+// 収入に数えると、収入と支出が両方膨らみ、返品した支出は予算や Need/Want に
+// 残ったままになる (予算オーバーに見える)。簿記でも費用の取り消し (戻し入れ)
+// として、元の費用科目を減らす。そこで、元の支出のカテゴリのマイナスの支出に直す。
+// 精算額が立替額と違う立替の返金も同じ (差額だけが自分の負担として残る)。
+
+// 返金の記録ID → 取り消す支出のカテゴリ
+function computeRefundCategories(entries) {
+  const map = new Map();
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  // 店名ごとの支出 (新しい順)。カードの返金は同じ店の直近の支出を取り消すとみなす
+  const expensesByMerchant = new Map();
+  for (const e of entries) {
+    if (e.type !== "expense" || !e.memo) continue;
+    const key = normalizeMemo(e.memo);
+    if (!expensesByMerchant.has(key)) expensesByMerchant.set(key, []);
+    expensesByMerchant.get(key).push(e);
+  }
+  for (const list of expensesByMerchant.values()) {
+    list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }
+
+  for (const e of entries) {
+    if (e.type !== "income") continue;
+    if (e.advanceRefundFor && byId.get(e.advanceRefundFor)?.advance === true) {
+      // 立替の返金 (同額の組は立替の除外で最初から除かれるので、ここに来るのは金額違い)
+      map.set(e.id, byId.get(e.advanceRefundFor).category);
+    } else if (e.category === CARD_REFUND_CATEGORY) {
+      const merchant = String(e.memo || "").replace(/^返金[:：]\s*/, "");
+      const original = (expensesByMerchant.get(normalizeMemo(merchant)) || []).find(
+        (x) => x.date <= e.date
+      );
+      map.set(
+        e.id,
+        original ? original.category : merchant ? guessCategoryFromMerchant(merchant) : "その他支出"
+      );
+    }
+  }
+  return map;
+}
+
+/**
+ * 集計に使う「自分のお金の出入り」に直した記録。
+ *   - 立替・同額で精算した返金の組、振替 (現金⇔口座) は除く
+ *   - 返金は収入ではなく、元の支出のカテゴリのマイナスの支出にする
+ * advanceIds・refundCategories は全記録から作ったもの (上の2つの関数)。
+ */
+function toOwnFlows(list, advanceIds, refundCategories) {
+  const out = [];
+  for (const e of list) {
+    if (e.type === "transfer" || advanceIds.has(e.id)) continue;
+    const category = e.type === "income" ? refundCategories.get(e.id) : null;
+    out.push(category ? { ...e, type: "expense", category, amount: -e.amount } : e);
+  }
+  return out;
+}
+
+// --- 予算の使用率通知 -------------------------------------------------------
+
+// 高い段階から並べる。100% を超えたら 80%・50% の通知はもう要らない
+const BUDGET_ALERT_LEVELS = [1, 0.8, 0.5];
+
+function yen(amount) {
+  return "¥" + String(Math.round(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * 今月 (month は "2026-10" の形) の使用率が 50% / 80% / 100% を超えた
+ * カテゴリと予算全体のうち、まだ通知していないもの。
+ * sentKeys はその月に通知済みの印。返す keys を通知できたら sentKeys に足す。
+ */
+function budgetAlertsToSend(entries, budgets, month, sentKeys) {
+  const monthEntries = entries.filter((e) => String(e.date || "").startsWith(month));
+  const flows = toOwnFlows(monthEntries, computeAdvanceFlowIds(entries), computeRefundCategories(entries));
+  const actuals = new Map();
+  for (const e of flows) {
+    if (e.type === "expense") actuals.set(e.category, (actuals.get(e.category) || 0) + e.amount);
+  }
+  const targets = Object.keys(budgets)
+    .filter((c) => budgets[c] > 0)
+    .map((c) => ({ name: c, budget: budgets[c], actual: actuals.get(c) || 0 }));
+  // 全体は画面の予算バーと同じく、予算を設定したカテゴリだけで数える
+  if (targets.length > 1) {
+    targets.unshift({
+      name: "予算全体",
+      budget: targets.reduce((sum, t) => sum + t.budget, 0),
+      actual: targets.reduce((sum, t) => sum + t.actual, 0),
+    });
+  }
+
+  const alerts = [];
+  for (const { name, budget, actual } of targets) {
+    const reached = BUDGET_ALERT_LEVELS.filter((level) => actual / budget >= level);
+    if (reached.length === 0 || sentKeys.includes(`${name}:${reached[0]}`)) continue;
+    const percent = Math.round((actual / budget) * 100);
+    alerts.push({
+      keys: reached.map((level) => `${name}:${level}`),
+      title: `${name}の予算を${percent}%使いました`,
+      body:
+        actual >= budget
+          ? `${yen(actual - budget)} オーバーしています (${yen(actual)} / ${yen(budget)})`
+          : `残り ${yen(budget - actual)} です (${yen(actual)} / ${yen(budget)})`,
+      tag: `budget-${name}`,
+    });
+  }
+  return alerts;
 }
 
 // --- 設定とログイン ---------------------------------------------------------
@@ -451,12 +750,8 @@ function dropAlreadyConfirmed_(imported, existing) {
   return { kept, confirmedCount };
 }
 
-function normalizeMemo_(memo) {
-  return toHalfWidthAscii(String(memo || "")).replace(/\s+/g, "").toUpperCase();
-}
-
 function dedupeKey_(e) {
-  return JSON.stringify([e.date, e.type, e.category, e.amount, normalizeMemo_(e.memo)]);
+  return JSON.stringify([e.date, e.type, e.category, e.amount, normalizeMemo(e.memo)]);
 }
 
 function dedupeAgainst_(imported, existing) {

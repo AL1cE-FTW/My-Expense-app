@@ -11,6 +11,14 @@ import {
   describePayslipPayload,
   interpretPayslipImport,
 } from "./payslip-import.js";
+import {
+  CARD_REFUND_CATEGORY,
+  computeAdvanceFlowIds,
+  computeRefundCategories,
+  normalizeMemo,
+  refundsByAdvanceId as refundsByAdvanceIdOf,
+  toOwnFlows,
+} from "./budget-usage.js";
 
 // このファイルが評価まで到達したことの合図。index.html の見張りが見ている。
 // (import しているファイルが1つでも読めないと、ここより下は一切動かない)
@@ -86,7 +94,6 @@ const BONUS_CATEGORY = "賞与";
 const ADVANCE_REFUND_CATEGORY = "立替金返金";
 
 // カード利用履歴CSVのマイナス金額(返金・キャンセル)から作られる収入のカテゴリ。
-const CARD_REFUND_CATEGORY = "カード返金";
 
 // 「稼いだお金」ではなく、払ったお金が戻ってきただけの収入。
 // 目標・達成率・Need/Want/Save の収入ベースからは除く
@@ -201,6 +208,9 @@ let currentMonth = startOfMonth(new Date());
 let viewMode = "month";
 
 let db = null;
+let firebaseApp = null;
+// 予算の使用率通知 (プッシュ通知) の公開鍵。firebase-config.js に無ければ通知のボタンを出さない
+let fcmVapidKey = null;
 let auth = null;
 let currentUid = null;
 let unsubscribeEntries = null;
@@ -430,6 +440,7 @@ const el = {
   budgetOverall: document.getElementById("budget-overall"),
   budgetBreakdown: document.getElementById("budget-breakdown"),
   editBudgetBtn: document.getElementById("edit-budget-btn"),
+  budgetAlertBtn: document.getElementById("budget-alert-btn"),
   budgetForm: document.getElementById("budget-form"),
   budgetInputs: document.getElementById("budget-inputs"),
   cancelBudgetBtn: document.getElementById("cancel-budget-btn"),
@@ -517,6 +528,7 @@ function showApp(user) {
   closeIncomeBudgetForm();
   closeAccountsForm();
   applyPendingPayslipImport();
+  registerPushToken();
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +616,10 @@ function updateEntriesInDb(updates) {
     commits.push(batch.commit());
   }
   return Promise.all(commits);
+}
+
+function pushTokensDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/pushTokens`);
 }
 
 function budgetDocRef(uid) {
@@ -709,7 +725,7 @@ function render() {
 
   const targetMultiplier = viewMode === "year" ? elapsedMonthsInYear() : 1;
   const entriesInPeriod = periodEntries();
-  // 集計には立替とその返金を含めない (isOwnMoney のコメント参照)。
+  // 集計には立替とその返金を含めない (js/budget-usage.js のコメント参照)。
   // 記録一覧と帳簿は元の記録をそのまま使う (帳簿は立替を資産として別に扱う)
   const ownEntries = ownFlows(entriesInPeriod);
   renderSummary(ownEntries);
@@ -1046,123 +1062,46 @@ function saveEntryWithLinked({ editingId, data, refundToDelete }) {
   return { id: ref.id, written: batch.commit() };
 }
 
-// --- 立替を自分のお金の出入りに数えない -------------------------------------
-//
-// 立て替えたお金は「あとで返ってくる権利」(簿記でいう立替金＝資産) で、
-// 使ったお金ではない。返金も稼いだお金ではなく、その権利が現金に戻っただけ。
-// 両方を支出・収入に数えると、立て替えた月は赤字、返ってきた月は黒字に見える
-// (2か月通せば相殺されるが、月ごとの数字が歪む)。
-//
-// そこで次の記録は、収入・支出・収支・予算・Need/Want/Save・累計貯金額の
-// どれにも数えない:
-//   - まだ返ってきていない立替 (返ってくる前提で、資産として持っている)
-//   - 立替と、それを同じ金額で精算した返金の組
-// 精算額が立替額と違う組 (一部しか返ってこなかった等) は、差額が自分の負担・
-// 得になるので、両方とも普通の支出・収入として数える (合計では差額だけ残る)。
-// 立替の印を付けずに記録した支出を、手で入れた「立替金返金」で相殺している
-// 場合もあるので、立替と結びついていない返金は今までどおり収入に数える。
+// --- 集計に使う「自分のお金の出入り」 ---------------------------------------
+// 立替・返金の扱いの理由は js/budget-usage.js のコメントを参照。
+// 計算は Apps Script と共通 (js/budget-usage.js)。ここでは記録が変わるまで結果を使い回す。
 
 let advanceFlowCache = { source: null, ids: new Set() };
 
+// 集計に数えない立替と、同額で精算したその返金の記録ID
 function advanceFlowIds() {
-  if (advanceFlowCache.source === entries) return advanceFlowCache.ids;
-  const refunds = refundsByAdvanceId();
-  const ids = new Set();
-  for (const e of entries) {
-    if (e.type !== "expense" || e.advance !== true) continue;
-    const refund = refunds.get(e.id);
-    if (!refund) {
-      ids.add(e.id);
-    } else if (refund.amount === e.amount) {
-      ids.add(e.id);
-      ids.add(refund.id);
-    }
+  if (advanceFlowCache.source !== entries) {
+    advanceFlowCache = { source: entries, ids: computeAdvanceFlowIds(entries) };
   }
-  advanceFlowCache = { source: entries, ids };
-  return ids;
+  return advanceFlowCache.ids;
 }
-
-// 自分のお金の出入りとして集計に数えるか
-function isOwnMoney(entry) {
-  return entry.type !== "transfer" && !advanceFlowIds().has(entry.id);
-}
-
-// --- 返金は「支出の取り消し」として数える ----------------------------------
-//
-// カードの返金 (返品・キャンセル) は稼いだお金ではなく、払ったお金が戻っただけ。
-// 収入に数えると、収入と支出が両方膨らみ、返品した支出は予算や Need/Want に
-// 残ったままになる (予算オーバーに見える)。簿記でも費用の取り消し (戻し入れ)
-// として、元の費用科目を減らす。そこで、元の支出のカテゴリのマイナスの支出に直す。
-// 精算額が立替額と違う立替の返金も同じ (差額だけが自分の負担として残る)。
 
 let refundCategoryCache = { source: null, map: new Map() };
+
+function refundCategories() {
+  if (refundCategoryCache.source !== entries) {
+    refundCategoryCache = { source: entries, map: computeRefundCategories(entries) };
+  }
+  return refundCategoryCache.map;
+}
 
 // 返金が取り消す支出のカテゴリ。返金でなければ null。
 function refundExpenseCategory(entry) {
   if (entry.type !== "income") return null;
-  if (refundCategoryCache.source !== entries) {
-    refundCategoryCache = { source: entries, map: buildRefundCategories() };
-  }
-  return refundCategoryCache.map.get(entry.id) || null;
-}
-
-function buildRefundCategories() {
-  const map = new Map();
-  const byId = new Map(entries.map((e) => [e.id, e]));
-  // 店名ごとの支出 (新しい順)。カードの返金は同じ店の直近の支出を取り消すとみなす
-  const expensesByMerchant = new Map();
-  for (const e of entries) {
-    if (e.type !== "expense" || !e.memo) continue;
-    const key = normalizeMemo(e.memo);
-    if (!expensesByMerchant.has(key)) expensesByMerchant.set(key, []);
-    expensesByMerchant.get(key).push(e);
-  }
-  for (const list of expensesByMerchant.values()) {
-    list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }
-
-  for (const e of entries) {
-    if (e.type !== "income") continue;
-    if (e.advanceRefundFor && byId.get(e.advanceRefundFor)?.advance === true) {
-      // 立替の返金 (同額の組は isOwnMoney で最初から除かれるので、ここに来るのは金額違い)
-      map.set(e.id, byId.get(e.advanceRefundFor).category);
-    } else if (e.category === CARD_REFUND_CATEGORY) {
-      const merchant = String(e.memo || "").replace(/^返金[:：]\s*/, "");
-      const original = (expensesByMerchant.get(normalizeMemo(merchant)) || []).find(
-        (x) => x.date <= e.date
-      );
-      map.set(
-        e.id,
-        original ? original.category : merchant ? guessCategoryFromMerchant(merchant) : "その他支出"
-      );
-    }
-  }
-  return map;
+  return refundCategories().get(entry.id) || null;
 }
 
 /**
- * 集計に使う「自分のお金の出入り」に直した記録。
- *   - 立替・同額で精算した返金の組、振替 (現金⇔口座) は除く
- *   - 返金は収入ではなく、元の支出のカテゴリのマイナスの支出にする
+ * 集計に使う「自分のお金の出入り」に直した記録 (toOwnFlows のコメント参照)。
  * 収入・支出・収支・予算・予定と実績・Need/Want/Save・累計・年間推移は、
  * すべてこれを通して数える (帳簿の損益計算書と数字が揃う)。
  */
 function ownFlows(list) {
-  const out = [];
-  for (const e of list) {
-    if (!isOwnMoney(e)) continue;
-    const category = refundExpenseCategory(e);
-    out.push(category ? { ...e, type: "expense", category, amount: -e.amount } : e);
-  }
-  return out;
+  return toOwnFlows(list, advanceFlowIds(), refundCategories());
 }
 
 function refundsByAdvanceId() {
-  const map = new Map();
-  for (const e of entries) {
-    if (e.advanceRefundFor) map.set(e.advanceRefundFor, e);
-  }
-  return map;
+  return refundsByAdvanceIdOf(entries);
 }
 
 // 未回収の立替金。期間(今月/今年)では絞り込まない —
@@ -1894,6 +1833,48 @@ function renderBudget(monthEntries, targetMultiplier = 1) {
   }
 
   return { totalActual, totalBudget, unbudgetedActual };
+}
+
+// ---------------------------------------------------------------------------
+// 予算の使用率通知
+// ---------------------------------------------------------------------------
+
+// 通知の判定と送信は Apps Script が15分ごとに行う (アプリを閉じていても届くように)。
+// アプリはこの端末の宛先 (FCM のトークン) を Firestore に登録するだけ。
+// 計算は js/budget-usage.js、送り方は apps-script/vpass-import.gs を参照。
+
+/** 通知に対応していて、まだ許可を聞いていないときだけボタンを出す */
+function updateBudgetAlertButton() {
+  const canAsk = Boolean(fcmVapidKey) && "Notification" in window && Notification.permission === "default";
+  el.budgetAlertBtn.classList.toggle("hidden", !canAsk);
+}
+
+async function enableBudgetAlerts() {
+  await Notification.requestPermission();
+  updateBudgetAlertButton();
+  await registerPushToken();
+}
+
+/**
+ * この端末の宛先を settings/pushTokens に足す。宛先はブラウザの都合で変わることが
+ * あるので、ログインのたびに登録し直す (同じものは arrayUnion で重ならない)。
+ */
+async function registerPushToken() {
+  if (!fcmVapidKey || !("Notification" in window) || Notification.permission !== "granted") return;
+  const uid = currentUid;
+  try {
+    const messagingApi = await import(`${FIREBASE_CDN}/firebase-messaging.js`);
+    if (!(await messagingApi.isSupported())) return;
+    const registration = await navigator.serviceWorker.register("sw.js");
+    const token = await messagingApi.getToken(messagingApi.getMessaging(firebaseApp), {
+      vapidKey: fcmVapidKey,
+      serviceWorkerRegistration: registration,
+    });
+    if (!token || uid !== currentUid) return;
+    await firestoreApi.setDoc(pushTokensDocRef(uid), { tokens: firestoreApi.arrayUnion(token) }, { merge: true });
+  } catch (err) {
+    console.error("通知の登録に失敗しました:", err);
+  }
 }
 
 /**
@@ -4780,11 +4761,6 @@ function parseCardUsageFormat(rows) {
 //   カード利用履歴CSV        : ﾌｧﾐﾘｰﾏｰﾄ / ＢＯＯＴＨ
 // のように別の表記で出てくる。生の文字列のまま比べると、同じ取引が別物に見えて
 // 二重に登録されてしまうため、比較の前に半角カナ・全角英数・空白を揃える。
-function normalizeMemo(memo) {
-  return toHalfWidthAscii(String(memo || ""))
-    .replace(/\s+/g, "")
-    .toUpperCase();
-}
 
 // 取り込み対象のうち、既存の記録と (日付・種別・カテゴリ・金額・店名) が
 // 一致するものを重複とみなしてスキップする。同じCSVを誤って2回読み込んだ
@@ -5619,6 +5595,8 @@ function setupAppEventListeners() {
     if (el.budgetForm.classList.contains("hidden")) openBudgetForm();
     else closeBudgetForm();
   });
+  el.budgetAlertBtn.addEventListener("click", enableBudgetAlerts);
+  updateBudgetAlertButton();
   el.cancelBudgetBtn.addEventListener("click", closeBudgetForm);
   el.budgetForm.addEventListener("submit", handleBudgetSubmit);
 
@@ -5977,7 +5955,7 @@ async function main() {
 
   let firebaseConfig;
   try {
-    ({ firebaseConfig } = await import("./firebase-config.js"));
+    ({ firebaseConfig, fcmVapidKey = null } = await import("./firebase-config.js"));
   } catch (err) {
     // ファイルが無い場合と、あるが構文エラーの場合を区別する。
     // 一緒くたにすると「作成してください」と案内された既存ファイルを
@@ -5999,9 +5977,9 @@ async function main() {
     googleClientId = null;
   }
 
-  const app = appModule.initializeApp(firebaseConfig);
-  auth = authApi.getAuth(app);
-  db = firestoreApi.initializeFirestore(app, {
+  firebaseApp = appModule.initializeApp(firebaseConfig);
+  auth = authApi.getAuth(firebaseApp);
+  db = firestoreApi.initializeFirestore(firebaseApp, {
     localCache: firestoreApi.persistentLocalCache({
       tabManager: firestoreApi.persistentMultipleTabManager(),
     }),

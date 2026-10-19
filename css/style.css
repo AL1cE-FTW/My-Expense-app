@@ -555,6 +555,12 @@ body {
   margin-bottom: 16px;
 }
 
+.card-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .card-head-note {
   font-size: 0.75rem;
   color: var(--faint);

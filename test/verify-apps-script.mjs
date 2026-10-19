@@ -6,6 +6,8 @@
 // - 新しいメールだけを「仮」の記録として書き、取り込み済みメールを記録すること
 // - 確定済み・登録済みの取引を二重に入れないこと (アプリと同じ判定)
 // - 設定漏れ・ログイン失敗・同時実行のときの振る舞い
+// - 予算の使用率通知: 集計がアプリ (js/budget-usage.js) と一字一句同じこと、
+//   段階ごとに1回だけ送ること、届かなかったら送り直すこと
 import fs from "fs";
 import path from "path";
 import vm from "vm";
@@ -32,6 +34,14 @@ assert(
   "apps-script/vpass-import.gs の読み取り部分が js/vpass-mail.js と食い違っている。両方を同じに直すこと"
 );
 
+// 集計と使用率通知の判定も一字一句同じ
+const usageSource = fs.readFileSync(path.join(root, "js", "budget-usage.js"), "utf-8");
+const usageShared = usageSource.slice(usageSource.indexOf("export const CARD_REFUND_CATEGORY")).replace(/export /g, "");
+assert(
+  scriptSource.includes(usageShared.trim()),
+  "apps-script/vpass-import.gs の集計部分が js/budget-usage.js と食い違っている。両方を同じに直すこと"
+);
+
 // エディタの「実行」で最初に選ばれているのは、ファイルの一番上の関数。
 // そこが引数の要る関数だと、そのまま実行してエラーになる (実際に起きた)
 const firstFunction = scriptSource.match(/^function (\w+)/m)?.[1];
@@ -49,11 +59,13 @@ const IMPORT_DOC = `${USER}/settings/gmailImport`;
 // 本物の UUID と同じく、実行をまたいでも重ならない
 let uuid = 0;
 
-function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails = false }) {
+function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails = false, pushStatus = () => 200 }) {
   const fetchLog = [];
+  const pushes = [];
   const value = (v) => {
     if (typeof v === "string") return { stringValue: v };
     if (typeof v === "number") return { integerValue: String(v) };
+    if (typeof v === "boolean") return { booleanValue: v };
     if (Array.isArray(v)) return { arrayValue: { values: v.map(value) } };
     return { nullValue: null };
   };
@@ -62,6 +74,7 @@ function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails
     for (const [k, v] of Object.entries(fields || {})) {
       if ("stringValue" in v) out[k] = v.stringValue;
       else if ("integerValue" in v) out[k] = Number(v.integerValue);
+      else if ("booleanValue" in v) out[k] = v.booleanValue;
       else if ("arrayValue" in v) out[k] = (v.arrayValue.values || []).map((x) => x.stringValue);
       else out[k] = null;
     }
@@ -81,6 +94,18 @@ function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails
           return response(400, { error: { message: "INVALID_LOGIN_CREDENTIALS" } });
         }
         return response(200, { idToken: "id-token", localId: UID });
+      }
+      if (url === "https://oauth2.googleapis.com/token") {
+        assert(options.payload.assertion.split(".").length === 3, "署名付きの JWT で鍵をもらうはず");
+        return response(200, { access_token: "fcm-token" });
+      }
+      if (url.startsWith("https://fcm.googleapis.com/")) {
+        assert(url === `https://fcm.googleapis.com/v1/projects/${PROJECT}/messages:send`, "送り先: " + url);
+        assert(options.headers?.Authorization === "Bearer fcm-token", "FCM にはサービスアカウントの鍵を付けるはず");
+        const { message } = JSON.parse(options.payload);
+        const code = pushStatus(message.token);
+        if (code === 200) pushes.push({ token: message.token, ...message.data });
+        return response(code, code === 200 ? { name: "sent" } : { error: { code } });
       }
       assert(options.headers?.Authorization === "Bearer id-token", "Firestore にはログインで得た鍵を付けるはず");
       const p = url.replace("https://firestore.googleapis.com/v1/", "");
@@ -154,7 +179,19 @@ function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails
     LockService: {
       getScriptLock: () => ({ tryLock: () => !lockBusy, releaseLock() {} }),
     },
-    Utilities: { getUuid: () => `${String(++uuid).padStart(8, "0")}-aaaa-4bbb-8ccc-dddddddddddd` },
+    Utilities: {
+      getUuid: () => `${String(++uuid).padStart(8, "0")}-aaaa-4bbb-8ccc-dddddddddddd`,
+      formatDate: (date, tz, format) => {
+        assert(tz === "Asia/Tokyo" && format === "yyyy-MM", "今月はスクリプトのタイムゾーンで決めるはず");
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      },
+      base64EncodeWebSafe: (data) => Buffer.from(data).toString("base64url"),
+      computeRsaSha256Signature: (input, key) => {
+        assert(key === "-----PRIVATE KEY-----", "サービスアカウントの秘密鍵で署名するはず");
+        return [1, 2, 3];
+      },
+    },
+    Session: { getScriptTimeZone: () => "Asia/Tokyo" },
     ScriptApp: {
       getProjectTriggers: () => triggers,
       deleteTrigger: (t) => triggers.splice(triggers.indexOf(t), 1),
@@ -169,7 +206,7 @@ function makeEnv({ props, mails, docs = new Map(), lockBusy = false, signInFails
   };
   vm.createContext(context);
   vm.runInContext(scriptSource, context, { filename: "vpass-import.gs" });
-  return { context, docs, fetchLog, triggers, plain };
+  return { context, docs, fetchLog, triggers, plain, pushes };
 }
 
 const PROPS = {
@@ -330,6 +367,80 @@ assert(env.plain(docs.get(IMPORT_DOC)).importedIds.includes("m4"), "飛ばした
   if (r.mails !== 150 || r.added !== 150) {
     throw new Error("100件を超えても全部読むはず: " + JSON.stringify(r));
   }
+}
+
+// ---------------------------------------------------------------------------
+// 8. 予算の使用率通知
+// ---------------------------------------------------------------------------
+{
+  const NOW = new Date();
+  const MONTH = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
+  const ALERT_PROPS = {
+    ...PROPS,
+    FCM_SERVICE_ACCOUNT: JSON.stringify({ client_email: "fcm@example.iam.gserviceaccount.com", private_key: "-----PRIVATE KEY-----" }),
+  };
+  const ALERTS_DOC = `${USER}/settings/budgetAlerts`;
+  const TOKENS_DOC = `${USER}/settings/pushTokens`;
+  const fields = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, typeof v === "string" ? { stringValue: v } : typeof v === "boolean" ? { booleanValue: v } : Array.isArray(v) ? { arrayValue: { values: v.map((x) => ({ stringValue: x })) } } : { integerValue: String(v) }]));
+  let n = 0;
+  const addEntry = (d, e) => d.set(`${USER}/entries/e${++n}`, fields({ date: `${MONTH}-01`, type: "expense", ...e }));
+  const run = (d, opts = {}) => {
+    const e = makeEnv({ props: ALERT_PROPS, mails: [], docs: d, ...opts });
+    return { r: e.context.importNewCardMails(), e };
+  };
+
+  const d = new Map();
+  d.set(`${USER}/settings/budget`, fields({ 食費: 10000, 交通: 10000 }));
+  d.set(TOKENS_DOC, fields({ tokens: ["phone", "old-phone"] }));
+  addEntry(d, { category: "食費", amount: 8500 });
+  addEntry(d, { category: "交通", amount: 1000 });
+  // まだ返ってきていない立替は数えない (アプリと同じ)
+  addEntry(d, { category: "交通", amount: 50000, advance: true });
+
+  // FCM の鍵が無ければ何もしない
+  {
+    const e = makeEnv({ props: PROPS, mails: [], docs: d });
+    assert(e.context.importNewCardMails().alerts === "off" && e.pushes.length === 0, "鍵が無ければ通知しないはず");
+  }
+
+  // 食費 85% → 1回送る。もう届かない宛先 (404) は消す
+  let { r, e } = run(d, { pushStatus: (t) => (t === "old-phone" ? 404 : 200) });
+  assert(e.pushes.length === 1 && e.pushes[0].token === "phone" && e.pushes[0].title === "食費の予算を85%使いました" &&
+    e.pushes[0].body.includes("残り ¥1,500") && e.pushes[0].tag === "budget-食費", "85% の通知: " + JSON.stringify(e.pushes));
+  assert(JSON.stringify(e.plain(d.get(TOKENS_DOC)).tokens) === '["phone"]', "届かない宛先は消すはず");
+  let sent = e.plain(d.get(ALERTS_DOC));
+  assert(sent.month === MONTH && sent.keys.includes("食費:0.8") && sent.keys.includes("食費:0.5"), "通知済みを残すはず: " + JSON.stringify(sent));
+
+  // 同じ段階は2回送らない
+  ({ e } = run(d));
+  assert(e.pushes.length === 0, "同じ段階は1回だけのはず: " + JSON.stringify(e.pushes));
+
+  // 交通が 100%、予算全体 (18,500 / 20,000) が 80% を超える
+  addEntry(d, { category: "交通", amount: 9000 });
+  ({ e } = run(d));
+  const titles = e.pushes.map((p) => p.title).sort();
+  assert(JSON.stringify(titles) === JSON.stringify(["予算全体の予算を93%使いました", "交通の予算を100%使いました"]),
+    "交通と予算全体の通知: " + JSON.stringify(titles));
+  assert(e.pushes.find((p) => p.tag === "budget-交通").body.startsWith("¥0 オーバー"), "100% の本文");
+
+  // 1台にも届かなかったら通知済みにしない (次の実行で送り直す)
+  addEntry(d, { category: "食費", amount: 2000 });
+  ({ r, e } = run(d, { pushStatus: () => 500 }));
+  assert(r.alerts.delivered === 0 && !e.plain(d.get(ALERTS_DOC)).keys.includes("食費:1"), "失敗したら通知済みにしないはず");
+  ({ e } = run(d));
+  // 食費 10,500 で予算全体 (20,500 / 20,000) も 100% を超える
+  assert(JSON.stringify(e.pushes.map((p) => p.title).sort()) === JSON.stringify(["予算全体の予算を102%使いました", "食費の予算を105%使いました"]),
+    "次の実行で送り直すはず: " + JSON.stringify(e.pushes));
+
+  // 月が変わったら (先月の印しか無ければ) 送り直す
+  d.set(ALERTS_DOC, fields({ month: "2000-01", keys: ["食費:1", "食費:0.8", "食費:0.5"] }));
+  ({ e } = run(d));
+  assert(e.pushes.some((p) => p.tag === "budget-食費"), "月が変わったら送り直すはず");
+
+  // 通知を許可した端末が無ければ、記録を読まない
+  const empty = new Map([[`${USER}/settings/budget`, fields({ 食費: 1 })]]);
+  ({ r, e } = run(empty));
+  assert(r.alerts === "no devices" && !e.fetchLog.some((f) => f.url.endsWith(":runQuery")), "端末が無ければ何もしないはず");
 }
 
 console.log("ALL APPS SCRIPT CHECKS PASSED");

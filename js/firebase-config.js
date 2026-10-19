@@ -11,3 +11,8 @@ export const firebaseConfig = {
   messagingSenderId: "774281940671",
   appId: "1:774281940671:web:07736e8ac56ce0123fc00a",
 };
+
+// 予算の使用率通知 (プッシュ通知) を使うときだけ設定する。
+// Firebase コンソール →「プロジェクトの設定」→「Cloud Messaging」→
+// 「ウェブプッシュ証明書」で作った鍵ペアの公開鍵 (README の「予算の使用率通知」参照)。
+// export const fcmVapidKey = "YOUR_VAPID_KEY";
