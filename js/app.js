@@ -11,6 +11,7 @@ import {
   describePayslipPayload,
   interpretPayslipImport,
 } from "./payslip-import.js";
+import { dueRecurring, nextMonth } from "./recurring.js";
 import {
   CARD_REFUND_CATEGORY,
   computeAdvanceFlowIds,
@@ -223,6 +224,9 @@ let unsubscribeIncomeBudget = null;
 // 覚えておき、次からその店はそのカテゴリで取り込む。キーは normalizeMemo した店名
 let merchantCategories = {};
 let unsubscribeMerchantCategories = null;
+// 固定費 (settings/recurring)。毎月その日を過ぎてアプリを開くと記録される
+let recurringItems = {};
+let unsubscribeRecurring = null;
 let authMode = "login";
 
 // 記録一覧の並び替え
@@ -395,6 +399,8 @@ const el = {
   entryMemo: document.getElementById("entry-memo"),
   advanceToggle: document.getElementById("advance-toggle"),
   entryAdvance: document.getElementById("entry-advance"),
+  entryRecurring: document.getElementById("entry-recurring"),
+  recurringList: document.getElementById("recurring-list"),
   advanceOutstandingTotal: document.getElementById("advance-outstanding-total"),
   advanceList: document.getElementById("advance-list"),
   advanceSettleModal: document.getElementById("advance-settle-modal"),
@@ -514,6 +520,11 @@ function showAuthScreen() {
     unsubscribeMerchantCategories = null;
   }
   merchantCategories = {};
+  if (unsubscribeRecurring) {
+    unsubscribeRecurring();
+    unsubscribeRecurring = null;
+  }
+  recurringItems = {};
   entries = [];
   budgets = {};
   incomeBudgets = {};
@@ -533,6 +544,7 @@ function showApp(user) {
   subscribeIncomeBudget(user.uid);
   subscribeAccounts(user.uid);
   subscribeMerchantCategories(user.uid);
+  subscribeRecurring(user.uid);
   resetForm();
   closeBudgetForm();
   closeIncomeBudgetForm();
@@ -698,6 +710,92 @@ function applyLearnedCategories(list) {
   for (const e of list) {
     const learned = e.type === "expense" ? merchantCategories[normalizeMemo(e.memo)] : null;
     if (learned && CATEGORIES.expense.includes(learned)) e.category = learned;
+  }
+}
+
+function recurringDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/recurring`);
+}
+
+function subscribeRecurring(uid) {
+  if (unsubscribeRecurring) unsubscribeRecurring();
+  unsubscribeRecurring = firestoreApi.onSnapshot(
+    recurringDocRef(uid),
+    (snap) => {
+      recurringItems = snap.exists() ? snap.data() : {};
+      renderRecurring();
+      postDueRecurring();
+    },
+    (error) => {
+      console.error(error);
+      alert("固定費の取得に失敗しました: " + error.message);
+    }
+  );
+}
+
+// 来ていた月の固定費を記録し、次の月へ進める (1回のまとめ書き込み)。
+// 記録のIDを「固定費のID+月」にしているので、2台で同時に開いても二重にならない
+function postDueRecurring() {
+  const { posts, next } = dueRecurring(recurringItems, new Date());
+  if (posts.length === 0) return;
+  const batch = firestoreApi.writeBatch(db);
+  const createdAt = nowTimestamp();
+  for (const { id, item, month, date } of posts) {
+    batch.set(firestoreApi.doc(db, `users/${currentUid}/entries/recurring-${id}-${month}`), {
+      date,
+      type: "expense",
+      category: item.category,
+      amount: item.amount,
+      memo: item.memo || "",
+      settlement: item.settlement || "bank",
+      recurring: id,
+      createdAt,
+    });
+  }
+  for (const [id, month] of Object.entries(next)) {
+    batch.update(recurringDocRef(currentUid), { [id]: { ...recurringItems[id], next: month } });
+  }
+  whenSynced(batch.commit(), "固定費の記録に失敗しました");
+}
+
+function renderRecurring() {
+  const items = Object.entries(recurringItems).sort(([, a], [, b]) => a.day - b.day);
+  el.recurringList.replaceChildren();
+  if (items.length === 0) {
+    const p = document.createElement("p");
+    p.className = "empty-message";
+    p.textContent =
+      "固定費はありません。支出を追加するときに「毎月この日に記録する」を付けると登録できます。";
+    el.recurringList.appendChild(p);
+    return;
+  }
+  for (const [id, item] of items) {
+    const row = document.createElement("div");
+    row.className = "advance-row";
+    const dayEl = document.createElement("span");
+    dayEl.className = "advance-row-date";
+    dayEl.textContent = `${item.day}日`;
+    const categoryEl = document.createElement("span");
+    categoryEl.textContent = item.category;
+    const memoEl = document.createElement("span");
+    memoEl.className = "advance-row-memo";
+    memoEl.textContent = item.memo || "";
+    const amountEl = document.createElement("span");
+    amountEl.className = "advance-row-amount";
+    amountEl.textContent = formatYen(item.amount);
+    const stopBtn = document.createElement("button");
+    stopBtn.type = "button";
+    stopBtn.className = "icon-btn";
+    stopBtn.append(createIcon("x"), "やめる");
+    stopBtn.setAttribute("aria-label", `毎月${item.day}日 ${item.category} ${formatYen(item.amount)} の固定費をやめる`);
+    stopBtn.addEventListener("click", () => {
+      if (!confirm(`毎月${item.day}日の「${item.memo || item.category}」(${formatYen(item.amount)}) の自動記録をやめますか?\n(これまでに記録した分は残ります)`)) return;
+      const rest = { ...recurringItems };
+      delete rest[id];
+      whenSynced(firestoreApi.setDoc(recurringDocRef(currentUid), rest), "固定費の削除に失敗しました");
+    });
+    row.append(dayEl, categoryEl, memoEl, amountEl, stopBtn);
+    el.recurringList.appendChild(row);
   }
 }
 
@@ -3875,6 +3973,9 @@ function updateAdvanceVisibility() {
   const isExpense = selectedType() === "expense";
   el.advanceToggle.classList.toggle("hidden", !isExpense);
   if (!isExpense) el.entryAdvance.checked = false;
+  // 固定費の登録は追加のときだけ (編集した記録を固定費にはしない)
+  el.entryRecurring.closest("label").classList.toggle("hidden", Boolean(el.entryId.value));
+  if (!isExpense || el.entryId.value) el.entryRecurring.checked = false;
 }
 
 // 内訳が入力されていれば payslip オブジェクトを、入力されていなければ null を返す
@@ -4268,6 +4369,25 @@ async function handleSubmit(event) {
     return;
   }
   whenSynced(saving.written, "保存に失敗しました (入力した内容は同期されていません)");
+  if (!editingId && type === "expense" && el.entryRecurring.checked) {
+    whenSynced(
+      firestoreApi.setDoc(
+        recurringDocRef(currentUid),
+        {
+          [crypto.randomUUID()]: {
+            day: Number(data.date.slice(8)),
+            category: data.category,
+            amount: data.amount,
+            memo: data.memo,
+            settlement: data.settlement,
+            next: nextMonth(data.date.slice(0, 7)),
+          },
+        },
+        { merge: true }
+      ),
+      "固定費の登録に失敗しました"
+    );
+  }
   if (learnCategory) {
     whenSynced(
       firestoreApi.setDoc(

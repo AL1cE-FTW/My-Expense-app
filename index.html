@@ -240,6 +240,10 @@
               <input type="checkbox" id="entry-advance">
               <span>立替払い(あとで会社などから返金される)</span>
             </label>
+            <label class="advance-checkbox">
+              <input type="checkbox" id="entry-recurring">
+              <span>毎月この日に記録する (固定費。カード払いは明細から入るので不要)</span>
+            </label>
           </div>
 
           <div class="payslip-section hidden" id="payslip-section">
@@ -511,6 +515,12 @@
           <strong id="advance-outstanding-total">¥0</strong>
         </div>
         <div id="advance-list"></div>
+      </section>
+
+      <!-- 固定費 (毎月自動で記録) -->
+      <section class="card" id="recurring-section" data-panel="budget">
+        <div class="card-head"><h2>固定費 (毎月自動で記録)</h2></div>
+        <div id="recurring-list"></div>
       </section>
 
       <!-- 帳簿 (簿記の見方) -->
