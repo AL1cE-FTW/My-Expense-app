@@ -76,6 +76,10 @@ const MAIL_MULTI = `AL1cE　様
 `;
 
 // 認証を1回だけ失敗させられるモック
+// 本物の Google のスクリプトが読み込めると、下の偽物の window.google を上書きする
+await page.route("https://accounts.google.com/gsi/client", (route) =>
+  route.fulfill({ status: 200, contentType: "text/javascript", body: "" })
+);
 await page.addInitScript(() => {
   window.google = {
     accounts: {

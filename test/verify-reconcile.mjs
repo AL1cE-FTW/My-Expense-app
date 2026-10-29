@@ -74,6 +74,10 @@ const MAIL = `AL1cE　様
 ◇利用金額：900円
 `;
 
+// 本物の Google のスクリプトが読み込めると、下の偽物の window.google を上書きする
+await page.route("https://accounts.google.com/gsi/client", (route) =>
+  route.fulfill({ status: 200, contentType: "text/javascript", body: "" })
+);
 await page.addInitScript(() => {
   window.google = {
     accounts: {
@@ -478,6 +482,32 @@ await page.setInputFiles("#import-csv-input", twicePath);
 await page.waitForTimeout(900);
 const twiceRows = await page.locator("#entry-list tr", { hasText: "二度買いの店" }).count();
 if (twiceRows !== 2) throw new Error("同日同額の2回目の買い物が捨てられている。rows=" + twiceRows);
+
+// ---------------------------------------------------------------------------
+// 取り込んだ記録のカテゴリを直すと、その店を覚えて次の取り込みから使う
+// ---------------------------------------------------------------------------
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-reconcile-test@example.com/entries/learn-pending", {
+    date, type: "expense", category: "その他支出", amount: 800, memo: "ｶﾞｸｼｭｳ ｼｮｳﾃﾝ",
+    source: "gmail", createdAt: Date.now(),
+  });
+}, `${CUR_Y}-${MM}-27`);
+await page.waitForTimeout(300);
+await rowFor("ｶﾞｸｼｭｳ").locator("button", { hasText: "編集" }).click();
+await page.waitForTimeout(300);
+await page.selectOption("#entry-category", "趣味・娯楽");
+await page.click("#submit-btn");
+await page.waitForTimeout(500);
+const learnPath = path.join(scratch, "reconcile-learn.csv");
+fs.writeFileSync(learnPath, [
+  "見本　太郎　様,1234-56**-****-****,Ｏｌｉｖｅ／クレジット",
+  `${CUR_Y}/${MM}/28,ｶﾞｸｼｭｳ ｼｮｳﾃﾝ,1200,１,１,1200,`,
+  ",,,,,1200,",
+].join("\n"), "utf-8");
+await page.setInputFiles("#import-csv-input", learnPath);
+await page.waitForTimeout(900);
+const learnedRow = await page.locator("#entry-list tr", { hasText: "¥1,200" }).textContent();
+if (!learnedRow.includes("趣味・娯楽")) throw new Error("直したカテゴリで取り込むはず: " + learnedRow);
 
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));

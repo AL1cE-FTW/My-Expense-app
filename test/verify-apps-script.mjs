@@ -370,6 +370,26 @@ assert(env.plain(docs.get(IMPORT_DOC)).importedIds.includes("m4"), "飛ばした
 }
 
 // ---------------------------------------------------------------------------
+// 8. アプリで直した店のカテゴリ (settings/merchantCategories) で取り込む
+// ---------------------------------------------------------------------------
+{
+  const { parseVpassEmails } = await import("../js/vpass-mail.js");
+  const { normalizeMemo } = await import("../js/budget-usage.js");
+  const famima = parseVpassEmails(MAIL_TWO).find((x) => x.amount === 540);
+  const d = new Map([[
+    `projects/${PROJECT}/databases/(default)/documents/users/${UID}/settings/merchantCategories`,
+    { [normalizeMemo(famima.memo)]: { stringValue: "外食" } },
+  ]]);
+  const e = makeEnv({ props: PROPS, docs: d, mails: [[{ id: "learn1", body: MAIL_TWO }]] });
+  e.context.importNewCardMails();
+  const cats = [...d.entries()].filter(([n]) => n.includes("/entries/")).map(([, f]) => [f.amount.integerValue, f.category.stringValue]);
+  const learned = cats.find(([a]) => a === "540");
+  const other = cats.find(([a]) => a === "1000");
+  if (!learned || learned[1] !== "外食") throw new Error("覚えたカテゴリで入るはず: " + JSON.stringify(cats));
+  if (!other || other[1] === "外食") throw new Error("覚えていない店はそのまま: " + JSON.stringify(cats));
+}
+
+// ---------------------------------------------------------------------------
 // 8. 予算の使用率通知
 // ---------------------------------------------------------------------------
 {

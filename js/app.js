@@ -219,6 +219,10 @@ let unsubscribeAccounts = null;
 // 口座の期首残高とカードの締め日・支払日 (settings/accounts)
 let accountSettings = {};
 let unsubscribeIncomeBudget = null;
+// 店名→カテゴリ (settings/merchantCategories)。取り込んだ記録のカテゴリを直すと
+// 覚えておき、次からその店はそのカテゴリで取り込む。キーは normalizeMemo した店名
+let merchantCategories = {};
+let unsubscribeMerchantCategories = null;
 let authMode = "login";
 
 // 記録一覧の並び替え
@@ -505,6 +509,11 @@ function showAuthScreen() {
     unsubscribeAccounts();
     unsubscribeAccounts = null;
   }
+  if (unsubscribeMerchantCategories) {
+    unsubscribeMerchantCategories();
+    unsubscribeMerchantCategories = null;
+  }
+  merchantCategories = {};
   entries = [];
   budgets = {};
   incomeBudgets = {};
@@ -523,6 +532,7 @@ function showApp(user) {
   subscribeBudget(user.uid);
   subscribeIncomeBudget(user.uid);
   subscribeAccounts(user.uid);
+  subscribeMerchantCategories(user.uid);
   resetForm();
   closeBudgetForm();
   closeIncomeBudgetForm();
@@ -666,6 +676,29 @@ function subscribeIncomeBudget(uid) {
 
 async function saveIncomeBudgetsToDb(newBudgets) {
   await firestoreApi.setDoc(incomeBudgetDocRef(currentUid), newBudgets);
+}
+
+function merchantCategoriesDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/merchantCategories`);
+}
+
+function subscribeMerchantCategories(uid) {
+  if (unsubscribeMerchantCategories) unsubscribeMerchantCategories();
+  unsubscribeMerchantCategories = firestoreApi.onSnapshot(
+    merchantCategoriesDocRef(uid),
+    (snap) => {
+      merchantCategories = snap.exists() ? snap.data() : {};
+    },
+    (error) => console.error(error)
+  );
+}
+
+// 覚えた店のカテゴリで上書きする。消したカテゴリを覚えていたら使わない
+function applyLearnedCategories(list) {
+  for (const e of list) {
+    const learned = e.type === "expense" ? merchantCategories[normalizeMemo(e.memo)] : null;
+    if (learned && CATEGORIES.expense.includes(learned)) e.category = learned;
+  }
 }
 
 function accountsDocRef(uid) {
@@ -4221,6 +4254,12 @@ async function handleSubmit(event) {
     }
   }
 
+  // 取り込んだカードの記録のカテゴリを直したら、その店のカテゴリとして覚える
+  const before = editingId ? entries.find((e) => e.id === editingId) : null;
+  const learnCategory =
+    before && isCardEntry(before) && before.type === "expense" && type === "expense" &&
+    data.memo && before.category !== data.category;
+
   let saving;
   try {
     saving = saveEntryWithLinked({ editingId, data, refundToDelete });
@@ -4229,6 +4268,16 @@ async function handleSubmit(event) {
     return;
   }
   whenSynced(saving.written, "保存に失敗しました (入力した内容は同期されていません)");
+  if (learnCategory) {
+    whenSynced(
+      firestoreApi.setDoc(
+        merchantCategoriesDocRef(currentUid),
+        { [normalizeMemo(data.memo)]: data.category },
+        { merge: true }
+      ),
+      "店のカテゴリを覚えられませんでした"
+    );
+  }
 
   // ポップアップ (またはPCの右側の入力欄) から編集していたか
   // (resetForm でフォームが元に戻る前に見る)
@@ -5029,6 +5078,7 @@ function importCsv(file) {
 
     // 確定明細なら、先にメールから取り込んだ仮の記録と突き合わせる。
     // 残った行(仮の記録に対応が無かったもの)だけを新規追加の候補にする。
+    if (isCardStatement) applyLearnedCategories(imported);
     const reconciliation = isCardStatement ? reconcileCardStatement(imported) : null;
     const toAdd = reconciliation ? reconciliation.additions : imported;
 
@@ -5360,6 +5410,7 @@ async function importFromGmail() {
       return;
     }
 
+    applyLearnedCategories(imported);
     // 確定明細を先に取り込んでいた場合、その取引の速報が後追いで入ってくる。
     const { kept, confirmedCount } = dropAlreadyConfirmed(imported);
 
@@ -5391,7 +5442,7 @@ async function importFromGmail() {
           : ")";
     }
     message +=
-      "\n\nカテゴリは自動推測です。あとで必要に応じて編集してください。" +
+      "\n\nカテゴリは自動推測です。直すと、次からその店は直したカテゴリで入ります。" +
       "\n取り込んだ記録は「仮」として入ります。カード利用履歴CSVを取り込むと確定します。";
     if (!confirm(message)) return;
 
