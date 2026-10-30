@@ -2106,6 +2106,32 @@ select.filter-select {
   text-align: right;
 }
 
+/* 要確認: 日付・内容と理由・金額・直す・OK */
+.review-row {
+  grid-template-columns: 3.4em minmax(0, 1fr) auto auto;
+}
+
+.review-row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.review-row-text {
+  display: grid;
+  min-width: 0;
+}
+
+.review-row-text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row-reason {
+  color: var(--muted);
+}
+
 .advance-settle-summary {
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -3842,6 +3868,15 @@ kbd {
 
   .advance-row-memo {
     display: none;
+  }
+
+  /* スマホでは「直す」「このままでOK」を下の段に回す */
+  .review-row {
+    grid-template-columns: 3.4em minmax(0, 1fr) auto;
+  }
+
+  .review-row-actions {
+    grid-column: 2 / -1;
   }
 
   /* 見出しの右に「口座を設定」、その下の段に表の切り替え */

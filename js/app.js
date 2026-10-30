@@ -12,6 +12,7 @@ import {
   interpretPayslipImport,
 } from "./payslip-import.js";
 import { dueRecurring, nextMonth } from "./recurring.js";
+import { reviewItems } from "./review.js";
 import {
   CARD_REFUND_CATEGORY,
   computeAdvanceFlowIds,
@@ -401,6 +402,9 @@ const el = {
   entryAdvance: document.getElementById("entry-advance"),
   entryRecurring: document.getElementById("entry-recurring"),
   recurringList: document.getElementById("recurring-list"),
+  reviewSection: document.getElementById("review-section"),
+  reviewTitle: document.getElementById("review-title"),
+  reviewList: document.getElementById("review-list"),
   advanceOutstandingTotal: document.getElementById("advance-outstanding-total"),
   advanceList: document.getElementById("advance-list"),
   advanceSettleModal: document.getElementById("advance-settle-modal"),
@@ -758,6 +762,53 @@ function postDueRecurring() {
   whenSynced(batch.commit(), "固定費の記録に失敗しました");
 }
 
+// 要確認の記録。見ている月に関係なく、直近の記録から拾う
+function renderReview() {
+  const items = reviewItems(entries, toDateInputValue(new Date()));
+  el.reviewSection.classList.toggle("hidden", items.length === 0);
+  el.reviewTitle.textContent = `要確認 (${items.length}件)`;
+  el.reviewList.replaceChildren();
+  for (const { entry, reasons } of items.slice(0, 20)) {
+    const row = document.createElement("div");
+    row.className = "advance-row review-row";
+    const dateEl = document.createElement("span");
+    dateEl.className = "advance-row-date";
+    const [, m, d] = entry.date.split("-");
+    dateEl.textContent = `${Number(m)}/${Number(d)}`;
+    const textEl = document.createElement("span");
+    textEl.className = "review-row-text";
+    const title = document.createElement("span");
+    title.textContent = `${entry.category} ${entry.memo || ""}`;
+    const why = document.createElement("small");
+    why.className = "review-row-reason";
+    why.textContent = reasons.join("・");
+    textEl.append(title, why);
+    const amountEl = document.createElement("span");
+    amountEl.className = "advance-row-amount";
+    amountEl.textContent = formatYen(entry.amount);
+    const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.append(createIcon("pencil"), "直す");
+    editBtn.setAttribute("aria-label", `${label} を直す`);
+    editBtn.addEventListener("click", () => startEdit(entry.id));
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "icon-btn";
+    okBtn.append(createIcon("check"), "このままでOK");
+    okBtn.setAttribute("aria-label", `${label} はこのままでOK`);
+    okBtn.addEventListener("click", () =>
+      whenSynced(updateEntryInDb(entry.id, { reviewed: true }), "確認済みにできませんでした")
+    );
+    const actions = document.createElement("span");
+    actions.className = "review-row-actions";
+    actions.append(editBtn, okBtn);
+    row.append(dateEl, textEl, amountEl, actions);
+    el.reviewList.appendChild(row);
+  }
+}
+
 function renderRecurring() {
   const items = Object.entries(recurringItems).sort(([, a], [, b]) => a.day - b.day);
   el.recurringList.replaceChildren();
@@ -865,6 +916,7 @@ function render() {
   const budgetTotals = renderBudget(ownEntries, targetMultiplier);
   renderPlanActual(ownEntries, targetMultiplier, budgetTotals);
   renderAdvances();
+  renderReview();
   renderNeedWantSave(ownEntries, targetMultiplier);
   renderBookkeeping(entriesInPeriod);
   updatePayslipCopyButton();
