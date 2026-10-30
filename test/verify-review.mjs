@@ -25,7 +25,7 @@ const assert = (cond, msg) => {
     e("stale", { source: "gmail", date: "2026-08-01" }),
     e("fresh-pending", { source: "gmail", date: "2026-10-01" }),
     e("f1"), e("f2"), e("f3", { amount: 1200 }),
-    e("huge", { amount: 2733690, source: "gmail" }),
+    e("huge", { amount: 2500000, source: "gmail" }),
     e("big-small", { amount: 6000 }), // 6倍でも 1万円未満は拾わない
     e("rent", { category: "住居", amount: 25000, payslipHousingFor: "salary1" }),
     e("r1", { category: "住居", amount: 500 }), e("r2", { category: "住居", amount: 600 }), e("r3", { category: "住居", amount: 700 }),
