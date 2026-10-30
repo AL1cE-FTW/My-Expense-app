@@ -509,6 +509,16 @@ await page.waitForTimeout(900);
 const learnedRow = await page.locator("#entry-list tr", { hasText: "¥1,200" }).textContent();
 if (!learnedRow.includes("趣味・娯楽")) throw new Error("直したカテゴリで取り込むはず: " + learnedRow);
 
+// 覚えた店は一覧に出て、「忘れる」で消せる
+const merchantText = await page.textContent("#merchant-list");
+// (店名は表記ゆれを揃えた形 = 全角カナ・空白なしで覚える)
+if (!merchantText.includes("ガクシュウショウテン") || !merchantText.includes("趣味・娯楽")) {
+  throw new Error("覚えた店の一覧: " + merchantText);
+}
+await page.locator("#merchant-list .merchant-row", { hasText: "ガクシュウ" }).locator("button", { hasText: "忘れる" }).click();
+await page.waitForTimeout(400);
+if (await page.locator("#merchant-section").isVisible()) throw new Error("全部忘れたら一覧を隠す");
+
 await page.screenshot({ path: path.join(scratch, "reconcile.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL RECONCILE (確定/未確定) CHECKS PASSED");

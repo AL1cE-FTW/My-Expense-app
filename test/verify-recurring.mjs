@@ -98,6 +98,14 @@ assert((await thisMonthRow.textContent()).includes(`${now.getMonth() + 1}/1`), "
 const listText = await page.textContent("#recurring-list");
 assert(listText.includes("1日") && listText.includes("スマホ代") && listText.includes("¥3,300"), "固定費の一覧: " + listText);
 
+// 金額を変える (来月から)
+page.removeAllListeners("dialog");
+page.on("dialog", (d) => (d.type() === "prompt" ? d.accept("3,800") : d.accept()));
+await page.locator("#recurring-list button", { hasText: "金額" }).click();
+await page.waitForTimeout(400);
+assert((await page.textContent("#recurring-list")).includes("¥3,800"), "金額が変わるはず: " + (await page.textContent("#recurring-list")));
+assert((await thisMonthRow.textContent()).includes("¥3,300"), "記録済みの分は変わらない: " + (await page.textContent("#entry-list")));
+
 // 編集のときはチェックを出さない
 await thisMonthRow.locator("button", { hasText: "編集" }).click();
 await page.waitForTimeout(300);

@@ -2142,6 +2142,17 @@ select.filter-select {
   justify-content: flex-end;
 }
 
+.merchant-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.merchant-row .review-row-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .review-row-text {
   display: grid;
   min-width: 0;
@@ -3889,6 +3900,10 @@ kbd {
   /* --- 予算・立替・帳簿 --- */
   .advance-row {
     grid-template-columns: 3.4em minmax(0, 1fr) auto auto;
+  }
+
+  .merchant-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
   .advance-row-memo {

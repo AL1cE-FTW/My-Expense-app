@@ -425,6 +425,8 @@ const el = {
   entryAdvance: document.getElementById("entry-advance"),
   entryRecurring: document.getElementById("entry-recurring"),
   recurringList: document.getElementById("recurring-list"),
+  merchantSection: document.getElementById("merchant-section"),
+  merchantList: document.getElementById("merchant-list"),
   reviewSection: document.getElementById("review-section"),
   cardPaymentNote: document.getElementById("card-payment-note"),
   reviewTitle: document.getElementById("review-title"),
@@ -734,9 +736,41 @@ function subscribeMerchantCategories(uid) {
     merchantCategoriesDocRef(uid),
     (snap) => {
       merchantCategories = snap.exists() ? snap.data() : {};
+      renderMerchantCategories();
     },
     (error) => console.error(error)
   );
+}
+
+// 覚えた店とカテゴリの一覧。間違えて覚えたものを忘れさせられるように
+function renderMerchantCategories() {
+  const items = Object.entries(merchantCategories).sort(([a], [b]) => a.localeCompare(b, "ja"));
+  el.merchantSection.classList.toggle("hidden", items.length === 0);
+  el.merchantList.replaceChildren();
+  for (const [merchant, category] of items) {
+    const row = document.createElement("div");
+    row.className = "advance-row merchant-row";
+    const nameEl = document.createElement("span");
+    nameEl.className = "review-row-text";
+    nameEl.textContent = merchant;
+    const categoryEl = document.createElement("span");
+    categoryEl.textContent = category;
+    const forgetBtn = document.createElement("button");
+    forgetBtn.type = "button";
+    forgetBtn.className = "icon-btn";
+    forgetBtn.append(createIcon("x"), "忘れる");
+    forgetBtn.setAttribute("aria-label", `${merchant} のカテゴリ (${category}) を忘れる`);
+    forgetBtn.addEventListener("click", () => {
+      const rest = { ...merchantCategories };
+      delete rest[merchant];
+      whenSynced(
+        firestoreApi.setDoc(merchantCategoriesDocRef(currentUid), rest),
+        "店のカテゴリを忘れられませんでした"
+      );
+    });
+    row.append(nameEl, categoryEl, forgetBtn);
+    el.merchantList.appendChild(row);
+  }
 }
 
 // 覚えた店のカテゴリで上書きする。消したカテゴリを覚えていたら使わない
@@ -929,7 +963,36 @@ function renderRecurring() {
       delete rest[id];
       whenSynced(firestoreApi.setDoc(recurringDocRef(currentUid), rest), "固定費の削除に失敗しました");
     });
-    row.append(dayEl, categoryEl, memoEl, amountEl, stopBtn);
+    const amountBtn = document.createElement("button");
+    amountBtn.type = "button";
+    amountBtn.className = "icon-btn";
+    amountBtn.append(createIcon("pencil"), "金額");
+    amountBtn.setAttribute("aria-label", `毎月${item.day}日 ${item.category} の固定費の金額を変える`);
+    amountBtn.addEventListener("click", () => {
+      const text = prompt(
+        `「${item.memo || item.category}」の来月からの金額 (円)。これまでに記録した分は変わりません。`,
+        String(item.amount)
+      );
+      if (text === null) return;
+      const amount = Number(text.replace(/[,，円¥\s]/g, ""));
+      if (!Number.isInteger(amount) || amount <= 0) {
+        alert("金額は1以上の数で入れてください。");
+        return;
+      }
+      whenSynced(
+        // 押した時点の最新 (次に記録する月) を使う。描いたときの item だと古いことがある
+        firestoreApi.setDoc(
+          recurringDocRef(currentUid),
+          { [id]: { ...recurringItems[id], amount } },
+          { merge: true }
+        ),
+        "固定費の金額を変えられませんでした"
+      );
+    });
+    const actions = document.createElement("span");
+    actions.className = "review-row-actions";
+    actions.append(amountBtn, stopBtn);
+    row.append(dayEl, categoryEl, memoEl, amountEl, actions);
     el.recurringList.appendChild(row);
   }
 }
