@@ -226,6 +226,7 @@ function runImport_(cfg, auth) {
 
   const parsed = [];
   for (const message of newMessages) parsed.push(...parseVpassEmails(message.getPlainBody() || ""));
+  applyLearnedCategories_(parsed, getMerchantCategories_(cfg, auth, `${userPath}/settings/merchantCategories`));
   const newIds = newMessages.map((m) => m.getId());
 
   let toAdd = [];
@@ -648,6 +649,20 @@ function getImportedIds_(cfg, auth, importDocName) {
   if (!doc) return [];
   const value = doc.fields && doc.fields.importedIds;
   return value ? fromValue_(value) || [] : [];
+}
+
+// アプリで取り込んだ記録のカテゴリを直すと、店名→カテゴリが settings/merchantCategories に
+// 残る (キーは normalizeMemo した店名)。アプリの applyLearnedCategories と同じく上書きする
+function getMerchantCategories_(cfg, auth, docName) {
+  const doc = firestore_(cfg, auth, "get", docName);
+  return doc && doc.fields ? fromFields_(doc.fields) : {};
+}
+
+function applyLearnedCategories_(list, learned) {
+  for (const e of list) {
+    const category = e.type === "expense" ? learned[normalizeMemo(e.memo)] : null;
+    if (typeof category === "string" && category) e.category = category;
+  }
 }
 
 function queryEntriesSince_(cfg, auth, userPath, minDate) {
