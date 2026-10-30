@@ -108,6 +108,27 @@ await page.click("#submit-btn");
 await page.waitForTimeout(500);
 assert(!(await page.isVisible("#review-section")), "カテゴリを直したら要確認から消える");
 
+// ---------------------------------------------------------------------------
+// 3. 次のカード引き落とし (末日締め・翌月26日払いの既定のまま)
+// ---------------------------------------------------------------------------
+{
+  const base = "users/uid-review-test@example.com/entries/";
+  const d = new Date();
+  const ymOf = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`;
+  await page.evaluate(([base, ym]) => {
+    window.__seedDoc(base + "card1", { date: ym + "-02", type: "expense", category: "食費", amount: 5000, memo: "カード店", source: "card" });
+    window.__seedDoc(base + "card2", { date: ym + "-03", type: "expense", category: "食費", amount: 1500, memo: "カード店2", source: "gmail" });
+    window.__seedDoc(base + "refund", { date: ym + "-04", type: "income", category: "カード返金", amount: 500, memo: "返金: カード店", source: "card" });
+    window.__seedDoc(base + "cash", { date: ym + "-05", type: "expense", category: "食費", amount: 9999, memo: "現金", settlement: "cash" });
+  }, [base, ymOf(d)]);
+  await page.waitForTimeout(400);
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 26);
+  const note = await page.textContent("#card-payment-note");
+  // 先に入れた「ナゾノミセ」「ベツノミセ」(メール、今月1日) の 800+900 も今月の利用
+  const expected = `${next.getMonth() + 1}/26 ¥7,700`;
+  assert(note.includes(expected), `引き落とし予定 (返金は引き、現金は入れない): ${note} (期待 ${expected})`);
+}
+
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL REVIEW (要確認) CHECKS PASSED");
 await browser.close();

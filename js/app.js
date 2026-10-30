@@ -164,6 +164,24 @@ const PAYSLIP_BONUS_DEDUCTION_FIELDS = [
   "incomeTax",
 ];
 
+const PAYSLIP_FIELD_LABELS = {
+  baseSalary: "本給",
+  locationAllowance: "勤務地手当",
+  commute: "通勤手当",
+  overtimePay: "時間外勤務手当",
+  salaryAdjustment: "給与調整",
+  bonusAmount: "賞与額",
+  housing: "寮社宅費",
+  healthInsurance: "健康保険",
+  nursingInsurance: "介護保険",
+  childSupportLevy: "子ども支援金",
+  pensionInsurance: "厚生年金",
+  employmentInsurance: "雇用保険料",
+  incomeTax: "所得税",
+  residentTax: "住民税",
+  otherDeductions: "その他控除",
+};
+
 // Need / Want / Save (50:30:20) の分類。ここに無い支出カテゴリはWant扱い。
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
 const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
@@ -403,6 +421,7 @@ const el = {
   entryRecurring: document.getElementById("entry-recurring"),
   recurringList: document.getElementById("recurring-list"),
   reviewSection: document.getElementById("review-section"),
+  cardPaymentNote: document.getElementById("card-payment-note"),
   reviewTitle: document.getElementById("review-title"),
   reviewList: document.getElementById("review-list"),
   advanceOutstandingTotal: document.getElementById("advance-outstanding-total"),
@@ -917,6 +936,7 @@ function render() {
   renderPlanActual(ownEntries, targetMultiplier, budgetTotals);
   renderAdvances();
   renderReview();
+  renderCardPaymentNote();
   renderNeedWantSave(ownEntries, targetMultiplier);
   renderBookkeeping(entriesInPeriod);
   updatePayslipCopyButton();
@@ -2665,6 +2685,24 @@ function renderList(monthEntries) {
 
 // 一覧の上に、表示している記録の件数と合計を出す (絞り込み中はその分だけ)。
 // 合計は上の収支と同じ数え方 (立替を除き、返金は支出の取り消し)
+// 次に来るカードの引き落とし (口座にいくら残しておけばいいか)。帳簿と同じ計算で、
+// 締め日・支払日は「口座を設定」の値。仮の記録も含む
+function renderCardPaymentNote() {
+  const upcoming = cardPaymentJournal(toDateInputValue(new Date()), "9999-12-31")
+    .map((j) => ({ date: j.date, amount: j.lines[0].side === "debit" ? j.lines[0].amount : -j.lines[0].amount }))
+    .filter((p) => p.amount > 0)
+    .slice(0, 2);
+  el.cardPaymentNote.textContent = upcoming.length
+    ? "カードの引き落とし予定: " +
+      upcoming
+        .map((p) => {
+          const [, m, d] = p.date.split("-");
+          return `${Number(m)}/${Number(d)} ${formatYen(p.amount)}`;
+        })
+        .join("・")
+    : "";
+}
+
 function renderListSummary(filtered) {
   if (filtered.length === 0) {
     el.listSummary.textContent = "";
@@ -3626,7 +3664,7 @@ function setupBookTabs() {
   }
 }
 
-function payslipModalRow(label, amount, { total = false } = {}) {
+function payslipModalRow(label, amount, { total = false, signed = false } = {}) {
   const row = document.createElement("div");
   row.className = total ? "payslip-modal-row total" : "payslip-modal-row";
 
@@ -3635,10 +3673,41 @@ function payslipModalRow(label, amount, { total = false } = {}) {
 
   const valueEl = document.createElement("span");
   valueEl.className = "payslip-modal-value";
-  valueEl.textContent = formatYen(amount);
+  valueEl.textContent = (signed && amount > 0 ? "+" : "") + formatYen(amount);
 
   row.append(labelEl, valueEl);
   return row;
+}
+
+// 前回の同じ種類の明細から変わった項目。住民税 (6月)・社会保険料 (9月) の改定や、
+// 読み取りの誤りに気づけるように。前回が無ければ何も出さない
+function payslipChangeRows(entry) {
+  const p = entry.payslip;
+  const bonus = p.kind === "bonus";
+  const prev = entries
+    .filter(
+      (e) =>
+        e.id !== entry.id && e.type === "income" && e.payslip && e.date < entry.date &&
+        (bonus ? e.payslip.kind === "bonus" : e.payslip.kind !== "bonus" && e.payslip.baseSalary !== undefined)
+    )
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  if (!prev) return [];
+  const fields = bonus
+    ? [...PAYSLIP_BONUS_EARNING_FIELDS, ...PAYSLIP_BONUS_DEDUCTION_FIELDS]
+    : [...PAYSLIP_SALARY_EARNING_FIELDS, ...PAYSLIP_SALARY_DEDUCTION_FIELDS];
+  const changed = fields
+    .map((f) => [f, (p[f] || 0) - (prev.payslip[f] || 0)])
+    .filter(([, diff]) => diff !== 0);
+  const [, m, d] = prev.date.split("-");
+  const rows = [payslipModalGroupLabel(`前回 (${Number(m)}/${Number(d)}) から変わった項目`)];
+  if (changed.length === 0) {
+    const none = document.createElement("p");
+    none.className = "empty-message";
+    none.textContent = "変わった項目はありません";
+    rows.push(none);
+  }
+  for (const [f, diff] of changed) rows.push(payslipModalRow(PAYSLIP_FIELD_LABELS[f], diff, { signed: true }));
+  return rows;
 }
 
 function payslipModalGroupLabel(text) {
@@ -3670,7 +3739,8 @@ function showPayslipDetailModal(entry) {
       payslipModalRow("雇用保険料", p.employmentInsurance || 0),
       payslipModalRow("所得税", p.incomeTax || 0),
       payslipModalRow("控除合計", deductions, { total: true }),
-      payslipModalRow("差引支給額(手取り)", entry.amount, { total: true })
+      payslipModalRow("差引支給額(手取り)", entry.amount, { total: true }),
+      ...payslipChangeRows(entry)
     );
   } else if (p.baseSalary !== undefined) {
     const gross = PAYSLIP_SALARY_EARNING_FIELDS.reduce((sum, field) => sum + (p[field] || 0), 0);
@@ -3707,6 +3777,7 @@ function showPayslipDetailModal(entry) {
         payslipModalRow("この記録の金額", entry.amount, { total: true })
       );
     }
+    el.payslipDetailContent.append(...payslipChangeRows(entry));
   } else {
     // 旧形式(総支給額・社会保険料まとめ)で保存された記録との互換表示
     el.payslipDetailContent.append(

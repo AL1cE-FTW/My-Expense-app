@@ -165,6 +165,17 @@ if (!list.includes("今月の給与") || !list.includes("¥240,200")) {
 }
 if (!list.includes("給与天引き")) throw new Error("引き継いだ寮社宅費の住居の支出も立つはず: " + list);
 
+// 内訳には、前回から変わった項目だけが差額つきで出る (残業代 30,000 → 18,000)
+await page.locator("#entry-list tr", { hasText: "今月の給与" }).locator("button", { hasText: "内訳" }).click();
+await page.waitForTimeout(300);
+const changeText = (await page.textContent("#payslip-detail-content")).replace(/\s+/g, " ");
+if (!changeText.includes(`前回 (${PREV.getMonth() + 1}/25) から変わった項目`) || !changeText.includes("時間外勤務手当-¥12,000")) {
+  throw new Error("前回からの変化を出すはず: " + changeText);
+}
+if (changeText.split("から変わった項目")[1].includes("本給")) throw new Error("変わっていない項目は出さない: " + changeText);
+await page.click("#payslip-detail-close");
+await page.waitForTimeout(250);
+
 // ---------------------------------------------------------------------------
 // 5. 賞与は賞与からしか引き継がない (給与の値を賞与の欄に入れない)
 // ---------------------------------------------------------------------------
