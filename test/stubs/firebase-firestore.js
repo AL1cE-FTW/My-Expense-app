@@ -160,6 +160,7 @@ export function writeBatch() {
         if (op.remove) {
           store.delete(op.docRef.path);
           touched.add(op.docRef.collectionPath);
+          touched.add(op.docRef.path);
           continue;
         }
         if (op.merge && !store.has(op.docRef.path)) {
@@ -167,7 +168,9 @@ export function writeBatch() {
         }
         const base = op.merge ? store.get(op.docRef.path) || {} : {};
         store.set(op.docRef.path, applyFieldValues(base, op.data));
+        // 本物と同じく、そのドキュメント1つを見ている onSnapshot にも知らせる
         touched.add(op.docRef.collectionPath);
+        touched.add(op.docRef.path);
       }
       for (const path of touched) notify(path);
       await serverAck();
