@@ -13,6 +13,7 @@ import {
 } from "./payslip-import.js";
 import { dueRecurring, nextMonth } from "./recurring.js";
 import { reviewItems } from "./review.js";
+import { goalProgress } from "./savings-goal.js";
 import {
   CARD_REFUND_CATEGORY,
   computeAdvanceFlowIds,
@@ -246,6 +247,9 @@ let unsubscribeMerchantCategories = null;
 // 固定費 (settings/recurring)。毎月その日を過ぎてアプリを開くと記録される
 let recurringItems = {};
 let unsubscribeRecurring = null;
+// 貯金の目標 (settings/savingsGoal)
+let savingsGoal = null;
+let unsubscribeSavingsGoal = null;
 let authMode = "login";
 
 // 記録一覧の並び替え
@@ -394,6 +398,7 @@ const el = {
   payslipCopyNote: document.getElementById("payslip-copy-note"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
+  savingsGoalBtn: document.getElementById("savings-goal-btn"),
   totalIncome: document.getElementById("total-income"),
   totalExpense: document.getElementById("total-expense"),
   balance: document.getElementById("balance"),
@@ -548,6 +553,11 @@ function showAuthScreen() {
     unsubscribeRecurring = null;
   }
   recurringItems = {};
+  if (unsubscribeSavingsGoal) {
+    unsubscribeSavingsGoal();
+    unsubscribeSavingsGoal = null;
+  }
+  savingsGoal = null;
   entries = [];
   budgets = {};
   incomeBudgets = {};
@@ -568,6 +578,7 @@ function showApp(user) {
   subscribeAccounts(user.uid);
   subscribeMerchantCategories(user.uid);
   subscribeRecurring(user.uid);
+  subscribeSavingsGoal(user.uid);
   resetForm();
   closeBudgetForm();
   closeIncomeBudgetForm();
@@ -736,6 +747,58 @@ function applyLearnedCategories(list) {
   }
 }
 
+function savingsGoalDocRef(uid) {
+  return firestoreApi.doc(db, `users/${uid}/settings/savingsGoal`);
+}
+
+function subscribeSavingsGoal(uid) {
+  if (unsubscribeSavingsGoal) unsubscribeSavingsGoal();
+  unsubscribeSavingsGoal = firestoreApi.onSnapshot(
+    savingsGoalDocRef(uid),
+    (snap) => {
+      savingsGoal = snap.exists() ? snap.data() : null;
+      renderCumulativeSavings();
+    },
+    (error) => console.error(error)
+  );
+}
+
+function editSavingsGoal() {
+  const amountText = prompt(
+    "累計貯金額の目標 (円)。空にすると目標を消します。",
+    savingsGoal?.amount ? String(savingsGoal.amount) : ""
+  );
+  if (amountText === null) return;
+  const amount = Number(amountText.replace(/[,，円¥\s]/g, ""));
+  if (amountText.trim() === "") {
+    whenSynced(firestoreApi.deleteDoc(savingsGoalDocRef(currentUid)), "目標を消せませんでした");
+    return;
+  }
+  if (!Number.isInteger(amount) || amount <= 0) {
+    alert("目標は1円以上の数で入れてください。");
+    return;
+  }
+  const next = new Date(new Date().getFullYear() + 1, new Date().getMonth(), 1);
+  const deadline = prompt(
+    "いつまでに (年-月。例: 2027-03)",
+    savingsGoal?.deadline || `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`
+  );
+  if (deadline === null) return;
+  const normalized = deadline.trim().replace(/[/.年]/g, "-").replace(/月$/, "");
+  const match = normalized.match(/^(\d{4})-(\d{1,2})$/);
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) {
+    alert("期限は「2027-03」のように年と月で入れてください。");
+    return;
+  }
+  whenSynced(
+    firestoreApi.setDoc(savingsGoalDocRef(currentUid), {
+      amount,
+      deadline: `${match[1]}-${match[2].padStart(2, "0")}`,
+    }),
+    "目標を保存できませんでした"
+  );
+}
+
 function recurringDocRef(uid) {
   return firestoreApi.doc(db, `users/${uid}/settings/recurring`);
 }
@@ -782,6 +845,8 @@ function postDueRecurring() {
 }
 
 // 要確認の記録。見ている月に関係なく、直近の記録から拾う
+el.savingsGoalBtn.addEventListener("click", editSavingsGoal);
+
 function renderReview() {
   const items = reviewItems(entries, toDateInputValue(new Date()));
   el.reviewSection.classList.toggle("hidden", items.length === 0);
@@ -1533,6 +1598,19 @@ function renderCumulativeSavings() {
   el.cumulativeChange.textContent = changeText;
   el.cumulativeChange.classList.toggle("positive", thisMonthNet > 0);
   el.cumulativeChange.classList.toggle("negative", thisMonthNet < 0);
+
+  const goal = goalProgress(total, savingsGoal, new Date());
+  if (!goal) {
+    el.savingsGoalBtn.textContent = "＋ 貯金の目標を決める";
+  } else {
+    const [gy, gm] = savingsGoal.deadline.split("-").map(Number);
+    const head = `目標 ${formatYen(savingsGoal.amount)} (${gy}年${gm}月)`;
+    el.savingsGoalBtn.textContent = goal.done
+      ? `${head} 達成!`
+      : goal.overdue
+        ? `${head} 期限を過ぎました・あと ${formatYen(goal.remaining)}`
+        : `${head} まで あと ${formatYen(goal.remaining)}・月 ${formatYen(goal.perMonth)}`;
+  }
 }
 
 function renderSummary(monthEntries) {
