@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { reviewItems } from "../js/review.js";
+import { goalProgress } from "../js/savings-goal.js";
 
 const assert = (cond, msg) => {
   if (!cond) throw new Error(msg);
@@ -41,6 +42,17 @@ const assert = (cond, msg) => {
   assert(reasons.stale.includes("仮のまま"), reasons.stale);
   assert(reasons.huge.includes("倍"), reasons.huge);
   assert(got[got.length - 1].entry.id === "stale", "新しい順");
+}
+
+// 貯金の目標: 今月を含めて期限の月まで何か月か・月いくらか
+{
+  const today = new Date(2026, 9, 30); // 2026-10
+  const g = goalProgress(400000, { amount: 1000000, deadline: "2027-03" }, today);
+  assert(g.months === 6 && g.remaining === 600000 && g.perMonth === 100000, "月いくら: " + JSON.stringify(g));
+  assert(goalProgress(1200000, { amount: 1000000, deadline: "2027-03" }, today).done, "超えたら達成");
+  assert(goalProgress(0, { amount: 1000, deadline: "2026-09" }, today).overdue, "期限切れ");
+  assert(goalProgress(0, { amount: 1000, deadline: "2026-10" }, today).perMonth === 1000, "今月が期限なら残り全部");
+  assert(goalProgress(0, null, today) === null && goalProgress(0, { amount: 0, deadline: "2027-01" }, today) === null, "目標なし");
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +139,17 @@ assert(!(await page.isVisible("#review-section")), "カテゴリを直したら�
   // 先に入れた「ナゾノミセ」「ベツノミセ」(メール、今月1日) の 800+900 も今月の利用
   const expected = `${next.getMonth() + 1}/26 ¥7,700`;
   assert(note.includes(expected), `引き落とし予定 (返金は引き、現金は入れない): ${note} (期待 ${expected})`);
+}
+
+// 貯金の目標を決める (prompt に答える)
+{
+  const answers = ["1,000,000", "2099-12"];
+  page.removeAllListeners("dialog");
+  page.on("dialog", (d) => (d.type() === "prompt" ? d.accept(answers.shift()) : d.accept()));
+  await page.click("#savings-goal-btn");
+  await page.waitForTimeout(400);
+  const text = await page.textContent("#savings-goal-btn");
+  assert(text.includes("目標 ¥1,000,000 (2099年12月)") && text.includes("月 ¥"), "目標の進み具合: " + text);
 }
 
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
