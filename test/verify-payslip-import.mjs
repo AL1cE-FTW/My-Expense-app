@@ -286,17 +286,12 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
 }
 
 // 給与明細の PDF を読み込む (PDF の画面ではブックマークが動かないため)。
-// 見本の HTML を Chromium で PDF にし、アプリの「明細のPDFを読み込む」に渡す。
+// 見本の HTML (fixtures/payslip-print.html) を PDF にしてパスワードを付けたもの
+// (fixtures/payslip-print-locked.pdf、パスワード test1234) を「明細のPDFを読み込む」に渡す。
 // PDF の読み取り (pdf.js) は CDN から読むので、npm の同じ版のファイルを返す。
 // 見本: 支給 271,500 / 控除 75,500 (うち寮社宅費 20,000、名前の分からない控除 10,700)
 // → 差引支給額 196,000。家計簿の記録は「振込額 + 寮社宅費」= 216,000
 {
-  const maker = await browser.newPage();
-  await maker.goto("file://" + path.join(here, "fixtures", "payslip-print.html"));
-  const pdfPath = path.join(scratch, "payslip-print.pdf");
-  fs.writeFileSync(pdfPath, await maker.pdf({ format: "A4", landscape: true, printBackground: true }));
-  await maker.close();
-
   const page = await openAppWith(APP, "import-pdf@example.com");
   await page.route("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/*", async (route) => {
     const file = new URL(route.request().url()).pathname.split("/").pop();
@@ -309,8 +304,17 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
   await page.click('.type-option:has(input[value="income"]) span');
   await page.selectOption("#entry-category", "給与");
   assert(await page.isVisible("#payslip-pdf-btn"), "給与を選ぶと PDF の読み込みボタンが出る");
-  await page.setInputFiles("#payslip-pdf-input", pdfPath);
-  await page.waitForTimeout(2500);
+  // パスワード付きの PDF (中身は同じ見本)。1回目はわざと間違え、聞き直されたら正しく答える
+  const answers = ["wrong", "test1234"];
+  const asked = [];
+  page.removeAllListeners("dialog");
+  page.on("dialog", (d) => {
+    asked.push(d.message());
+    return d.type() === "prompt" ? d.accept(answers.shift()) : d.accept();
+  });
+  await page.setInputFiles("#payslip-pdf-input", path.join(here, "fixtures", "payslip-print-locked.pdf"));
+  await page.waitForTimeout(3000);
+  assert(asked[0]?.includes("パスワード") && asked[1]?.includes("違います"), "パスワードを聞き、違えば聞き直す: " + asked);
   const got = await page.evaluate(() => ({
     base: document.querySelector("#payslip-base-salary").value,
     adjustment: document.querySelector("#payslip-salary-adjustment").value,
