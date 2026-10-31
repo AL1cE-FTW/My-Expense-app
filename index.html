@@ -259,6 +259,10 @@
                    引き継いでから変わった欄だけ直すのが一番早い -->
               <button type="button" class="btn btn-primary btn-small hidden" id="payslip-copy-prev-btn"></button>
               <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">給与明細の内訳を入力</button>
+              <!-- 給与サイトの明細が PDF で開くとき (PDF の画面ではブックマークが動かない) は、
+                   保存した PDF をここから読み込む。読み込みはブラウザの中だけで行う -->
+              <button type="button" class="btn btn-ghost btn-small" id="payslip-pdf-btn">明細のPDFを読み込む</button>
+              <input type="file" id="payslip-pdf-input" accept="application/pdf,.pdf" class="hidden" tabindex="-1" aria-hidden="true">
               <button type="button" class="btn btn-ghost btn-small" id="payslip-link-btn">給与サイトから読み込む (設定)</button>
             </div>
             <p class="payslip-hint">内訳を入れると、支給と控除から手取り (振込額) を自動で計算します。</p>

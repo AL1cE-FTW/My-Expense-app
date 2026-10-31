@@ -285,6 +285,50 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
   await page.close();
 }
 
+// 給与明細の PDF を読み込む (PDF の画面ではブックマークが動かないため)。
+// 見本の HTML を Chromium で PDF にし、アプリの「明細のPDFを読み込む」に渡す。
+// PDF の読み取り (pdf.js) は CDN から読むので、npm の同じ版のファイルを返す。
+// 見本: 支給 271,500 / 控除 75,500 (うち寮社宅費 20,000、名前の分からない控除 10,700)
+// → 差引支給額 196,000。家計簿の記録は「振込額 + 寮社宅費」= 216,000
+{
+  const maker = await browser.newPage();
+  await maker.goto("file://" + path.join(here, "fixtures", "payslip-print.html"));
+  const pdfPath = path.join(scratch, "payslip-print.pdf");
+  fs.writeFileSync(pdfPath, await maker.pdf({ format: "A4", landscape: true, printBackground: true }));
+  await maker.close();
+
+  const page = await openAppWith(APP, "import-pdf@example.com");
+  await page.route("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/*", async (route) => {
+    const file = new URL(route.request().url()).pathname.split("/").pop();
+    await route.fulfill({
+      status: 200,
+      contentType: "text/javascript",
+      body: fs.readFileSync(path.join(root, "node_modules", "pdfjs-dist", "build", file), "utf-8"),
+    });
+  });
+  await page.click('.type-option:has(input[value="income"]) span');
+  await page.selectOption("#entry-category", "給与");
+  assert(await page.isVisible("#payslip-pdf-btn"), "給与を選ぶと PDF の読み込みボタンが出る");
+  await page.setInputFiles("#payslip-pdf-input", pdfPath);
+  await page.waitForTimeout(2500);
+  const got = await page.evaluate(() => ({
+    base: document.querySelector("#payslip-base-salary").value,
+    adjustment: document.querySelector("#payslip-salary-adjustment").value,
+    housing: document.querySelector("#payslip-housing").value,
+    other: document.querySelector("#payslip-other-deductions").value,
+    amount: document.querySelector("#entry-amount").value,
+    date: document.querySelector("#entry-date").value,
+    note: document.querySelector("#payslip-copy-note").textContent,
+  }));
+  console.log("payslip-print.pdf", JSON.stringify(got));
+  assert(got.base === "240000" && got.adjustment === "1500" && got.housing === "20000", "支給・寮社宅費: " + JSON.stringify(got));
+  assert(got.other === "10700", "名前の分からない控除: " + got.other);
+  assert(got.amount === "216000", "金額は 振込額+寮社宅費: " + got.amount);
+  assert(got.date === "2026-10-28", "支給日: " + got.date);
+  assert(got.note.includes("一致"), "差引支給額で検算が合うはず: " + got.note);
+  await page.close();
+}
+
 // 読み取れなかったときは、受け取った項目名と区切りを出す (金額は出さない)
 {
   const payload = {
