@@ -113,6 +113,43 @@ export function payloadFromPdfItems(items) {
   };
 }
 
+/**
+ * PDF の画面で全選択してコピーした文字から、受け渡し内容を作る (PDF を保存しなくて済む)。
+ * コピーした文字は「項目名の行」の次に「金額の行」が来る形を想定し、
+ * 両方の数が同じときだけ、左から順に組にする (数が違うと、どれがどれか分からない)。
+ */
+export function payloadFromText(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\u3000/g, " ").trim())
+    .filter(Boolean);
+  const pairs = [];
+  let section = "";
+  for (let i = 0; i < lines.length; i++) {
+    const compact = lines[i].replace(/\s/g, "");
+    if (SECTION.test(compact)) {
+      section = compact;
+      continue;
+    }
+    const labels = lines[i].split(/\s+/);
+    if (labels.some(isValue) || labels.some((l) => l.length > 20)) continue;
+    const values = (lines[i + 1] || "").split(/\s+/);
+    if (values.length !== labels.length || !values.every(isValue)) continue;
+    labels.forEach((label, k) => pairs.push([label, values[k], section]));
+    i++;
+  }
+  const joined = lines.join(" ");
+  const period = joined.match(/\d{4}\s*年\s*\d{1,2}\s*月\s*度/) || joined.match(/\d{4}\s*年\s*\d{1,2}\s*月/);
+  const payDate = joined.match(/支給日\s*[:：]?\s*(\d{4}\s*[年/.-]\s*\d{1,2}\s*[月/.-]\s*\d{1,2})/);
+  return {
+    v: 1,
+    pairs,
+    period: period ? period[0] : "",
+    payDate: payDate ? payDate[1] : "",
+    bonus: /賞与/.test(joined) && !/本給|基本給/.test(joined),
+  };
+}
+
 // PDF ファイル (1ページ目) から受け渡し内容を作る。
 // パスワード付きの PDF (給与明細によくある) は、開くときにパスワードを聞く。
 // パスワードはこの PDF を開くのに使うだけで、保存も送信もしない

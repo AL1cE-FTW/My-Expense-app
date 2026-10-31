@@ -333,6 +333,40 @@ for (const fixture of ["payslip-table.html", "payslip-mobile.html"]) {
   await page.close();
 }
 
+// PDF の画面で全選択・コピーした文字を「明細のコピーを読み込む」で読む (保存しなくてよい)。
+// 文字は見本の PDF (fixtures/payslip-print-locked.pdf) を pdf.js で取り出したものと同じ形
+{
+  const copied = [
+    "2026年10月度給与", "支給日:2026年10月28日", "サンプル商事株式会社 X0000 見本 太郎 様",
+    "勤怠", "出勤 普通残業時間 1日年休", "18 14:45 1",
+    "支給", "本給 勤務地手当 時間外勤務手当 給与調整", "240,000 10,000 20,000 1,500",
+    "控除",
+    "慶弔掛金 福祉会費 寮社宅費 食事代 団体保険 組合費・闘争資金 共済会費 健康保険 介護保険 子ども支援金",
+    "100 400 20,000 3,000 1,200 5,000 1,000 12,000 0 300",
+    "厚年保険 雇用保険料 所得税 住民税", "25,000 1,500 6,000 0",
+    "記事", "振込金額1 課税対象額", "196,000 230,000", "差引支給額", "196,000",
+    "標準報酬月額変更 (新健保) 300000 (新厚年) 300000", "9月度勤怠遡及額 1500",
+  ].join("\n");
+  const page = await openAppWith(APP, "import-paste@example.com");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: APP });
+  await page.evaluate((t) => navigator.clipboard.writeText(t), copied);
+  await page.click('.type-option:has(input[value="income"]) span');
+  await page.selectOption("#entry-category", "給与");
+  await page.click("#payslip-paste-btn");
+  await page.waitForTimeout(800);
+  const got = await page.evaluate(() => ({
+    base: document.querySelector("#payslip-base-salary").value,
+    other: document.querySelector("#payslip-other-deductions").value,
+    amount: document.querySelector("#entry-amount").value,
+    date: document.querySelector("#entry-date").value,
+    note: document.querySelector("#payslip-copy-note").textContent,
+  }));
+  console.log("paste", JSON.stringify(got));
+  assert(got.base === "240000" && got.other === "10700" && got.amount === "216000", "コピーから読む: " + JSON.stringify(got));
+  assert(got.date === "2026-10-28" && got.note.includes("一致"), "支給日と検算: " + JSON.stringify(got));
+  await page.close();
+}
+
 // 読み取れなかったときは、受け取った項目名と区切りを出す (金額は出さない)
 {
   const payload = {

@@ -261,6 +261,9 @@
               <button type="button" class="btn btn-secondary btn-small" id="payslip-toggle-btn">給与明細の内訳を入力</button>
               <!-- 給与サイトの明細が PDF で開くとき (PDF の画面ではブックマークが動かない) は、
                    保存した PDF をここから読み込む。読み込みはブラウザの中だけで行う -->
+<!-- PC なら保存しなくてよい: PDF の画面で全選択 (Ctrl+A)・コピー (Ctrl+C) してから押す -->
+              <button type="button" class="btn btn-ghost btn-small" id="payslip-paste-btn"
+                      title="給与明細の PDF の画面で Ctrl+A → Ctrl+C してから押してください">明細のコピーを読み込む</button>
               <button type="button" class="btn btn-ghost btn-small" id="payslip-pdf-btn">明細のPDFを読み込む</button>
               <input type="file" id="payslip-pdf-input" accept="application/pdf,.pdf" class="hidden" tabindex="-1" aria-hidden="true">
               <button type="button" class="btn btn-ghost btn-small" id="payslip-link-btn">給与サイトから読み込む (設定)</button>

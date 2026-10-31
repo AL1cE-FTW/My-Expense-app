@@ -14,7 +14,7 @@ import {
 import { dueRecurring, nextMonth } from "./recurring.js";
 import { reviewItems } from "./review.js";
 import { goalProgress } from "./savings-goal.js";
-import { readPayslipPdf } from "./payslip-pdf.js";
+import { payloadFromText, readPayslipPdf } from "./payslip-pdf.js";
 import {
   CARD_REFUND_CATEGORY,
   computeAdvanceFlowIds,
@@ -398,6 +398,7 @@ const el = {
   payslipLinkDrag: document.getElementById("payslip-link-drag"),
   payslipCopyNote: document.getElementById("payslip-copy-note"),
   payslipPdfBtn: document.getElementById("payslip-pdf-btn"),
+  payslipPasteBtn: document.getElementById("payslip-paste-btn"),
   payslipPdfInput: document.getElementById("payslip-pdf-input"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
@@ -6066,6 +6067,22 @@ function setupAppEventListeners() {
   el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
   el.payslipCopyPrevBtn.addEventListener("click", copyPreviousPayslip);
   el.payslipPdfBtn.addEventListener("click", () => el.payslipPdfInput.click());
+  // PDF の画面で全選択・コピーした文字を読む (PDF を保存しなくて済む)
+  el.payslipPasteBtn.addEventListener("click", async () => {
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      console.error(err);
+      alert(
+        "コピーした文字を読めませんでした (ブラウザが許可していません)。\n" +
+          "許可を求められたら「許可」を押すか、明細の PDF を保存して「明細のPDFを読み込む」を使ってください。"
+      );
+      return;
+    }
+    pendingPayslipImport = payloadFromText(text);
+    applyPendingPayslipImport();
+  });
   el.payslipPdfInput.addEventListener("change", async () => {
     const file = el.payslipPdfInput.files[0];
     el.payslipPdfInput.value = "";
