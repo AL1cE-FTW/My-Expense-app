@@ -239,6 +239,37 @@ if (!(await page.locator("#budget-form").evaluate((f) => f.classList.contains("h
 await page.evaluate(() => window.__setOffline(false));
 await page.waitForTimeout(300);
 
+// --- カードをたたむ ---
+// たたむと見出しだけになり、ログインし直しても覚えている。「記録を追加」へ
+// 飛ぶ操作 (N キー) では、たたんだ入力欄を自動でひらく
+await page.click("#summary-section .collapse-btn");
+await page.click("#entry-form-slot .collapse-btn");
+await page.waitForTimeout(200);
+const collapsedState = await page.evaluate(() => ({
+  flowHidden: getComputedStyle(document.getElementById("summary-flow")).display === "none",
+  formHidden: getComputedStyle(document.getElementById("entry-form")).display === "none",
+  expanded: document.querySelector("#entry-form-slot .collapse-btn").getAttribute("aria-expanded"),
+  balanceShown: getComputedStyle(document.getElementById("balance")).display !== "none",
+}));
+if (!collapsedState.flowHidden || !collapsedState.formHidden || collapsedState.expanded !== "false" || !collapsedState.balanceShown) {
+  throw new Error("たたむと中身が隠れ、収支の数字は残るはず: " + JSON.stringify(collapsedState));
+}
+await page.locator("#logout-btn").dispatchEvent("click");
+await page.waitForTimeout(400);
+await page.fill("#auth-email", "smoke-test@example.com");
+await page.fill("#auth-password", "password123");
+await page.click("#auth-submit-btn");
+await page.waitForTimeout(400);
+if (!(await page.locator("#entry-form-slot").evaluate((c) => c.classList.contains("collapsed")))) {
+  throw new Error("たたんだカードを覚えているはず");
+}
+await page.keyboard.press("n");
+await page.waitForTimeout(300);
+if (await page.locator("#entry-form-slot").evaluate((c) => c.classList.contains("collapsed"))) {
+  throw new Error("「記録を追加」へ飛ぶときは入力欄をひらくはず");
+}
+await page.click("#summary-section .collapse-btn");
+
 await page.screenshot({ path: path.join(scratch, "smoke.png"), fullPage: true });
 
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
