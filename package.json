@@ -1,0 +1,16 @@
+{
+  "name": "my-expense-app",
+  "private": true,
+  "type": "module",
+  "description": "家計簿 (GitHub Pages で配る静的サイト)。css/app.css は Tailwind CSS + daisyUI から作る",
+  "scripts": {
+    "build:css": "tailwindcss -i css/input.css -o css/app.css --minify",
+    "watch:css": "tailwindcss -i css/input.css -o css/app.css --watch",
+    "test": "sh test/run-all.sh"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "daisyui": "5.7.50",
+    "tailwindcss": "4.3.3"
+  }
+}

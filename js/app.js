@@ -118,6 +118,14 @@ function isRefundIncome(entry) {
 //   manual : 手で入力したもの。現金やその他の支払いなので、カード明細とは
 //            そもそも突き合わせない。
 // 古い記録には source が無い。その場合は「不明」であり、未確定とは扱わない。
+// 種別のバッジの色 (daisyUI)。収入=success・支出=error・貯蓄=secondary・振替=neutral
+const TYPE_BADGE_COLOR = {
+  income: "badge-success",
+  expense: "badge-error",
+  save: "badge-secondary",
+  transfer: "badge-neutral",
+};
+
 const SOURCE_GMAIL = "gmail";
 const SOURCE_CARD = "card";
 const SOURCE_MANUAL = "manual";
@@ -188,7 +196,7 @@ const PAYSLIP_FIELD_LABELS = {
 const NEED_CATEGORIES = ["食費", "住居", "水道・光熱", "通信", "交通", "医療", "教育", "日用品"];
 const WANT_CATEGORIES = ["交際費", "趣味・娯楽", "衣服・美容", "その他支出"];
 const NWS_TARGET_RATIO = { need: 0.5, want: 0.3, save: 0.2 };
-// 色は css/style.css のトークン (ダークモードで切り替わる)
+// 色は css/layout.css のトークン (daisyUI のテーマから作る。ダークモードで切り替わる)
 const NWS_BUCKET_COLORS = { need: "var(--need)", want: "var(--want)" };
 
 function categoryBucket(category) {
@@ -761,7 +769,7 @@ function renderMerchantCategories() {
     categoryEl.textContent = category;
     const forgetBtn = document.createElement("button");
     forgetBtn.type = "button";
-    forgetBtn.className = "icon-btn";
+    forgetBtn.className = "icon-btn btn btn-ghost btn-sm";
     forgetBtn.append(createIcon("x"), "忘れる");
     forgetBtn.setAttribute("aria-label", `${merchant} のカテゴリ (${category}) を忘れる`);
     forgetBtn.addEventListener("click", () => {
@@ -911,13 +919,13 @@ function renderReview() {
     const label = `${entry.date} ${entry.category} ${formatYen(entry.amount)}`;
     const editBtn = document.createElement("button");
     editBtn.type = "button";
-    editBtn.className = "icon-btn";
+    editBtn.className = "icon-btn btn btn-ghost btn-sm";
     editBtn.append(createIcon("pencil"), "直す");
     editBtn.setAttribute("aria-label", `${label} を直す`);
     editBtn.addEventListener("click", () => startEdit(entry.id));
     const okBtn = document.createElement("button");
     okBtn.type = "button";
-    okBtn.className = "icon-btn";
+    okBtn.className = "icon-btn btn btn-ghost btn-sm";
     okBtn.append(createIcon("check"), "このままでOK");
     okBtn.setAttribute("aria-label", `${label} はこのままでOK`);
     okBtn.addEventListener("click", () =>
@@ -958,7 +966,7 @@ function renderRecurring() {
     amountEl.textContent = formatYen(item.amount);
     const stopBtn = document.createElement("button");
     stopBtn.type = "button";
-    stopBtn.className = "icon-btn";
+    stopBtn.className = "icon-btn btn btn-ghost btn-sm";
     stopBtn.append(createIcon("x"), "やめる");
     stopBtn.setAttribute("aria-label", `毎月${item.day}日 ${item.category} ${formatYen(item.amount)} の固定費をやめる`);
     stopBtn.addEventListener("click", () => {
@@ -969,7 +977,7 @@ function renderRecurring() {
     });
     const amountBtn = document.createElement("button");
     amountBtn.type = "button";
-    amountBtn.className = "icon-btn";
+    amountBtn.className = "icon-btn btn btn-ghost btn-sm";
     amountBtn.append(createIcon("pencil"), "金額");
     amountBtn.setAttribute("aria-label", `毎月${item.day}日 ${item.category} の固定費の金額を変える`);
     amountBtn.addEventListener("click", () => {
@@ -1485,7 +1493,7 @@ function renderAdvances() {
 
     const settleBtn = document.createElement("button");
     settleBtn.type = "button";
-    settleBtn.className = "icon-btn";
+    settleBtn.className = "icon-btn btn btn-outline btn-sm";
     settleBtn.append(createIcon("check"), "精算");
     settleBtn.setAttribute(
       "aria-label",
@@ -2735,7 +2743,7 @@ function renderList(monthEntries) {
 
     const typeTd = document.createElement("td");
     const badge = document.createElement("span");
-    badge.className = `type-badge ${entry.type}`;
+    badge.className = `type-badge ${entry.type} badge badge-sm badge-soft ${TYPE_BADGE_COLOR[entry.type] || ""}`;
     badge.textContent = TYPE_LABELS[entry.type];
     typeTd.appendChild(badge);
 
@@ -2743,7 +2751,7 @@ function renderList(monthEntries) {
     // 金額や日付が動くことがある。確定済みと見分けが付くようにする。
     if (isPendingEntry(entry)) {
       const pendingBadge = document.createElement("span");
-      pendingBadge.className = "pending-badge";
+      pendingBadge.className = "pending-badge badge badge-sm badge-ghost border-dashed";
       pendingBadge.textContent = "仮";
       pendingBadge.title =
         "メールの利用通知から取り込んだ未確定の記録。" +
@@ -2755,7 +2763,9 @@ function renderList(monthEntries) {
     if (entry.advance === true) {
       const settled = refundMap.has(entry.id);
       const advanceBadge = document.createElement("span");
-      advanceBadge.className = settled ? "advance-badge settled" : "advance-badge";
+      advanceBadge.className = settled
+        ? "advance-badge settled badge badge-sm badge-soft badge-success"
+        : "advance-badge badge badge-sm badge-soft badge-warning";
       advanceBadge.textContent = settled ? "立替(精算済)" : "立替(未回収)";
       typeTd.appendChild(advanceBadge);
     }
@@ -2797,7 +2807,7 @@ function renderList(monthEntries) {
 
     if (entry.payslip) {
       const detailBtn = document.createElement("button");
-      detailBtn.className = "icon-btn";
+      detailBtn.className = "icon-btn btn btn-ghost btn-sm btn-square";
       detailBtn.append(createIcon("file-text"), rowButtonText("内訳"));
       detailBtn.title = "内訳";
       detailBtn.setAttribute("aria-label", `${rowLabel} の内訳を見る`);
@@ -2806,7 +2816,7 @@ function renderList(monthEntries) {
     }
 
     const editBtn = document.createElement("button");
-    editBtn.className = "icon-btn";
+    editBtn.className = "icon-btn btn btn-ghost btn-sm btn-square";
     editBtn.append(createIcon("pencil"), rowButtonText("編集"));
     editBtn.title = "編集";
     editBtn.setAttribute("aria-label", `${rowLabel} を編集`);
@@ -2815,7 +2825,7 @@ function renderList(monthEntries) {
     editBtn.addEventListener("click", () => startEdit(entry.id));
 
     const deleteBtn = document.createElement("button");
-    deleteBtn.className = "icon-btn delete";
+    deleteBtn.className = "icon-btn delete btn btn-ghost btn-sm btn-square hover:text-error";
     deleteBtn.append(createIcon("trash-2"), rowButtonText("削除"));
     deleteBtn.title = "削除";
     deleteBtn.setAttribute("aria-label", `${rowLabel} を削除`);
@@ -3556,7 +3566,7 @@ function renderJournal(container, journal) {
     head.append(dateEl, memoEl);
     if (isCardEntry(je.entry)) {
       const tag = document.createElement("span");
-      tag.className = "journal-tag";
+      tag.className = "journal-tag badge badge-sm";
       tag.textContent = "カード";
       head.appendChild(tag);
     }
@@ -3736,6 +3746,7 @@ function renderAccountsForm() {
     const input = document.createElement("input");
     input.type = "number";
     input.id = `account-input-${account}`;
+    input.className = "input w-full";
     input.dataset.account = account;
     input.min = "0";
     input.step = "1";
@@ -3803,6 +3814,7 @@ function setupBookTabs() {
       for (const t of el.bookTabs) {
         const active = t === tab;
         t.classList.toggle("active", active);
+        t.classList.toggle("tab-active", active);
         t.setAttribute("aria-selected", String(active));
       }
       render();
@@ -4280,6 +4292,7 @@ function renderBudgetInputs() {
     const input = document.createElement("input");
     input.type = "number";
     input.id = `budget-input-${category}`;
+    input.className = "input w-full";
     input.dataset.category = category;
     input.min = "0";
     input.step = "1";
@@ -4352,6 +4365,7 @@ function renderIncomeBudgetInputs() {
     const input = document.createElement("input");
     input.type = "number";
     input.id = `income-budget-input-${category}`;
+    input.className = "input w-full";
     input.dataset.category = category;
     input.min = "0";
     input.step = "1";
@@ -4373,6 +4387,7 @@ function renderBonusSettingsInputs() {
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
+    checkbox.className = "checkbox checkbox-sm";
     checkbox.dataset.month = month;
     checkbox.checked = savedMonths.includes(month);
 
@@ -5877,6 +5892,7 @@ function setupAuthForm() {
       for (const t of el.authTabs) {
         const isActive = t === tab;
         t.classList.toggle("active", isActive);
+        t.classList.toggle("tab-active", isActive);
         // 選択中かどうかを色だけでなく読み上げにも伝える
         t.setAttribute("aria-pressed", String(isActive));
       }
@@ -5976,7 +5992,7 @@ function setupCollapsibleCards() {
     if (!head) continue;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "collapse-btn";
+    btn.className = "collapse-btn btn btn-circle btn-ghost btn-sm";
     btn.append(createIcon("chevron-up"));
     btn.addEventListener("click", () => {
       setCardCollapsed(card, !card.classList.contains("collapsed"));
@@ -6045,6 +6061,7 @@ function setupAppEventListeners() {
       for (const t of el.viewTabs) {
         const isActive = t === tab;
         t.classList.toggle("active", isActive);
+        t.classList.toggle("tab-active", isActive);
         t.setAttribute("aria-pressed", String(isActive));
       }
       el.todayBtn.textContent = viewMode === "year" ? "今年" : "今月";

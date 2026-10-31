@@ -7,6 +7,7 @@ Firebase には接続せず、`stubs/` のインメモリ実装に差し替え�
 ## 実行方法
 
 ```bash
+npm install
 npm install --no-save playwright pdfjs-dist@4.10.38
 npx playwright install chromium
 
@@ -34,6 +35,7 @@ CHROMIUM_PATH=/path/to/chromium node test/verify-smoke.mjs
 | `verify-smoke.mjs` | 収入・支出・貯蓄の追加、サマリーの集計、予算フォーム、立替金の精算、削除、絞り込み、並び替え、オフラインでも追加・編集・削除・予算の保存ができて画面が固まらないこと、カードをたたむ (中身が隠れる・ログインし直しても覚えている・N キーで入力欄をひらく) |
 | `verify-edit-modal.mjs` | 記録の編集ポップアップ (スクロールしない・一覧がずれない・背景が動かない・閉じたら位置が戻る・4通りの閉じ方・給与明細の内訳・ログアウト時の後始末) |
 | `verify-aggregation.mjs` | サマリー、Need/Want/Save、累計貯金額、予算バーと「予算外」、収入目標と賞与、年間表示の経過月数按分 (未来年・過去年を含む)、月別の収支推移グラフ |
+| `verify-css-build.mjs` | 公開する `css/app.css` が、`css/input.css`・`css/layout.css`・HTML・JS から作り直したものと同じか (`npm run build:css` の忘れ) |
 | `verify-csv.mjs` | 3形式の取り込み (縦持ち・横持ち・カード利用履歴)、カテゴリの読み替えと告知、重複スキップ、Shift_JIS の読み直し、店名からのカテゴリ推測、合計の検算 |
 | `verify-gmail.mjs` | メールからの読み込み (認証失敗からの復帰、1通に複数明細、ID履歴が消えないこと、内容ベースの重複チェック、開いただけでは読み込まないこと、読み込み後もボタンのアイコンが残ること) |
 | `verify-apps-script.mjs` | メールの自動取り込み (Apps Script) を Gmail・ログイン・Firestore の偽物の上で動かす (読み取りがアプリと一字一句同じこと、新しいメールだけを仮で入れて取り込み済みを記録すること、確定済み・登録済みを二重に入れないこと、IDの上限、会話にまとまった古いメールを読まないこと、100件を超えても取りこぼさないこと、設定漏れ・ログイン失敗・同時実行、定期実行の登録)。ブラウザは使わない |

@@ -100,6 +100,22 @@ python3 -m http.server 8000
 
 初回はログイン画面で「新規登録」タブからメールアドレスとパスワードを登録してください。
 
+### 4. 見た目 (CSS) を変えるとき
+
+画面の部品は [daisyUI](https://daisyui.com/) (Tailwind CSS の部品集) で作っています。
+公開するのは作り終えた `css/app.css` なので、CSS (`css/input.css`・`css/layout.css`) や
+HTML・JS のクラス名を変えたら、作り直してからコミットしてください
+(作り直し忘れはテスト `verify-css-build.mjs` で分かります)。
+
+```bash
+npm install          # 初回だけ (tailwindcss・daisyui が入る)
+npm run build:css    # css/app.css を作り直す
+npm run watch:css    # 変えるたびに作り直す (作業中に)
+```
+
+色は `css/input.css` の daisyUI のテーマ (`kakeibo` / `kakeibo-dark`) で決めています。
+収入=success・支出=error・貯蓄=secondary・操作=primary です。
+
 ## スマホと PC でデータを共有する
 
 同じ Firebase アカウント(同じメールアドレス)でログインすれば、スマホと PC で自動的にデータが同期されます。
@@ -708,7 +724,10 @@ cp js/google-config.example.js js/google-config.js
 
 ```
 index.html                       … 画面 (UI)
-css/style.css                    … スタイル (色・文字・余白はファイル冒頭のトークンで管理。ダークモードもトークンの入れ替え)
+css/input.css                    … CSS の入口。Tailwind CSS + daisyUI と、色のテーマ (kakeibo / kakeibo-dark)
+css/layout.css                   … daisyUI に無い部分 (画面の並び・グラフ・帳簿・一覧のスマホ表示)。色はテーマから作る
+css/app.css                      … 上の2つから作った CSS (npm run build:css)。公開するのはこれ。直接編集しない
+package.json                     … CSS を作る道具 (tailwindcss・daisyui) の版
 js/app.js                        … ロジック (認証・Firestore同期・集計・CSV入出力)
 js/icons.js                      … Lucide アイコン (使う分のパスだけを直接持つ)
 js/payslip-import.js             … 給与サイトからの取り込み (ブックマークレットと読み取りの判断)

@@ -1,0 +1,106 @@
+/* ===========================================================================
+   家計簿の CSS の入口。ここから css/app.css を作る (npm run build:css)。
+
+   - 部品 (ボタン・カード・入力欄・タブ・ポップアップ・バッジ・表) は daisyUI
+   - 色は daisyUI のテーマ「kakeibo」(ライト) と「kakeibo-dark」(ダーク)。
+     ダークは OS の設定に従って自動で切り替わる。
+     色は「お金の種類」にだけ使う: 収入=success (翡翠)、支出=error (朱)、
+     貯蓄=secondary (藍紫)。操作 (primary) は墨色にして、数字の色とぶつからないようにする
+   - daisyUI に無いもの (画面の並び・グラフ・収支の帯・帳簿の表・一覧のスマホ表示) は
+     css/layout.css。色はテーマの値から作るので、テーマを変えればそちらも変わる
+   =========================================================================== */
+
+@import "tailwindcss";
+
+/* クラス名を拾う場所。JS で作る要素のクラスも、文字列のまま書いておけば拾われる */
+@source "../index.html";
+@source "../js";
+
+/* 使う部品だけ入れる (CSS を小さくするため)。部品を増やしたらここにも足す */
+@plugin "daisyui" {
+  themes: false;
+  include: alert, badge, button, card, checkbox, input, kbd, loading, modal, select, tab, table, textarea;
+}
+
+@plugin "daisyui/theme" {
+  name: "kakeibo";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f4f3ee;
+  --color-base-300: #e7e4db;
+  --color-base-content: #16171b;
+  --color-primary: #16171b;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5b4fd6;
+  --color-secondary-content: #ffffff;
+  --color-accent: #4361ee;
+  --color-accent-content: #ffffff;
+  --color-neutral: #16171b;
+  --color-neutral-content: #ffffff;
+  --color-info: #3d63dd;
+  --color-info-content: #ffffff;
+  --color-success: #0f9b6c;
+  --color-success-content: #ffffff;
+  --color-warning: #c7820a;
+  --color-warning-content: #ffffff;
+  --color-error: #e0482b;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 2rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1.125rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "kakeibo-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #17181c;
+  --color-base-200: #0d0e10;
+  --color-base-300: #26282e;
+  --color-base-content: #f1f0eb;
+  --color-primary: #f1f0eb;
+  --color-primary-content: #111214;
+  --color-secondary: #a79cff;
+  --color-secondary-content: #111214;
+  --color-accent: #8ea2ff;
+  --color-accent-content: #111214;
+  --color-neutral: #f1f0eb;
+  --color-neutral-content: #111214;
+  --color-info: #7d9cff;
+  --color-info-content: #111214;
+  --color-success: #38d39a;
+  --color-success-content: #111214;
+  --color-warning: #f2b33d;
+  --color-warning-content: #111214;
+  --color-error: #ff7d5e;
+  --color-error-content: #111214;
+
+  --radius-selector: 2rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1.125rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* 数字と英字は Geist、和文は Zen Kaku Gothic New */
+@theme {
+  --font-sans: "Geist", "Zen Kaku Gothic New", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", "Noto Sans JP", Meiryo, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@import "./layout.css";

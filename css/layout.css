@@ -1,71 +1,61 @@
 /* ===========================================================================
-   家計簿 — デザインシステム
+   家計簿 — daisyUI に無い部分 (画面の並び・グラフ・帳簿・一覧のスマホ表示)
 
-   方針
-   - 紙の帳面のような落ち着いた下地 (--bg) に、白い面 (--surface) を重ねる。
-   - 色は「お金の種類」にだけ使う。収入=翡翠、支出=朱、貯蓄=藍紫、振替=灰。
-     操作 (ボタン) は墨色にして、数字の色とぶつからないようにする。
-   - 数字は Geist の等幅数字 (tabular-nums)。桁がそろうので一覧で比べやすい。
-   - 余白は 4px の倍数。角丸は 3 段階 (--r-sm / --r-md / --r-lg)。
-   - ダークモードは OS の設定に従う (トークンを入れ替えるだけ)。
+   色・角丸は daisyUI のテーマ (css/input.css) の値から作る。ここで新しい色を
+   決めないこと (ダークモードやテーマの切り替えに付いてこなくなる)。
    =========================================================================== */
 
 :root {
-  color-scheme: light dark;
-
-  /* 入力欄・ボタンの高さ。種類ごとに既定の高さが違って数pxずつずれるので、
-     ここで揃える。スマホでは指で押せる大きさ (iOSの目安44px) にする */
+  /* 入力欄・ボタンの高さ。スマホでは指で押せる大きさ (iOSの目安44px) にする */
   --control-height: 42px;
 
   --font-sans: "Geist", "Zen Kaku Gothic New", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
     "Yu Gothic UI", "Noto Sans JP", Meiryo, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* 面 */
-  --bg: #f4f3ee;
-  --bg-tint: #ecebe4;
-  --surface: #ffffff;
-  /* セグメントで選ばれている札の面 */
-  --thumb: #ffffff;
-  --surface-2: #faf9f6;
-  --line: #e7e4db;
-  --line-strong: #d6d2c6;
+  /* 面 (daisyUI の base-100 / 200 / 300) */
+  --bg: var(--color-base-200);
+  --bg-tint: color-mix(in oklab, var(--color-base-300) 70%, var(--color-base-200));
+  --surface: var(--color-base-100);
+  --thumb: var(--color-base-100);
+  --surface-2: color-mix(in oklab, var(--color-base-200) 40%, var(--color-base-100));
+  --line: var(--color-base-300);
+  --line-strong: color-mix(in oklab, var(--color-base-content) 16%, var(--color-base-100));
 
   /* 文字 */
-  --ink: #16171b;
-  --ink-2: #3a3c42;
-  --muted: #73716a;
-  --faint: #a29f97;
+  --ink: var(--color-base-content);
+  --ink-2: color-mix(in oklab, var(--color-base-content) 82%, var(--color-base-100));
+  --muted: color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));
+  --faint: color-mix(in oklab, var(--color-base-content) 42%, var(--color-base-100));
 
   /* 操作 */
-  --accent: #16171b;
-  --accent-hover: #2c2e34;
-  --on-accent: #ffffff;
-  --focus: #4361ee;
+  --accent: var(--color-neutral);
+  --on-accent: var(--color-neutral-content);
+  --focus: var(--color-accent);
 
   /* お金の種類 */
-  --income: #0f9b6c;
-  --income-soft: #e2f4ec;
-  --expense: #e0482b;
-  --expense-soft: #fce9e4;
-  --save: #5b4fd6;
-  --save-soft: #ebe9fb;
-  --transfer: #6a6e78;
-  --transfer-soft: #eeede9;
-  --warn: #c7820a;
-  --warn-soft: #fbf0d9;
+  --income: var(--color-success);
+  --expense: var(--color-error);
+  --save: var(--color-secondary);
+  --transfer: color-mix(in oklab, var(--color-base-content) 55%, var(--color-base-100));
+  --warn: var(--color-warning);
+  --income-soft: color-mix(in oklab, var(--income) 13%, var(--color-base-100));
+  --expense-soft: color-mix(in oklab, var(--expense) 13%, var(--color-base-100));
+  --save-soft: color-mix(in oklab, var(--save) 13%, var(--color-base-100));
+  --transfer-soft: color-mix(in oklab, var(--transfer) 13%, var(--color-base-100));
+  --warn-soft: color-mix(in oklab, var(--warn) 14%, var(--color-base-100));
 
   /* Need / Want / Save */
-  --need: #3d63dd;
-  --need-soft: #dfe6fa;
-  --want: #e2a516;
-  --want-soft: #faefd2;
-  --nws-save: #0f9b6c;
-  --nws-save-soft: #d9f0e6;
+  --need: var(--color-info);
+  --want: color-mix(in oklab, var(--color-warning) 70%, #f5c518);
+  --nws-save: var(--color-success);
+  --need-soft: color-mix(in oklab, var(--need) 18%, var(--color-base-100));
+  --want-soft: color-mix(in oklab, var(--want) 18%, var(--color-base-100));
+  --nws-save-soft: color-mix(in oklab, var(--nws-save) 16%, var(--color-base-100));
 
-  --r-sm: 8px;
+  --r-sm: var(--radius-field);
   --r-md: 12px;
-  --r-lg: 18px;
+  --r-lg: var(--radius-box);
   --r-xl: 24px;
 
   --shadow-sm: 0 1px 0 rgba(22, 23, 27, 0.03), 0 1px 2px rgba(22, 23, 27, 0.04);
@@ -73,61 +63,11 @@
   --shadow-lg: 0 24px 64px -24px rgba(22, 23, 27, 0.35);
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --header-blur: rgba(244, 243, 238, 0.82);
+  --header-blur: color-mix(in oklab, var(--color-base-200) 82%, transparent);
   --sidebar-w: 248px;
   --tabbar-h: 64px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d0e10;
-    --bg-tint: #22242a;
-    --surface: #17181c;
-    --thumb: #34363e;
-    --surface-2: #1c1d22;
-    --line: #26282e;
-    --line-strong: #34363d;
-
-    --ink: #f1f0eb;
-    --ink-2: #d4d3cd;
-    --muted: #9b9991;
-    --faint: #6c6b66;
-
-    --accent: #f1f0eb;
-    --accent-hover: #ffffff;
-    --on-accent: #111214;
-    --focus: #8ea2ff;
-
-    --income: #38d39a;
-    --income-soft: rgba(56, 211, 154, 0.13);
-    --expense: #ff7d5e;
-    --expense-soft: rgba(255, 125, 94, 0.13);
-    --save: #a79cff;
-    --save-soft: rgba(167, 156, 255, 0.14);
-    --transfer: #a3a6ae;
-    --transfer-soft: rgba(163, 166, 174, 0.13);
-    --warn: #f2b33d;
-    --warn-soft: rgba(242, 179, 61, 0.14);
-
-    --need: #7d9cff;
-    --need-soft: rgba(125, 156, 255, 0.18);
-    --want: #f2c14e;
-    --want-soft: rgba(242, 193, 78, 0.18);
-    --nws-save: #38d39a;
-    --nws-save-soft: rgba(56, 211, 154, 0.16);
-
-    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.02);
-    --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 16px 40px -20px rgba(0, 0, 0, 0.6);
-    --shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
-    --header-blur: rgba(13, 14, 16, 0.78);
-  }
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
 
 /* scroll-behavior: smooth はページ全体には付けない。付けるとフォーカスの移動や
    スクリプトからのスクロールまで全部ゆっくり動き、押そうとした場所が
@@ -159,6 +99,21 @@ body {
   display: none !important;
 }
 
+/* ポップアップは daisyUI の modal。開け閉めは .hidden の付け外しで行う (JS の openModal)。
+   daisyUI の modal-open は付けない: 付けたままだと「開いている」とみなされ、
+   閉じていてもページのスクロールが止まって右に空きができる */
+.modal-overlay:not(.hidden) {
+  pointer-events: auto;
+  visibility: visible;
+  opacity: 1;
+}
+
+.modal-overlay:not(.hidden) .modal-box {
+  translate: 0 0;
+  scale: 1;
+  opacity: 1;
+}
+
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -169,6 +124,8 @@ body {
    線の太さは 24px 前提の 2 なので、小さく使うと相対的に太くなる。
    文字と並べたときに浮かないよう少し細くしている。 */
 .icon {
+  /* Tailwind の下地は svg を block にするので、文字と並ぶよう戻す */
+  display: inline-block;
   width: 1.15em;
   height: 1.15em;
   flex-shrink: 0;
@@ -400,79 +357,6 @@ body {
   white-space: nowrap;
 }
 
-.nav-btn,
-.today-btn {
-  display: inline-grid;
-  place-items: center;
-  height: 36px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink);
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
-}
-
-.nav-btn {
-  width: 36px;
-}
-
-.nav-btn .icon {
-  width: 18px;
-  height: 18px;
-  vertical-align: 0;
-}
-
-.today-btn {
-  padding: 0 14px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  margin-left: 4px;
-}
-
-.nav-btn:hover,
-.today-btn:hover {
-  background: var(--surface-2);
-  border-color: var(--line-strong);
-}
-
-.nav-btn:active,
-.today-btn:active {
-  transform: scale(0.95);
-}
-
-/* セグメント (月別 / 年間・帳簿のタブ・ログインのタブで共通の形) */
-.view-toggle,
-.auth-tabs {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  background: var(--bg-tint);
-  border-radius: 999px;
-}
-
-.view-tab,
-.auth-tab {
-  border: none;
-  background: transparent;
-  padding: 0 14px;
-  height: 30px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  font-family: inherit;
-  color: var(--muted);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.2s var(--ease), color 0.2s var(--ease), box-shadow 0.2s var(--ease);
-}
-
-.view-tab.active,
-.auth-tab.active {
-  background: var(--thumb);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line);
-}
 
 .user-bar {
   display: flex;
@@ -492,7 +376,7 @@ body {
 /* ===========================================================================
    本文
    =========================================================================== */
-.container {
+.app-main {
   max-width: 1120px;
   margin: 0 auto;
   padding: 8px 32px 48px;
@@ -501,7 +385,7 @@ body {
   gap: 20px;
 }
 
-.container > *,
+.app-main > *,
 .workspace > * {
   /* .workspace はPC以外では display: contents なので、中身が直接ここの
      グリッドに並ぶ。中身にも全幅を指定しないと細い列に押し込まれる */
@@ -521,18 +405,10 @@ body {
   }
 }
 
+/* カードの面と枠は daisyUI (card card-border bg-base-100)。中の余白だけ決める */
 .card {
-  background: var(--surface);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-md);
   padding: 24px;
-  border: 1px solid var(--line);
-}
-
-@media (prefers-color-scheme: light) {
-  .card {
-    border-color: rgba(22, 23, 27, 0.04);
-  }
+  box-shadow: var(--shadow-md);
 }
 
 .card-head {
@@ -559,22 +435,6 @@ body {
   position: absolute;
   top: 18px;
   right: 18px;
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  flex: none;
-}
-
-.collapse-btn:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
 }
 
 .collapse-btn svg {
@@ -780,16 +640,16 @@ h2:focus {
   border-bottom: 1px solid var(--line);
 }
 
-.stat {
+.summary-stat {
   padding: 14px 16px;
   min-width: 0;
 }
 
-.stat + .stat {
+.summary-stat + .summary-stat {
   border-left: 1px solid var(--line);
 }
 
-.stat:first-child {
+.summary-stat:first-child {
   padding-left: 0;
 }
 
@@ -827,7 +687,7 @@ h2:focus {
 }
 
 /* 累計は「これまでの全部」で、上の月の数字とは性格が違う。墨色の帯で分ける */
-.stat.cumulative-card {
+.summary-stat.cumulative-card {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1000,6 +860,13 @@ h2:focus {
   min-width: 0; /* grid の既定 (auto) だと中身の最小幅より縮まずはみ出す */
 }
 
+/* daisyUI の入力欄・選択欄の高さを、種別の切り替えと同じ高さにそろえる
+   (横に並べたときに下端がずれないように。スマホでは指で押せる44px) */
+.form-group .input,
+.form-group .select {
+  height: var(--control-height);
+}
+
 .form-group-wide {
   grid-column: 1 / -1;
 }
@@ -1027,66 +894,6 @@ h2:focus {
   margin-bottom: 6px;
 }
 
-.form-group input,
-.form-group select,
-.filter-select {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 0 12px;
-  font-size: 0.95rem;
-  font-family: inherit;
-  background-color: var(--surface);
-  color: var(--ink);
-  /* input の既定幅は size=20 (約20文字ぶん) で、狭い画面では枠より広い。
-     日付入力は iOS だとさらに大きくなる。列幅に収まるよう明示的に縮める */
-  min-width: 0;
-  width: 100%;
-  /* 高さを明示しないと、日付39.2px・選択39px・数値37px とバラバラになり、
-     横に並べたときに下端が数pxずつずれる */
-  height: var(--control-height);
-  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
-}
-
-/* iOS の日付入力は中身を中央寄せ・独自の高さにするので、ほかの欄と揃える */
-.form-group input[type="date"],
-.filter-select[type="date"] {
-  display: block;
-  line-height: calc(var(--control-height) - 2px);
-}
-
-input[type="date"]::-webkit-date-and-time-value {
-  text-align: left;
-}
-
-.form-group select,
-select.filter-select {
-  padding-right: 34px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2373716a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 16px;
-  cursor: pointer;
-}
-
-.form-group input::placeholder {
-  color: var(--faint);
-}
-
-.form-group input:hover,
-.form-group select:hover,
-.filter-select:hover {
-  border-color: var(--line-strong);
-}
-
-.form-group input:focus,
-.form-group select:focus,
-.filter-select:focus {
-  outline: none;
-  border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
-}
 
 /* 数値入力の上下ボタンは押し間違えやすく見た目も騒がしいので消す */
 input[type="number"]::-webkit-inner-spin-button,
@@ -1105,6 +912,8 @@ input[type="number"] {
 
 .amount-prefix {
   position: absolute;
+  /* daisyUI の input が上に重なるので、前に出す */
+  z-index: 2;
   left: 14px;
   top: 50%;
   transform: translateY(-50%);
@@ -1219,40 +1028,6 @@ input[type="number"] {
   min-height: 32px;
 }
 
-.advance-checkbox input {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
-  border: 1.5px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
-}
-
-.advance-checkbox input::after {
-  content: "";
-  width: 10px;
-  height: 6px;
-  border: 2px solid var(--on-accent);
-  border-top: 0;
-  border-right: 0;
-  transform: translateY(-1px) rotate(-45deg) scale(0);
-  transition: transform 0.2s var(--ease);
-}
-
-.advance-checkbox input:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.advance-checkbox input:checked::after {
-  transform: translateY(-1px) rotate(-45deg) scale(1);
-}
 
 /* 給与明細 */
 .payslip-section {
@@ -1373,79 +1148,8 @@ input[type="number"] {
   gap: 10px;
 }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  min-height: var(--control-height);
-  padding: 0 22px;
-  font-size: 0.92rem;
-  font-weight: 600;
-  font-family: inherit;
-  line-height: 1.3;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
-}
-
-.btn:active {
-  transform: scale(0.97);
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: progress;
-}
-
-.btn .icon {
-  width: 16px;
-  height: 16px;
-  vertical-align: 0;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: var(--on-accent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.btn-primary:hover {
-  background: var(--accent-hover);
-}
-
 #submit-btn {
   min-width: 160px;
-}
-
-.btn-secondary {
-  background: var(--surface);
-  border-color: var(--line-strong);
-  color: var(--ink);
-}
-
-.btn-secondary:hover {
-  background: var(--surface-2);
-  border-color: var(--faint);
-}
-
-.btn-ghost {
-  background: transparent;
-  border-color: var(--line);
-  color: var(--ink-2);
-}
-
-.btn-ghost:hover {
-  background: var(--bg-tint);
-  color: var(--ink);
-}
-
-.btn-small {
-  min-height: 34px;
-  padding: 0 14px;
-  font-size: 0.8rem;
 }
 
 /* 長い説明つきのボタンは折り返してよい */
@@ -1481,20 +1185,6 @@ input[type="number"] {
   margin-bottom: 8px;
 }
 
-.filter-select {
-  width: auto;
-  max-width: 100%;
-  height: 36px;
-  border-radius: 999px;
-  padding: 0 14px;
-  font-size: 0.82rem;
-  font-weight: 500;
-  background-color: var(--surface-2);
-}
-
-select.filter-select {
-  padding-right: 32px;
-}
 
 .list-pending-note {
   margin: 0 0 12px;
@@ -1621,43 +1311,10 @@ select.filter-select {
 .amount-cell.save { color: var(--save); }
 .amount-cell.transfer { color: var(--muted); }
 
-.type-badge,
+/* 種別・立替・仮の印は daisyUI の badge。並べたときの間だけ空ける */
 .advance-badge,
-.pending-badge,
-.journal-tag {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 1px 9px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.6;
-  white-space: nowrap;
-}
-
-.type-badge.income { background: var(--income-soft); color: var(--income); }
-.type-badge.expense { background: var(--expense-soft); color: var(--expense); }
-.type-badge.save { background: var(--save-soft); color: var(--save); }
-.type-badge.transfer { background: var(--transfer-soft); color: var(--transfer); }
-
-.advance-badge {
-  margin-left: 4px;
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
-.advance-badge.settled {
-  background: var(--income-soft);
-  color: var(--income);
-}
-
-/* メールの利用通知から取り込んだ、まだ確定していない記録の印。
-   立替のバッジと同じ形で、色だけ変えて並べても見分けが付くようにする */
 .pending-badge {
   margin-left: 4px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px dashed var(--line-strong);
 }
 
 .created-at-cell {
@@ -1671,44 +1328,6 @@ select.filter-select {
   justify-content: flex-end;
 }
 
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 0 10px;
-  min-height: 30px;
-  cursor: pointer;
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-family: inherit;
-  color: var(--muted);
-  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
-}
-
-.icon-btn .icon {
-  width: 14px;
-  height: 14px;
-  vertical-align: 0;
-}
-
-.icon-btn:hover {
-  background: var(--bg-tint);
-  color: var(--ink);
-}
-
-.icon-btn.delete:hover {
-  background: var(--expense-soft);
-  color: var(--expense);
-}
-
-/* 立替金の「精算」は押してほしい操作なので、枠を付けて目立たせる */
-.advance-row .icon-btn {
-  border-color: var(--line-strong);
-  color: var(--ink);
-}
 
 .empty-message {
   color: var(--muted);
@@ -2370,39 +1989,6 @@ select.filter-select {
   gap: 8px;
 }
 
-.book-tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  padding: 3px;
-  gap: 2px;
-  background: var(--bg-tint);
-  border-radius: var(--r-sm);
-}
-
-.book-tab {
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 6px;
-  padding: 0 12px;
-  height: 30px;
-  font-size: 0.8rem;
-  font-family: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s var(--ease), color 0.2s var(--ease);
-}
-
-.book-tab:hover {
-  color: var(--ink);
-}
-
-.book-tab.active {
-  background: var(--thumb);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line);
-}
-
 .book-form-note {
   margin: 0 0 12px;
   color: var(--muted);
@@ -2569,35 +2155,6 @@ select.filter-select {
 /* ===========================================================================
    モーダル
    =========================================================================== */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(10, 11, 13, 0.42);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 100;
-  animation: fade-in 0.2s var(--ease) both;
-}
-
-.modal-box {
-  position: relative;
-  background: var(--surface);
-  border-radius: var(--r-xl);
-  padding: 28px;
-  width: 100%;
-  max-width: 460px;
-  max-height: 88vh;
-  max-height: 88dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--line);
-  animation: modal-in 0.35s var(--ease) both;
-}
 
 @keyframes fade-in {
   from { opacity: 0; }
@@ -2620,10 +2177,6 @@ body.modal-open {
   overflow: hidden;
 }
 
-/* 入力フォームを収めるポップアップ */
-.modal-box-wide {
-  max-width: 560px;
-}
 
 .modal-title {
   font-size: 1.1rem;
@@ -2632,26 +2185,6 @@ body.modal-open {
   padding-right: 32px;
 }
 
-.modal-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: var(--bg-tint);
-  border-radius: 999px;
-  font-size: 1.3rem;
-  line-height: 1;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
-}
-
-.modal-close:hover {
-  background: var(--line);
-  color: var(--ink);
-}
 
 .payslip-modal-group-label {
   font-size: 0.72rem;
@@ -2713,10 +2246,6 @@ body.modal-open {
 }
 
 .auth-card {
-  background: var(--surface);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--line);
   padding: 36px 32px 28px;
   width: 100%;
   max-width: 400px;
@@ -2818,33 +2347,6 @@ body.modal-open {
   margin-top: 4px;
 }
 
-.auth-error {
-  background: var(--expense-soft);
-  color: var(--expense);
-  border-radius: var(--r-sm);
-  padding: 10px 12px;
-  font-size: 0.84rem;
-  margin-bottom: 14px;
-}
-
-.auth-forgot {
-  display: block;
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin-top: 14px;
-  cursor: pointer;
-  font-family: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
-}
-
-.auth-forgot:hover {
-  color: var(--ink);
-}
 
 .loading-screen {
   flex-direction: column;
@@ -3010,22 +2512,6 @@ body.modal-open {
 }
 
 /* キーボードショートカットの表示 */
-kbd {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.7em;
-  height: 1.7em;
-  padding: 0 0.4em;
-  font-family: var(--font-sans);
-  font-size: 0.68rem;
-  font-weight: 650;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  line-height: 1;
-}
 
 .shortcut-help {
   display: flex;
@@ -3106,16 +2592,6 @@ kbd {
 .category-dot.transfer { background: var(--transfer); }
 
 /* 行の操作はアイコンだけ (文字は読み上げ用に残す) */
-.entry-table .icon-btn {
-  width: 34px;
-  padding: 0;
-  justify-content: center;
-}
-
-.entry-table .icon-btn .icon {
-  width: 16px;
-  height: 16px;
-}
 
 .entry-table .icon-btn .btn-text {
   position: absolute;
@@ -3277,7 +2753,7 @@ kbd {
 }
 
 @media (min-width: 1200px) {
-  .container {
+  .app-main {
     max-width: 1440px;
     gap: 22px;
   }
@@ -3320,7 +2796,7 @@ kbd {
     align-items: center;
   }
 
-  .stat.cumulative-card {
+  .summary-stat.cumulative-card {
     grid-column: auto;
     margin: 12px 0 12px 14px;
   }
@@ -3462,7 +2938,7 @@ kbd {
     padding-left: 24px;
     padding-right: 24px;
   }
-  .container {
+  .app-main {
     padding-left: 24px;
     padding-right: 24px;
   }
@@ -3475,10 +2951,6 @@ kbd {
 
 /* PCとスマホの間 (タブレット): ログアウトはアイコンだけにしてヘッダーを1段に収める */
 @media (max-width: 1100px) {
-  .logout-btn.btn-small {
-    width: 36px;
-    padding: 0;
-  }
   .logout-btn .logout-text {
     position: absolute;
     width: 1px;
@@ -3530,11 +3002,6 @@ kbd {
     order: 2;
   }
 
-  .view-tab {
-    height: 38px;
-    min-height: 38px;
-    padding: 0 14px;
-  }
 
   .user-bar {
     order: 3;
@@ -3545,12 +3012,6 @@ kbd {
     display: none;
   }
 
-  .logout-btn.btn-small {
-    width: 44px;
-    min-height: 44px;
-    padding: 0;
-    border-color: transparent;
-  }
 
   .logout-btn .logout-text {
     position: absolute;
@@ -3560,10 +3021,6 @@ kbd {
     clip-path: inset(50%);
   }
 
-  .logout-btn .icon {
-    width: 20px;
-    height: 20px;
-  }
 
   /* 月の表示を左に大きく、移動ボタンを右手の届く右側にまとめる */
   .month-nav {
@@ -3584,35 +3041,26 @@ kbd {
     letter-spacing: -0.02em;
   }
 
-  .nav-btn,
-  .today-btn,
-  .view-tab,
-  .auth-tab {
-    min-height: 44px;
-  }
-
-  .nav-btn {
-    width: 44px;
-    height: 44px;
-  }
-
-  .today-btn {
-    height: 44px;
-    margin-left: 0;
-  }
-
-  /* 一覧の操作や編集ボタンまで44pxにすると縦に伸びすぎるので、
-     押せる下限として40pxにとどめる */
-  .btn-small,
-  .icon-btn {
-    min-height: 40px;
-  }
 
   .advance-checkbox {
     min-height: 44px;
   }
 
-  .container {
+  /* ヘッダーのボタンは指で押せる大きさ (44px) にする */
+  .nav-btn,
+  .logout-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .today-btn,
+  .view-tab {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .app-main {
     padding: 4px 16px calc(var(--tabbar-h) + 28px + env(safe-area-inset-bottom));
     gap: 14px;
   }
@@ -3748,11 +3196,11 @@ kbd {
     margin: 2px 0 16px;
   }
 
-  .stat {
+  .summary-stat {
     padding: 12px 10px;
   }
 
-  .stat:first-child {
+  .summary-stat:first-child {
     padding-left: 0;
   }
 
@@ -3763,7 +3211,7 @@ kbd {
     text-overflow: clip;
   }
 
-  .stat.cumulative-card {
+  .summary-stat.cumulative-card {
     margin: 12px 0 0;
     padding: 12px 14px;
   }
@@ -3782,20 +3230,20 @@ kbd {
     .summary-cards {
       grid-template-columns: 1fr;
     }
-    .stat {
+    .summary-stat {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       padding: 9px 0;
     }
-    .stat + .stat {
+    .summary-stat + .summary-stat {
       border-left: 0;
       border-top: 1px solid var(--line);
     }
-    .stat .card-value {
+    .summary-stat .card-value {
       margin-top: 0;
     }
-    .stat.cumulative-card {
+    .summary-stat.cumulative-card {
       display: grid;
       padding: 12px 14px;
     }
@@ -3942,16 +3390,6 @@ kbd {
   }
 
   /* 行の操作はアイコンだけ見せる (文字は読み上げ用に残す) */
-  #list-section .entry-table .icon-btn {
-    width: 40px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  #list-section .entry-table .icon-btn .icon {
-    width: 17px;
-    height: 17px;
-  }
 
   #list-section .entry-table .icon-btn .btn-text {
     position: absolute;
@@ -4044,39 +3482,6 @@ kbd {
   }
 
   /* --- ポップアップは画面下から出るシートにする (片手で届く) --- */
-  .modal-overlay {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  .modal-box {
-    max-width: none;
-    border-radius: var(--r-xl) var(--r-xl) 0 0;
-    padding: 24px 18px calc(20px + env(safe-area-inset-bottom));
-    max-height: 92vh;
-    max-height: 92dvh;
-    animation: sheet-in 0.4s var(--ease) both;
-  }
-
-  .modal-box::before {
-    content: "";
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--line-strong);
-    margin: -12px auto 14px;
-  }
-
-  .modal-close {
-    top: 14px;
-    right: 14px;
-  }
-
-  @keyframes sheet-in {
-    from { transform: translateY(40px); opacity: 0.4; }
-    to { transform: none; opacity: 1; }
-  }
 
   .app-footer {
     display: none;
