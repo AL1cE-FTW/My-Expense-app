@@ -1224,6 +1224,7 @@ function isRailEditing() {
 }
 
 function startRailEdit() {
+  expandCard(el.entryFormSlot);
   el.entryFormSlot.classList.add("is-editing");
   el.formTitle.textContent = "記録を編集";
   markEditingRow();
@@ -4098,6 +4099,7 @@ function applyPendingPayslipImport() {
 
   // スマホで予算や帳簿の画面を開いたままでも、入力欄のある画面に戻す
   switchTab("home");
+  expandCard(el.entryFormSlot);
   const result = payload.invalid ? null : interpretPayslipImport(payload);
   if (!result) {
     alert(
@@ -5932,7 +5934,60 @@ function setupAuthForm() {
 // イベント登録・初期化
 // ---------------------------------------------------------------------------
 
+// カードをたたむ (見出しだけにする)。画面が長くて見にくいとき、使わないカードを
+// 小さくしておける。どれをたたんだかは端末ごとに覚える (localStorage)
+const COLLAPSED_CARDS_KEY = "collapsedCards";
+
+function saveCollapsedCards() {
+  const ids = [...document.querySelectorAll("section.card.collapsed[id]")].map((c) => c.id);
+  try {
+    localStorage.setItem(COLLAPSED_CARDS_KEY, JSON.stringify(ids));
+  } catch {
+    // 保存できなくても、この画面の間はたたんだまま使える
+  }
+}
+
+function setCardCollapsed(card, collapsed) {
+  card.classList.toggle("collapsed", collapsed);
+  const btn = card.querySelector(":scope > .card-head > .collapse-btn, :scope > .hero-main > .collapse-btn");
+  if (!btn) return;
+  const title = card.querySelector("h2")?.textContent || "収支の内訳";
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.setAttribute("aria-label", `${title}を${collapsed ? "ひらく" : "たたむ"}`);
+  btn.title = collapsed ? "ひらく" : "たたむ";
+}
+
+function expandCard(card) {
+  if (!card.classList.contains("collapsed")) return;
+  setCardCollapsed(card, false);
+  saveCollapsedCards();
+}
+
+function setupCollapsibleCards() {
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem(COLLAPSED_CARDS_KEY)) || [];
+  } catch {
+    saved = [];
+  }
+  for (const card of document.querySelectorAll("section.card[id]")) {
+    const head = card.querySelector(":scope > .card-head, :scope > .hero-main");
+    if (!head) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "collapse-btn";
+    btn.append(createIcon("chevron-up"));
+    btn.addEventListener("click", () => {
+      setCardCollapsed(card, !card.classList.contains("collapsed"));
+      saveCollapsedCards();
+    });
+    head.appendChild(btn);
+    setCardCollapsed(card, saved.includes(card.id));
+  }
+}
+
 function setupAppEventListeners() {
+  setupCollapsibleCards();
   setupBookTabs();
   setupTabBar();
   el.editAccountsBtn.addEventListener("click", openAccountsForm);
@@ -6325,6 +6380,7 @@ function jumpToEntryForm() {
   // 後回しになり、まだ隠れている金額欄にフォーカスできない。また iOS は
   // タップの処理の中で focus() したときだけキーボードを出す
   switchTab("home", { animate: false });
+  expandCard(el.entryFormSlot);
   const rect = el.entryFormSlot.getBoundingClientRect();
   const visible = rect.top >= 0 && rect.top < window.innerHeight * 0.6;
   if (!visible) el.entryFormSlot.scrollIntoView({ block: "start", behavior: "smooth" });

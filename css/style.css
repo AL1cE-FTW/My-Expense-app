@@ -544,6 +544,71 @@ body {
   margin-bottom: 16px;
 }
 
+/* カードをたたむボタン (カードの右上)。たたむと見出しだけが残る。
+   見出しの中の並び (取り込みボタンなど) が折り返しても位置が変わらないよう、
+   見出しの流れには入れずに右上へ置き、見出しはその分だけ右を空ける */
+.card:has(> .card-head > .collapse-btn) {
+  position: relative;
+}
+
+.card-head:has(> .collapse-btn) {
+  padding-right: 44px;
+}
+
+.collapse-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex: none;
+}
+
+.collapse-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.collapse-btn svg {
+  transition: transform 0.2s var(--ease);
+}
+
+.card.collapsed .collapse-btn svg {
+  transform: rotate(180deg);
+}
+
+.card.collapsed > :not(.card-head):not(.hero-main),
+.hero-card.collapsed #summary-flow {
+  display: none;
+}
+
+.card.collapsed > .card-head {
+  margin-bottom: 0;
+}
+
+/* 収支のカードは見出しが無いので、大きな数字の行の右上に置く。
+   たたむとグラフ・内訳の欄が消えるので、横並びの格子もやめて1列にする */
+.hero-main {
+  position: relative;
+}
+
+.hero-main > .collapse-btn {
+  top: 0;
+  right: 0;
+}
+
+.hero-card.collapsed {
+  display: block;
+}
+
 .card h2,
 .card-head h2 {
   font-size: 1rem;
