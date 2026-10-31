@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>給与明細 (テスト用の見本・PDF)</title>
+<style>
+  /* 給与サイトの PDF の明細の形だけを真似る: 10列、項目名は中央、金額は右寄せ */
+  body { font-family: sans-serif; margin: 40px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 16px; font-size: 11px; }
+  td, th { border: 1px solid #000; height: 16px; padding: 0 3px; }
+  th { text-align: center; }
+  tr.label td { background: #cfc; text-align: center; }
+  tr.value td { text-align: right; }
+  .head { display: flex; justify-content: space-between; }
+</style></head>
+<body>
+<!-- 会社名・氏名・金額はすべて架空 -->
+<div class="head"><h1>2026年10月度給与</h1><div>支給日:2026年10月28日</div></div>
+<div>サンプル商事株式会社 X0000 見本 太郎 様</div>
+<table>
+<tr><th colspan="10">勤怠</th></tr>
+<tr class="label"><td>出勤</td><td>普通残業時間</td><td>1日年休</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="value"><td>18</td><td>14:45</td><td>1</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+</table>
+<table>
+<tr><th colspan="10">支給</th></tr>
+<tr class="label"><td>本給</td><td>勤務地手当</td><td>時間外勤務手当</td><td>給与調整</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="value"><td>240,000</td><td>10,000</td><td>20,000</td><td>1,500</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="label"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="value"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><th colspan="10">控除</th></tr>
+<tr class="label"><td>慶弔掛金</td><td>福祉会費</td><td>寮社宅費</td><td>食事代</td><td>団体保険</td><td>組合費・闘争資金</td><td>共済会費</td><td>健康保険</td><td>介護保険</td><td>子ども支援金</td></tr>
+<tr class="value"><td>100</td><td>400</td><td>20,000</td><td>3,000</td><td>1,200</td><td>5,000</td><td>1,000</td><td>12,000</td><td>0</td><td>300</td></tr>
+<tr class="label"><td>厚年保険</td><td>雇用保険料</td><td>所得税</td><td>住民税</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="value"><td>25,000</td><td>1,500</td><td>6,000</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><th colspan="10">記事</th></tr>
+<tr class="label"><td>振込金額1</td><td>課税対象額</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="value"><td>196,000</td><td>230,000</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr class="label"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>差引支給額</td></tr>
+<tr class="value"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>196,000</td></tr>
+</table>
+<div>年休情報(20260421～) 取得累計2日、年休残10日0時間</div>
+<div>標準報酬月額変更 (新健保) 300000 (新厚年) 300000 (旧健保) 280000 (旧厚年) 280000</div>
+<div>9月度勤怠遡及額 1500</div>
+</body>
+</html>

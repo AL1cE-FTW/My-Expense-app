@@ -14,6 +14,7 @@ import {
 import { dueRecurring, nextMonth } from "./recurring.js";
 import { reviewItems } from "./review.js";
 import { goalProgress } from "./savings-goal.js";
+import { readPayslipPdf } from "./payslip-pdf.js";
 import {
   CARD_REFUND_CATEGORY,
   computeAdvanceFlowIds,
@@ -396,6 +397,8 @@ const el = {
   payslipLinkCopy: document.getElementById("payslip-link-copy"),
   payslipLinkDrag: document.getElementById("payslip-link-drag"),
   payslipCopyNote: document.getElementById("payslip-copy-note"),
+  payslipPdfBtn: document.getElementById("payslip-pdf-btn"),
+  payslipPdfInput: document.getElementById("payslip-pdf-input"),
   cumulativeSavings: document.getElementById("cumulative-savings"),
   cumulativeChange: document.getElementById("cumulative-change"),
   savingsGoalBtn: document.getElementById("savings-goal-btn"),
@@ -6007,6 +6010,21 @@ function setupAppEventListeners() {
   el.entryCategory.addEventListener("change", updatePayslipVisibility);
   el.payslipToggleBtn.addEventListener("click", openPayslipBreakdown);
   el.payslipCopyPrevBtn.addEventListener("click", copyPreviousPayslip);
+  el.payslipPdfBtn.addEventListener("click", () => el.payslipPdfInput.click());
+  el.payslipPdfInput.addEventListener("change", async () => {
+    const file = el.payslipPdfInput.files[0];
+    el.payslipPdfInput.value = "";
+    if (!file) return;
+    try {
+      pendingPayslipImport = await readPayslipPdf(file);
+    } catch (err) {
+      console.error(err);
+      alert("PDFを読み込めませんでした: " + err.message);
+      return;
+    }
+    // ブックマークから受け取ったときと同じ流れで、フォームに入れて確認してもらう
+    applyPendingPayslipImport();
+  });
   el.payslipLinkBtn.addEventListener("click", openPayslipLinkModal);
   el.payslipLinkClose.addEventListener("click", () => closeModal(el.payslipLinkModal));
   el.payslipLinkCopy.addEventListener("click", copyPayslipLinkCode);
