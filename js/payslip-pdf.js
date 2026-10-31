@@ -113,11 +113,34 @@ export function payloadFromPdfItems(items) {
   };
 }
 
-// PDF ファイル (1ページ目) から受け渡し内容を作る
+// PDF ファイル (1ページ目) から受け渡し内容を作る。
+// パスワード付きの PDF (給与明細によくある) は、開くときにパスワードを聞く。
+// パスワードはこの PDF を開くのに使うだけで、保存も送信もしない
 export async function readPayslipPdf(file) {
   const pdfjs = await import(PDFJS_BASE + "pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.mjs";
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  let cancelled = false;
+  task.onPassword = (answer, reason) => {
+    const password = prompt(
+      reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD
+        ? "パスワードが違います。もう一度入れてください。"
+        : "この明細の PDF にはパスワードが付いています。開くときのパスワードを入れてください。"
+    );
+    if (password === null) {
+      cancelled = true;
+      task.destroy();
+    } else {
+      answer(password);
+    }
+  };
+  let doc;
+  try {
+    doc = await task.promise;
+  } catch (err) {
+    if (cancelled) throw new Error("パスワードの入力をやめました");
+    throw err;
+  }
   const page = await doc.getPage(1);
   const { height } = page.getViewport({ scale: 1 });
   const { items } = await page.getTextContent();
