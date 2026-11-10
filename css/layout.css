@@ -1989,6 +1989,17 @@ input[type="number"] {
   gap: 8px;
 }
 
+/* 現金がマイナスのときの内訳 (daisyUI の alert) */
+.negative-cash-note {
+  margin-top: 14px;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.negative-cash-note p + p {
+  margin-top: 4px;
+}
+
 .book-form-note {
   margin: 0 0 12px;
   color: var(--muted);
