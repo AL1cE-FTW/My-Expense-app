@@ -3674,12 +3674,74 @@ function renderBalanceSheet(container, periodEnd) {
     `${formatDateLabel(bs.periodEnd)}までの増減を足したものです。`;
   container.appendChild(asOf);
 
+  const cash = bs.assets.find((row) => row.account === CASH_ACCOUNT);
+  if (cash && cash.amount < 0) container.appendChild(negativeCashNote(bs.periodEnd));
+
   // 銀行アプリの残高と合わないときは記録漏れがある、と気づけるようにする
   const hint = document.createElement("p");
   hint.className = "book-check";
   hint.textContent =
     "実際の残高と合わない場合は、記録していない支出・収入があります。";
   container.appendChild(hint);
+}
+
+/**
+ * 現金がマイナスのとき、どの記録で現金が減っているかを出す。
+ * 口座を指定していない記録 (CSV で取り込んだ記録や、口座の欄ができる前の記録) は
+ * 支出を現金とみなしているので、実際は口座やカードで払った分まで現金から引かれている
+ * ことが多い。それらはまとめて「銀行口座」に直せるようにする。
+ */
+function negativeCashNote(periodEnd) {
+  const fromCash = entries.filter(
+    (e) =>
+      (e.type === "expense" || e.type === "save") &&
+      e.date >= accountSettings.openingDate &&
+      e.date <= periodEnd &&
+      !isCardEntry(e) &&
+      settlementAccount(e) === CASH_ACCOUNT
+  );
+  const unspecified = fromCash.filter((e) => !e.settlement);
+  const chosen = fromCash.filter((e) => e.settlement === "cash");
+  const total = (list) => formatYen(list.reduce((sum, e) => sum + e.amount, 0));
+
+  const box = document.createElement("div");
+  box.className = "alert alert-warning alert-soft alert-vertical items-start text-left negative-cash-note";
+  const body = document.createElement("div");
+  const lines = [
+    "現金がマイナスです。手元にあった現金より多くを、現金で払ったことになっています。",
+    `現金から出た記録: 口座を指定していない記録 ${unspecified.length}件 (${total(unspecified)})・` +
+      `「現金」を選んだ記録 ${chosen.length}件 (${total(chosen)})`,
+    "口座を指定していない記録は、CSV で取り込んだ記録や、口座の欄ができる前の記録です。" +
+      "支出は現金とみなしているので、実際は口座で払った分まで現金から引かれています。",
+    "ATM で下ろしたお金は「振替」(口座 → 現金) で記録すると、現金に入ります。",
+  ];
+  for (const text of lines) {
+    const p = document.createElement("p");
+    p.textContent = text;
+    body.appendChild(p);
+  }
+  box.appendChild(body);
+
+  if (unspecified.length > 0) {
+    const fix = document.createElement("button");
+    fix.type = "button";
+    fix.className = "btn btn-sm h-auto min-h-8 py-1.5 whitespace-normal";
+    fix.textContent = `口座を指定していない${unspecified.length}件を「銀行口座」払いにする`;
+    fix.addEventListener("click", () => {
+      const ok = confirm(
+        `口座を指定していない支出・貯蓄 ${unspecified.length}件 (${total(unspecified)}) を、` +
+          "「銀行口座」から払ったものに直します。\n" +
+          "現金で払ったものが混じっている場合は、あとで1件ずつ「現金」に戻してください。\n\nよろしいですか?"
+      );
+      if (!ok) return;
+      whenSynced(
+        updateEntriesInDb(unspecified.map((e) => ({ id: e.id, data: { settlement: "bank" } }))),
+        "口座を直せませんでした"
+      );
+    });
+    box.appendChild(fix);
+  }
+  return box;
 }
 
 const BOOK_NOTES = {

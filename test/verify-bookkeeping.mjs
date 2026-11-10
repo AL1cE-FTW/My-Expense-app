@@ -399,6 +399,23 @@ if (plAdvance !== plBeforeAdvance || plAdvance.includes("立替金返金")) {
   throw new Error(`返金を収益に入れてはいけない:\n前 ${plBeforeAdvance}\n後 ${plAdvance}`);
 }
 
+// --- 現金がマイナスのとき: どの記録で減ったかを出し、口座未指定の記録をまとめて直せる ---
+// CSV で取り込んだような、口座 (settlement) の無い支出を入れて現金をマイナスにする
+await page.evaluate((date) => {
+  window.__seedDoc("users/uid-book-test@example.com/entries/csv-rent", {
+    date, type: "expense", category: "住居", amount: 90000, memo: "CSVから取り込んだ家賃",
+  });
+}, `${CUR_Y}-${MM}-03`);
+await page.waitForTimeout(400);
+const negBs = await bookText("bs");
+if (!negBs.includes("現金がマイナスです") || !negBs.includes("口座を指定していない記録 1件 (¥90,000)")) {
+  throw new Error("現金がマイナスの理由を出すはず: " + negBs);
+}
+await page.locator(".negative-cash-note button").click();
+await page.waitForTimeout(500);
+const fixedBs = await bookText("bs");
+if (fixedBs.includes("現金がマイナスです")) throw new Error("銀行口座に直したら現金は戻るはず: " + fixedBs);
+
 await page.screenshot({ path: path.join(scratch, "bookkeeping.png"), fullPage: true });
 if (errors.length) throw new Error("JS errors: " + errors.join("; "));
 console.log("ALL BOOKKEEPING (帳簿) CHECKS PASSED");
